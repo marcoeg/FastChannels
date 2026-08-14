@@ -1,0 +1,28 @@
+diff --git a/app/worker.py b/app/worker.py
+index 0350234..ff81236 100644
+--- a/app/worker.py
++++ b/app/worker.py
+@@ -6140,10 +6140,19 @@ if __name__ == '__main__':
+ 
+         # Weekly, Sunday 02:00 user-local — independent of the DB backup/VACUUM
+         # window above; this just refreshes a pip package.
+-        scheduler.add_job(_scheduled_ytdlp_upgrade, 'cron',
+-                          day_of_week='sun', hour=2, minute=0, timezone=_tz,
+-                          id='ytdlp_upgrade', max_instances=1, coalesce=True,
+-                          misfire_grace_time=3600)
++        #
++        # Gated on FC_YTDLP_AUTO_UPGRADE so the unattended pip install from
++        # GitHub master can be turned off without blocking egress. Defaults to
++        # enabled, matching upstream. yt-dlp is only reached by the TVE/MVPD
++        # scrapers and by custom-channel stream detection (YouTube); an install
++        # using neither can disable this with no loss of function.
++        if (os.environ.get('FC_YTDLP_AUTO_UPGRADE', '1') or '1').strip() != '0':
++            scheduler.add_job(_scheduled_ytdlp_upgrade, 'cron',
++                              day_of_week='sun', hour=2, minute=0, timezone=_tz,
++                              id='ytdlp_upgrade', max_instances=1, coalesce=True,
++                              misfire_grace_time=3600)
++        else:
++            logger.info('[scheduler] yt-dlp auto-upgrade disabled (FC_YTDLP_AUTO_UPGRADE=0)')
+ 
+         def _scheduled_dvr_epg_refresh():
+             import re as _re

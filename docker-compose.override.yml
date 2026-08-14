@@ -1,0 +1,27 @@
+# Local hardening overrides. Auto-loaded by `docker compose up` — no -f needed.
+# Gitignored, so it survives `git pull` without conflicting with upstream.
+#
+# Rationale (see the security review):
+#   - The app has NO authentication on any of its ~200 routes, and two
+#     endpoints (/api/custom-channels/detect, /images/proxy?url=) are
+#     unauthenticated SSRF. Publishing 5523 on all interfaces hands full admin
+#     to anyone on the LAN, so bind it to loopback only.
+#   - The version check phones github.com/repos/kineticman/FastChannels every
+#     12h. It carries no telemetry payload, but there's no reason to make the
+#     call if you don't want it.
+
+services:
+  fastchannels:
+    # !override replaces the base file's port list instead of appending to it.
+    # Without the tag, Compose would merge and STILL publish 0.0.0.0:5523.
+    ports: !override
+      - "127.0.0.1:5523:5523"
+    environment:
+      VERSION_CHECK_ENABLED: "0"
+      # Stops the weekly (Sun 02:00 local) unattended
+      #   pip install --force-reinstall yt-dlp@github-master
+      # inside the running container. Requires the FC_YTDLP_AUTO_UPGRADE gate
+      # added to app/worker.py — upstream has no such flag.
+      # Safe here: yt-dlp is only used by the TVE/MVPD scrapers (all disabled)
+      # and by custom-channel YouTube detection (no custom channels).
+      FC_YTDLP_AUTO_UPGRADE: "0"
