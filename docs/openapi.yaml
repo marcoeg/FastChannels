@@ -1,0 +1,4601 @@
+openapi: 3.1.0
+
+info:
+  title: FastChannels HTTP API
+  version: "5.0.4"
+  summary: FAST-channel aggregator — M3U/XMLTV outputs, stream resolution, and admin control.
+  description: |
+    FastChannels scrapes free streaming services and publishes them as M3U playlists
+    and XMLTV guide data for Channels DVR, Plex, and generic IPTV clients.
+
+    This document was reverse-engineered from the route handlers in `app/routes/`
+    at version 5.0.4. It is a description of observed behaviour, not a stability
+    contract published by the project — see the "Stability" section below.
+
+    ## Authentication
+
+    **There is none.** No route in this API performs any credential check.
+    `create_app()` registers a single `before_request` hook, and it only assigns a
+    request ID (`app/__init__.py:36`). Every endpoint below — including those that
+    read and write provider passwords, download the entire database, replace the
+    database, and drive interactive browser logins — is reachable by any client
+    that can open a TCP connection to the port.
+
+    Deploy accordingly: bind the port to loopback, or place the service behind a
+    reverse proxy that enforces authentication.
+
+    ## Surfaces
+
+    | Prefix | Purpose |
+    | --- | --- |
+    | `/m3u`, `/epg.xml`, `/feeds/{slug}/…` | Playlist and guide outputs — what a DVR or IPTV client consumes |
+    | `/play/…`, `/watch/…` | Stream resolution, manifest/segment proxies, DRM license proxy |
+    | `/logos/…`, `/posters/…`, `/images/proxy/…` | Cached image proxy |
+    | `/api/…` | Control API (sources, channels, settings, diagnostics) |
+    | `/api/feeds/…` | Feed management |
+    | `/admin/…` | Server-rendered HTML pages — **not** part of this API |
+
+    ## Conventions
+
+    - Request and response bodies are JSON unless stated otherwise.
+    - Errors from `/api` routes are `{"error": "message"}`. A few routes use
+      `{"ok": false, "message": "…"}` instead; those are marked individually.
+    - Unmatched routes return Flask's **HTML** 404 page, not JSON.
+    - Artifact-backed outputs return `503` with `Retry-After: 15` while the
+      background worker is still building them ("warming").
+    - Stream resolution failures return `503` with `Retry-After: 30` and a
+      `text/plain` body, so players back off rather than retry-storm.
+    - `X-FastChannels-Request-ID` is set on every response; send `X-Request-ID`
+      to correlate your own identifier through the logs.
+
+    ## Stability
+
+    This is the admin UI's private backend. There is no version negotiation, no
+    deprecation policy, and no OpenAPI document shipped upstream. Response shapes
+    can change on any release. Pin the container tag if you build against it.
+
+servers:
+  - url: http://127.0.0.1:5523
+    description: Default local bind (recommended)
+  - url: http://{host}:{port}
+    description: Custom deployment
+    variables:
+      host:
+        default: localhost
+      port:
+        default: "5523"
+
+tags:
+  - name: Outputs
+    description: M3U playlists and XMLTV guide data. The primary consumer surface.
+  - name: Playback
+    description: Stream resolution, manifest/segment proxies, and DRM license proxying.
+  - name: Images
+    description: Cached logo and poster proxy.
+  - name: Sources
+    description: Scraper source management and scrape/audit control.
+  - name: Source sign-in
+    description: Per-source credential flows, including interactive browser logins.
+  - name: Channels
+    description: Channel listing, editing, inspection, and duplicate resolution.
+  - name: Custom channels
+    description: User-defined channels and stream auto-detection.
+  - name: Feeds
+    description: Feed (filtered playlist) definition, membership, and numbering.
+  - name: Gracenote
+    description: Gracenote/TMS station-ID mapping, community map, and contributions.
+  - name: Channels DVR
+    description: Registering FastChannels outputs as sources in Channels DVR.
+  - name: Settings
+    description: Global application settings, database backup/restore.
+  - name: TVE
+    description: TV Everywhere (MVPD / Adobe Pass) account and per-network sign-in.
+  - name: System
+    description: Logs, statistics, and diagnostics.
+
+paths:
+
+  # ────────────────────────────── Outputs ──────────────────────────────
+
+  /m3u:
+    get:
+      tags: [Outputs]
+      summary: Master M3U playlist
+      description: |
+        Every enabled channel across every enabled source. With no query
+        parameters this serves a pre-built artifact; any filter parameter
+        switches to live generation (slower, uncached).
+      parameters:
+        - $ref: '#/components/parameters/FilterSource'
+        - $ref: '#/components/parameters/FilterCategory'
+        - $ref: '#/components/parameters/FilterLanguage'
+        - $ref: '#/components/parameters/FilterSearch'
+      responses:
+        '200':
+          $ref: '#/components/responses/M3U'
+        '503':
+          $ref: '#/components/responses/ArtifactWarming'
+
+  /m3u/gracenote:
+    get:
+      tags: [Outputs]
+      summary: Gracenote-guided M3U playlist
+      description: |
+        Only channels carrying a valid Gracenote/TMS station ID, emitted with
+        `tvc-guide-stationid` so Channels DVR pulls guide data from Gracenote
+        instead of the XMLTV feed. The two guide sources cannot be mixed within
+        one DVR source, which is why this is a separate playlist.
+      parameters:
+        - $ref: '#/components/parameters/FilterSource'
+        - $ref: '#/components/parameters/FilterCategory'
+        - $ref: '#/components/parameters/FilterLanguage'
+        - $ref: '#/components/parameters/FilterSearch'
+      responses:
+        '200':
+          $ref: '#/components/responses/M3U'
+        '503':
+          $ref: '#/components/responses/ArtifactWarming'
+
+  /epg.xml:
+    get:
+      tags: [Outputs]
+      summary: Master XMLTV guide
+      description: |
+        Pair with `/m3u`. Filtered requests are streamed as they are generated;
+        unfiltered requests serve a pre-built artifact.
+      parameters:
+        - $ref: '#/components/parameters/FilterSource'
+        - $ref: '#/components/parameters/FilterCategory'
+        - $ref: '#/components/parameters/FilterLanguage'
+        - $ref: '#/components/parameters/FilterSearch'
+      responses:
+        '200':
+          $ref: '#/components/responses/XMLTV'
+        '503':
+          $ref: '#/components/responses/ArtifactWarming'
+
+  /m3u/prismcast:
+    get:
+      tags: [Outputs]
+      summary: PrismCast DRM-bridge M3U
+      description: |
+        Entries route through a PrismCast server, whose headless Chrome renders
+        `/watch/{id}`, decrypts the DRM stream, and re-streams it. Pair with
+        `/epg.xml`. Requires a PrismCast server URL in settings.
+      parameters:
+        - $ref: '#/components/parameters/FilterSource'
+        - $ref: '#/components/parameters/FilterCategory'
+        - $ref: '#/components/parameters/FilterLanguage'
+        - $ref: '#/components/parameters/FilterSearch'
+      responses:
+        '200':
+          $ref: '#/components/responses/M3U'
+        '409':
+          $ref: '#/components/responses/PrismCastNotConfigured'
+        '503':
+          $ref: '#/components/responses/ArtifactWarming'
+
+  /m3u/prismcast/ts:
+    get:
+      tags: [Outputs]
+      summary: PrismCast M3U (raw MPEG-TS variant)
+      description: |
+        DRM entries point at `/play/prismcast/{id}.ts`, which redirects to
+        PrismCast's raw transport-stream capture rather than its HLS output.
+        Always generated live — intended for occasional use by fallback tooling,
+        not repeated DVR polling.
+      parameters:
+        - $ref: '#/components/parameters/FilterSource'
+        - $ref: '#/components/parameters/FilterCategory'
+        - $ref: '#/components/parameters/FilterLanguage'
+        - $ref: '#/components/parameters/FilterSearch'
+      responses:
+        '200':
+          $ref: '#/components/responses/M3U'
+        '409':
+          $ref: '#/components/responses/PrismCastNotConfigured'
+
+  /m3u/prismcast/gracenote:
+    get:
+      tags: [Outputs]
+      summary: PrismCast M3U (Gracenote guide)
+      parameters:
+        - $ref: '#/components/parameters/FilterSource'
+        - $ref: '#/components/parameters/FilterCategory'
+        - $ref: '#/components/parameters/FilterLanguage'
+        - $ref: '#/components/parameters/FilterSearch'
+      responses:
+        '200':
+          $ref: '#/components/responses/M3U'
+        '409':
+          $ref: '#/components/responses/PrismCastNotConfigured'
+        '503':
+          $ref: '#/components/responses/ArtifactWarming'
+
+  /m3u/watch:
+    get:
+      tags: [Outputs]
+      summary: Deprecated alias for /m3u/prismcast
+      description: Permanent redirect, query string preserved.
+      responses:
+        '308':
+          description: Redirect to `/m3u/prismcast`.
+
+  /feeds/{slug}/m3u:
+    get:
+      tags: [Outputs]
+      summary: Feed M3U playlist
+      parameters:
+        - $ref: '#/components/parameters/FeedSlug'
+      responses:
+        '200':
+          $ref: '#/components/responses/M3U'
+        '404':
+          $ref: '#/components/responses/NotFoundHTML'
+        '503':
+          $ref: '#/components/responses/ArtifactWarming'
+
+  /feeds/{slug}/m3u/gracenote:
+    get:
+      tags: [Outputs]
+      summary: Feed Gracenote M3U playlist
+      parameters:
+        - $ref: '#/components/parameters/FeedSlug'
+      responses:
+        '200':
+          $ref: '#/components/responses/M3U'
+        '404':
+          $ref: '#/components/responses/NotFoundHTML'
+        '503':
+          $ref: '#/components/responses/ArtifactWarming'
+
+  /feeds/{slug}/epg.xml:
+    get:
+      tags: [Outputs]
+      summary: Feed XMLTV guide
+      parameters:
+        - $ref: '#/components/parameters/FeedSlug'
+      responses:
+        '200':
+          $ref: '#/components/responses/XMLTV'
+        '404':
+          $ref: '#/components/responses/NotFoundHTML'
+        '503':
+          $ref: '#/components/responses/ArtifactWarming'
+
+  /feeds/{slug}/native/m3u:
+    get:
+      tags: [Outputs]
+      summary: Feed M3U with native (non-proxied) stream URLs
+      parameters:
+        - $ref: '#/components/parameters/FeedSlug'
+      responses:
+        '200':
+          $ref: '#/components/responses/M3U'
+        '404':
+          $ref: '#/components/responses/NotFoundHTML'
+        '503':
+          $ref: '#/components/responses/ArtifactWarming'
+
+  /feeds/{slug}/native/epg.xml:
+    get:
+      tags: [Outputs]
+      summary: Feed XMLTV guide for the native playlist
+      parameters:
+        - $ref: '#/components/parameters/FeedSlug'
+      responses:
+        '200':
+          $ref: '#/components/responses/XMLTV'
+        '404':
+          $ref: '#/components/responses/NotFoundHTML'
+        '503':
+          $ref: '#/components/responses/ArtifactWarming'
+
+  /feeds/{slug}/m3u/prismcast:
+    get:
+      tags: [Outputs]
+      summary: Feed PrismCast DRM-bridge M3U
+      parameters:
+        - $ref: '#/components/parameters/FeedSlug'
+      responses:
+        '200':
+          $ref: '#/components/responses/M3U'
+        '404':
+          $ref: '#/components/responses/NotFoundHTML'
+        '409':
+          $ref: '#/components/responses/PrismCastNotConfigured'
+        '503':
+          $ref: '#/components/responses/ArtifactWarming'
+
+  /feeds/{slug}/m3u/prismcast/ts:
+    get:
+      tags: [Outputs]
+      summary: Feed PrismCast M3U (raw MPEG-TS variant)
+      parameters:
+        - $ref: '#/components/parameters/FeedSlug'
+      responses:
+        '200':
+          $ref: '#/components/responses/M3U'
+        '404':
+          $ref: '#/components/responses/NotFoundHTML'
+        '409':
+          $ref: '#/components/responses/PrismCastNotConfigured'
+
+  /feeds/{slug}/m3u/prismcast/gracenote:
+    get:
+      tags: [Outputs]
+      summary: Feed PrismCast M3U (Gracenote guide)
+      parameters:
+        - $ref: '#/components/parameters/FeedSlug'
+      responses:
+        '200':
+          $ref: '#/components/responses/M3U'
+        '404':
+          $ref: '#/components/responses/NotFoundHTML'
+        '409':
+          $ref: '#/components/responses/PrismCastNotConfigured'
+        '503':
+          $ref: '#/components/responses/ArtifactWarming'
+
+  /feeds/{slug}/m3u/watch:
+    get:
+      tags: [Outputs]
+      summary: Deprecated alias for the feed PrismCast M3U
+      parameters:
+        - $ref: '#/components/parameters/FeedSlug'
+      responses:
+        '308':
+          description: Redirect to `/feeds/{slug}/m3u/prismcast`.
+
+  # ────────────────────────────── Playback ─────────────────────────────
+
+  /play/{source_name}/{channel_id}.m3u8:
+    get:
+      tags: [Playback]
+      summary: Resolve a channel to its live stream
+      description: |
+        The main playback entry point, and the URL that appears in generated
+        M3U playlists. Resolves the channel through its scraper — refreshing
+        auth tokens, re-detecting custom streams, consulting caches — and
+        **302-redirects** to the upstream CDN URL. Some sources instead return
+        a proxied manifest when the CDN cannot be reached directly by a client.
+
+        Resolution failures are reported as `503` rather than `5xx`-with-detail,
+        so players retry rather than blacklist the channel. Check `/api/logs`
+        for the underlying cause; the log line carries the same request ID as
+        the `X-FastChannels-Request-ID` response header.
+      parameters:
+        - $ref: '#/components/parameters/SourceName'
+        - $ref: '#/components/parameters/ChannelSourceId'
+      responses:
+        '302':
+          description: Redirect to the resolved upstream stream URL.
+          headers:
+            Location:
+              schema: { type: string, format: uri }
+        '200':
+          description: Proxied manifest, for sources that cannot be redirected to.
+          content:
+            application/vnd.apple.mpegurl: {}
+        '404':
+          $ref: '#/components/responses/NotFoundHTML'
+        '503':
+          $ref: '#/components/responses/StreamUnavailable'
+
+  /play/{source_name}/{channel_id}.m3u:
+    get:
+      tags: [Playback]
+      summary: Single-entry M3U wrapper for a channel
+      description: |
+        Returns a one-line playlist pointing at the stream, so a desktop player
+        can open the channel by URL without following a bare redirect.
+      parameters:
+        - $ref: '#/components/parameters/SourceName'
+        - $ref: '#/components/parameters/ChannelSourceId'
+      responses:
+        '200':
+          $ref: '#/components/responses/M3U'
+        '404':
+          $ref: '#/components/responses/NotFoundHTML'
+        '503':
+          $ref: '#/components/responses/StreamUnavailable'
+
+  /play/{source_name}/license:
+    post:
+      tags: [Playback]
+      summary: Widevine license proxy
+      description: |
+        Forwards a raw Widevine license challenge to the source's license server,
+        adding whatever source-specific authentication is required, so the client
+        never needs the credentials. Request body is the binary challenge;
+        response body is the binary license.
+
+        Maximum challenge size is 65536 bytes.
+      parameters:
+        - $ref: '#/components/parameters/SourceName'
+        - name: channel_id
+          in: query
+          description: Required by sources whose licensing is per-channel (e.g. Sling).
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema: { type: string, format: binary }
+      responses:
+        '200':
+          description: Binary Widevine license.
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        '400':
+          description: Empty challenge body.
+        '404':
+          description: Unknown source, or the source has no license path configured.
+        '413':
+          description: Challenge exceeds 65536 bytes.
+
+  /play/{source_name}/license/{channel_id}:
+    post:
+      tags: [Playback]
+      summary: Widevine license proxy (per-channel path form)
+      description: Path-parameter variant used by DirecTV.
+      parameters:
+        - $ref: '#/components/parameters/SourceName'
+        - $ref: '#/components/parameters/ChannelSourceId'
+      requestBody:
+        required: true
+        content:
+          application/octet-stream:
+            schema: { type: string, format: binary }
+      responses:
+        '200':
+          description: Binary Widevine license.
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        '400':
+          description: Empty challenge body.
+        '404':
+          description: Unknown source or no license path.
+        '413':
+          description: Challenge too large.
+
+  /play/{source_name}/certificate:
+    get:
+      tags: [Playback]
+      summary: Widevine service certificate
+      description: |
+        Returns the source's Widevine service certificate so a player can enable
+        privacy-mode license requests (`serverCertificateUri`).
+      parameters:
+        - $ref: '#/components/parameters/SourceName'
+      responses:
+        '200':
+          description: Binary service certificate.
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        '404':
+          description: Unknown source or no certificate available.
+
+  /play/prismcast/{channel_id}.ts:
+    get:
+      tags: [Playback]
+      summary: Trigger a PrismCast capture and redirect to its MPEG-TS output
+      parameters:
+        - name: channel_id
+          in: path
+          required: true
+          description: Internal numeric channel ID (not the source channel ID).
+          schema: { type: integer }
+      responses:
+        '302':
+          description: Redirect to the PrismCast MPEG-TS session URL.
+        '503':
+          description: PrismCast not configured or capture failed.
+
+  /watch/{channel_id}:
+    get:
+      tags: [Playback]
+      summary: Browser watch page
+      description: |
+        An HTML page that plays the channel in-browser via Shaka Player or the
+        native video element, choosing DASH/HLS/EME as appropriate. This is the
+        page PrismCast's headless Chrome loads to bridge DRM streams.
+      parameters:
+        - name: channel_id
+          in: path
+          required: true
+          schema: { type: integer }
+        - name: fc_request_id
+          in: query
+          description: Correlation ID injected by a PrismCast capture.
+          schema: { type: string }
+        - name: audio
+          in: query
+          description: Audio-codec preference, for sources that expose a choice.
+          schema: { type: string, enum: [aac, ec3, all] }
+      responses:
+        '200':
+          description: HTML player page.
+          content:
+            text/html: {}
+        '404':
+          $ref: '#/components/responses/NotFoundHTML'
+
+  /watch/{channel_id}/debug:
+    post:
+      tags: [Playback]
+      summary: Report a playback telemetry event from the watch page
+      description: Writes a diagnostic line to the application log. Used by the in-browser player.
+      parameters:
+        - name: channel_id
+          in: path
+          required: true
+          schema: { type: integer }
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                request_id: { type: string }
+                event: { type: string, maxLength: 48 }
+                seq: { type: integer }
+                age_ms: { type: number }
+                current_time: { type: number }
+                ready_state: { type: integer }
+                network_state: { type: integer }
+                extra: { type: object, additionalProperties: true }
+      responses:
+        '200':
+          description: Event recorded.
+
+  /play/cspan/{channel_id}/proxy.m3u8:
+    get:
+      tags: [Playback]
+      summary: C-SPAN manifest proxy
+      description: |
+        C-SPAN's CDN rejects segment requests without a `Referer` header, so
+        segment URLs are rewritten to route back through `/play/cspan/segment`.
+      parameters:
+        - $ref: '#/components/parameters/ChannelSourceId'
+      responses:
+        '200': { $ref: '#/components/responses/HLSManifest' }
+        '404': { $ref: '#/components/responses/NotFoundHTML' }
+        '503': { $ref: '#/components/responses/StreamUnavailable' }
+
+  /play/cspan/segment:
+    get:
+      tags: [Playback]
+      summary: C-SPAN segment proxy
+      parameters:
+        - $ref: '#/components/parameters/ProxyUrl'
+      responses:
+        '200': { $ref: '#/components/responses/MediaSegment' }
+        '400': { description: Missing or non-HTTPS URL. }
+        '403': { description: Host not allowed, or resolves to a private address. }
+
+  /play/distro/{channel_id}/proxy.m3u8:
+    get:
+      tags: [Playback]
+      summary: Distro manifest proxy
+      description: Adds the Origin/Referer headers Distro CDNs require, and rewrites segment URLs.
+      parameters:
+        - $ref: '#/components/parameters/ChannelSourceId'
+      responses:
+        '200': { $ref: '#/components/responses/HLSManifest' }
+        '404': { $ref: '#/components/responses/NotFoundHTML' }
+        '503': { $ref: '#/components/responses/StreamUnavailable' }
+
+  /play/distro/segment:
+    get:
+      tags: [Playback]
+      summary: Distro segment proxy
+      parameters:
+        - $ref: '#/components/parameters/ProxyUrl'
+      responses:
+        '200': { $ref: '#/components/responses/MediaSegment' }
+        '400': { description: Missing or non-HTTPS URL. }
+        '403': { description: Blocked private address. }
+
+  /play/samsung/{channel_id}/proxy.m3u8:
+    get:
+      tags: [Playback]
+      summary: Samsung TV Plus manifest proxy
+      description: Absolutizes relative playlist references in the Samsung master manifest.
+      parameters:
+        - $ref: '#/components/parameters/ChannelSourceId'
+      responses:
+        '200': { $ref: '#/components/responses/HLSManifest' }
+        '404': { $ref: '#/components/responses/NotFoundHTML' }
+        '503': { $ref: '#/components/responses/StreamUnavailable' }
+
+  /play/pluto/{channel_id}/proxy.m3u8:
+    get:
+      tags: [Playback]
+      summary: Pluto TV manifest proxy
+      description: |
+        Pluto's stitcher only echoes `Origin` for pluto.tv origins, which breaks
+        browser playback. Both master and variant manifests are proxied; segments
+        and AES keys are fetched directly by the client.
+      parameters:
+        - $ref: '#/components/parameters/ChannelSourceId'
+      responses:
+        '200': { $ref: '#/components/responses/HLSManifest' }
+        '404': { $ref: '#/components/responses/NotFoundHTML' }
+        '503': { $ref: '#/components/responses/StreamUnavailable' }
+
+  /play/pluto/variant:
+    get:
+      tags: [Playback]
+      summary: Pluto TV variant playlist proxy
+      parameters:
+        - $ref: '#/components/parameters/ProxyUrl'
+      responses:
+        '200': { $ref: '#/components/responses/HLSManifest' }
+        '400': { description: Missing or malformed URL. }
+        '403': { description: Blocked private address. }
+
+  /play/tubi/{channel_id}/proxy.m3u8:
+    get:
+      tags: [Playback]
+      summary: Tubi master manifest proxy
+      description: Serves the master same-origin to avoid a null-origin CORS rejection after redirect.
+      parameters:
+        - $ref: '#/components/parameters/ChannelSourceId'
+      responses:
+        '200': { $ref: '#/components/responses/HLSManifest' }
+        '404': { $ref: '#/components/responses/NotFoundHTML' }
+        '503': { $ref: '#/components/responses/StreamUnavailable' }
+
+  /play/fubo/{channel_id}/proxy.m3u8:
+    get:
+      tags: [Playback]
+      summary: Fubo manifest proxy
+      parameters:
+        - $ref: '#/components/parameters/ChannelSourceId'
+      responses:
+        '200': { $ref: '#/components/responses/HLSManifest' }
+        '404': { $ref: '#/components/responses/NotFoundHTML' }
+        '503': { $ref: '#/components/responses/StreamUnavailable' }
+
+  /play/fubo/variant:
+    get:
+      tags: [Playback]
+      summary: Fubo variant playlist proxy
+      description: Host must be under `.fubo.tv`.
+      parameters:
+        - $ref: '#/components/parameters/ProxyUrl'
+      responses:
+        '200': { $ref: '#/components/responses/HLSManifest' }
+        '400': { description: Missing or malformed URL. }
+        '403': { description: Host is not a Fubo host, or is a private address. }
+
+  /play/fubo/seg:
+    get:
+      tags: [Playback]
+      summary: Fubo segment proxy
+      parameters:
+        - $ref: '#/components/parameters/ProxyUrl'
+      responses:
+        '200': { $ref: '#/components/responses/MediaSegment' }
+        '400': { description: Missing or malformed URL. }
+        '403': { description: Host is not a Fubo host, or is a private address. }
+
+  /play/stirr/{channel_id}/proxy.m3u8:
+    get:
+      tags: [Playback]
+      summary: STIRR manifest proxy
+      description: |
+        STIRR issues IP-bound session tokens, so manifests must be fetched from
+        the server rather than the client. Segments usually go direct; origins
+        needing a legacy TLS handshake are routed through `/play/stirr/segment`.
+      parameters:
+        - $ref: '#/components/parameters/ChannelSourceId'
+      responses:
+        '200': { $ref: '#/components/responses/HLSManifest' }
+        '404': { $ref: '#/components/responses/NotFoundHTML' }
+        '503': { $ref: '#/components/responses/StreamUnavailable' }
+
+  /play/stirr/variant:
+    get:
+      tags: [Playback]
+      summary: STIRR variant playlist proxy
+      parameters:
+        - $ref: '#/components/parameters/ProxyUrl'
+      responses:
+        '200': { $ref: '#/components/responses/HLSManifest' }
+        '400': { description: Missing or malformed URL. }
+        '403': { description: Blocked host. }
+
+  /play/stirr/segment:
+    get:
+      tags: [Playback]
+      summary: STIRR segment/key proxy
+      description: Fetches through a lax-TLS session for CDN origins requiring SECLEVEL=1.
+      parameters:
+        - $ref: '#/components/parameters/ProxyUrl'
+      responses:
+        '200': { $ref: '#/components/responses/MediaSegment' }
+        '400': { description: Missing or malformed URL. }
+        '403': { description: Blocked host. }
+
+  /play/custom/{channel_id}/proxy.m3u8:
+    get:
+      tags: [Playback]
+      summary: Custom-channel manifest proxy
+      description: |
+        For custom channels with `proxy_segments` enabled. Applies the channel's
+        stored `custom_headers` and rewrites segment URLs through
+        `/play/custom/segment`.
+      parameters:
+        - $ref: '#/components/parameters/ChannelSourceId'
+        - name: browser
+          in: query
+          description: Set to `1` to also re-serve segments same-origin (used for YouTube sources).
+          schema: { type: string, enum: ['1'] }
+      responses:
+        '200': { $ref: '#/components/responses/HLSManifest' }
+        '404': { $ref: '#/components/responses/NotFoundHTML' }
+        '503': { $ref: '#/components/responses/StreamUnavailable' }
+
+  /play/custom/{channel_id}/direct:
+    get:
+      tags: [Playback]
+      summary: Custom-channel direct-media proxy
+      description: For non-HLS media where the client cannot send the required request headers.
+      parameters:
+        - $ref: '#/components/parameters/ChannelSourceId'
+      responses:
+        '200': { $ref: '#/components/responses/MediaSegment' }
+        '404': { $ref: '#/components/responses/NotFoundHTML' }
+        '503': { $ref: '#/components/responses/StreamUnavailable' }
+
+  /play/custom/{channel_id}/live.m3u8:
+    get:
+      tags: [Playback]
+      summary: Synthetic live manifest for a direct-video custom channel
+      description: |
+        Wraps a single direct video URL in a rolling HLS manifest with no
+        `EXT-X-ENDLIST`, so clients keep polling and pick up a new clip URL when
+        it changes.
+      parameters:
+        - $ref: '#/components/parameters/ChannelSourceId'
+      responses:
+        '200': { $ref: '#/components/responses/HLSManifest' }
+        '404': { $ref: '#/components/responses/NotFoundHTML' }
+
+  /play/custom/segment:
+    get:
+      tags: [Playback]
+      summary: Custom-channel segment proxy
+      description: |
+        Requires HTTPS, blocks private address ranges, and requires the segment
+        host to share a domain root with the channel's stored `stream_url`.
+      parameters:
+        - $ref: '#/components/parameters/ProxyUrl'
+      responses:
+        '200': { $ref: '#/components/responses/MediaSegment' }
+        '400': { description: Missing or non-HTTPS URL. }
+        '403': { description: Host mismatch or private address. }
+
+  /play/fox_tve/{channel_id}/proxy.m3u8:
+    get:
+      tags: [Playback]
+      summary: FOX TVE manifest proxy
+      parameters:
+        - $ref: '#/components/parameters/ChannelSourceId'
+      responses:
+        '200': { $ref: '#/components/responses/HLSManifest' }
+        '404': { $ref: '#/components/responses/NotFoundHTML' }
+        '503': { $ref: '#/components/responses/StreamUnavailable' }
+
+  /play/fox_one/{channel_id}/proxy.m3u8:
+    get:
+      tags: [Playback]
+      summary: FOX One manifest proxy
+      parameters:
+        - $ref: '#/components/parameters/ChannelSourceId'
+      responses:
+        '200': { $ref: '#/components/responses/HLSManifest' }
+        '404': { $ref: '#/components/responses/NotFoundHTML' }
+        '503': { $ref: '#/components/responses/StreamUnavailable' }
+
+  /play/fox_tve/key:
+    get:
+      tags: [Playback]
+      summary: FOX TVE AES key proxy
+      description: Restricted to permitted Uplynk key URLs.
+      parameters:
+        - $ref: '#/components/parameters/ProxyUrl'
+      responses:
+        '200':
+          description: Binary AES-128 key.
+          content:
+            application/octet-stream:
+              schema: { type: string, format: binary }
+        '400': { description: Missing URL. }
+        '403': { description: URL is not a permitted Uplynk key endpoint. }
+
+  /play/amazon_prime_free/{channel_id}/dash.mpd:
+    get:
+      tags: [Playback]
+      summary: Amazon Prime Free DASH manifest proxy
+      description: |
+        Amazon's CDN only permits `Origin: https://www.amazon.com`. The manifest
+        is proxied with permissive CORS and relative `<BaseURL>` elements are
+        rewritten to absolute CDN URLs. Polled roughly every 5 s for live updates.
+      parameters:
+        - $ref: '#/components/parameters/ChannelSourceId'
+      responses:
+        '200': { $ref: '#/components/responses/DASHManifest' }
+        '404': { $ref: '#/components/responses/NotFoundHTML' }
+        '503': { $ref: '#/components/responses/StreamUnavailable' }
+
+  /play/roku/{channel_id}/dash.mpd:
+    get:
+      tags: [Playback]
+      summary: Roku DASH (Widevine) variant
+      description: |
+        The EME path for Roku channels whose HLS variant is FairPlay. Redirects
+        to the upstream MPD; resolving it also caches the per-session Widevine
+        license URL that `/play/roku/license` later reads.
+      parameters:
+        - $ref: '#/components/parameters/ChannelSourceId'
+      responses:
+        '302': { description: Redirect to the upstream MPD. }
+        '404': { $ref: '#/components/responses/NotFoundHTML' }
+        '503': { $ref: '#/components/responses/StreamUnavailable' }
+
+  /play/cox/{channel_id}/dash.mpd:
+    get:
+      tags: [Playback]
+      summary: Cox Contour TVE DASH manifest proxy
+      parameters:
+        - $ref: '#/components/parameters/ChannelSourceId'
+      responses:
+        '200': { $ref: '#/components/responses/DASHManifest' }
+        '404': { $ref: '#/components/responses/NotFoundHTML' }
+        '503': { $ref: '#/components/responses/StreamUnavailable' }
+
+  /play/philo/{channel_id}/dash.mpd:
+    get:
+      tags: [Playback]
+      summary: Philo DASH manifest proxy
+      parameters:
+        - $ref: '#/components/parameters/ChannelSourceId'
+      responses:
+        '200': { $ref: '#/components/responses/DASHManifest' }
+        '404': { $ref: '#/components/responses/NotFoundHTML' }
+        '503': { $ref: '#/components/responses/StreamUnavailable' }
+
+  /play/sling/{channel_id}/dash.mpd:
+    get:
+      tags: [Playback]
+      summary: Sling DASH manifest proxy
+      parameters:
+        - $ref: '#/components/parameters/ChannelSourceId'
+      responses:
+        '200': { $ref: '#/components/responses/DASHManifest' }
+        '404': { $ref: '#/components/responses/NotFoundHTML' }
+        '503': { $ref: '#/components/responses/StreamUnavailable' }
+
+  /play/vidaa/{channel_id}/dash.mpd:
+    get:
+      tags: [Playback]
+      summary: Vidaa DASH manifest proxy
+      parameters:
+        - $ref: '#/components/parameters/ChannelSourceId'
+      responses:
+        '200': { $ref: '#/components/responses/DASHManifest' }
+        '404': { $ref: '#/components/responses/NotFoundHTML' }
+        '503': { $ref: '#/components/responses/StreamUnavailable' }
+
+  /play/pbs/{channel_id}/dash.mpd:
+    get:
+      tags: [Playback]
+      summary: PBS DASH manifest proxy
+      description: Applies only to opt-in DRM station feeds; clear PBS feeds use the standard HLS path.
+      parameters:
+        - $ref: '#/components/parameters/ChannelSourceId'
+      responses:
+        '200': { $ref: '#/components/responses/DASHManifest' }
+        '404': { $ref: '#/components/responses/NotFoundHTML' }
+        '503': { $ref: '#/components/responses/StreamUnavailable' }
+
+  /play/nbc_tve/{channel_id}/dash.mpd:
+    get:
+      tags: [Playback]
+      summary: NBC TVE DASH manifest proxy
+      description: Rewrites the manifest to a single audio track, which some players require.
+      parameters:
+        - $ref: '#/components/parameters/ChannelSourceId'
+        - name: audio
+          in: query
+          schema: { type: string, enum: [aac, ec3, all] }
+      responses:
+        '200': { $ref: '#/components/responses/DASHManifest' }
+        '404': { $ref: '#/components/responses/NotFoundHTML' }
+        '503': { $ref: '#/components/responses/StreamUnavailable' }
+
+  /play/directv/{channel_id}/browser.m3u8:
+    get:
+      tags: [Playback]
+      summary: DirecTV same-origin HLS master for browser playback
+      parameters:
+        - $ref: '#/components/parameters/ChannelSourceId'
+      responses:
+        '200': { $ref: '#/components/responses/HLSManifest' }
+        '404': { $ref: '#/components/responses/NotFoundHTML' }
+        '503': { $ref: '#/components/responses/StreamUnavailable' }
+
+  /play/directv/browser-asset:
+    get:
+      tags: [Playback]
+      summary: DirecTV child-playlist and segment proxy
+      description: Host must be a permitted DirecTV CDN. Forwards `Range` requests.
+      parameters:
+        - $ref: '#/components/parameters/ProxyUrl'
+      responses:
+        '200': { $ref: '#/components/responses/MediaSegment' }
+        '206': { description: Partial content, when a `Range` header is sent. }
+        '400': { description: Missing URL, non-HTTPS, or disallowed host. }
+
+  /play/directv/{channel_id}/prismcast.m3u:
+    get:
+      tags: [Playback]
+      summary: DirecTV PrismCast bridge playlist
+      parameters:
+        - $ref: '#/components/parameters/ChannelSourceId'
+      responses:
+        '200': { $ref: '#/components/responses/M3U' }
+        '404': { $ref: '#/components/responses/NotFoundHTML' }
+        '503': { description: PrismCast is not configured, or the capture failed. }
+
+  /play/directv/{channel_id}/prismcast.m3u8:
+    get:
+      tags: [Playback]
+      summary: DirecTV PrismCast bridge playlist (m3u8 alias)
+      parameters:
+        - $ref: '#/components/parameters/ChannelSourceId'
+      responses:
+        '200': { $ref: '#/components/responses/HLSManifest' }
+        '404': { $ref: '#/components/responses/NotFoundHTML' }
+        '503': { description: PrismCast is not configured, or the capture failed. }
+
+  /play/directv/prismcast-asset:
+    get:
+      tags: [Playback]
+      summary: DirecTV PrismCast asset proxy
+      description: Host must exactly match the configured PrismCast server.
+      parameters:
+        - $ref: '#/components/parameters/ProxyUrl'
+      responses:
+        '200': { $ref: '#/components/responses/MediaSegment' }
+        '400': { description: Missing URL or host does not match the PrismCast server. }
+
+  # ─────────────────────────────── Images ──────────────────────────────
+
+  /logos/{filename}:
+    get:
+      tags: [Images]
+      summary: Cached channel logo
+      description: |
+        Logos are normalised for Channels DVR compatibility — fitted to a 4:3
+        canvas, converted to PNG, and kept under 150 KB. Cache entries expire
+        when the channel's logo URL changes, not on a timer.
+      parameters:
+        - name: filename
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Image bytes.
+          content:
+            image/png: {}
+            image/jpeg: {}
+        '404': { $ref: '#/components/responses/NotFoundHTML' }
+
+  /posters/{filename}:
+    get:
+      tags: [Images]
+      summary: Cached programme poster
+      description: Retained until the programme ends, with a 4-day safety-net TTL.
+      parameters:
+        - name: filename
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Image bytes.
+          content:
+            image/jpeg: {}
+            image/png: {}
+        '404': { $ref: '#/components/responses/NotFoundHTML' }
+
+  /images/proxy/{img_type}/{hash_ext}:
+    get:
+      tags: [Images]
+      summary: Hash-addressed image proxy
+      description: |
+        `hash_ext` is `{md5-of-original-url}.{ext}`. The original URL is recovered
+        from a sidecar file written on first fetch, so the proxy URL stays clean
+        and stable in generated playlists.
+      parameters:
+        - $ref: '#/components/parameters/ImageType'
+        - name: hash_ext
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Image bytes.
+          content:
+            image/png: {}
+            image/jpeg: {}
+        '400': { description: Malformed hash/extension. }
+        '404': { description: Not cached and could not be fetched. }
+
+  /images/proxy/{img_type}/image.{ext}:
+    get:
+      tags: [Images]
+      summary: Legacy query-parameter image proxy
+      description: |
+        Retained for compatibility with previously generated playlists.
+
+        This route fetches the supplied URL with **no host or private-address
+        validation**. The response is validated as a decodable image before
+        caching, which bounds what can be read back, but the outbound request is
+        still made. Treat it as unrestricted server-side fetch.
+      parameters:
+        - $ref: '#/components/parameters/ImageType'
+        - name: ext
+          in: path
+          required: true
+          schema: { type: string }
+        - name: url
+          in: query
+          required: true
+          schema: { type: string, format: uri }
+      responses:
+        '200':
+          description: Image bytes.
+          content:
+            image/png: {}
+            image/jpeg: {}
+        '400': { description: Missing url parameter. }
+        '404': { description: Fetch failed or content was not a valid image. }
+
+  # ─────────────────────────────── Sources ─────────────────────────────
+
+  /api/sources:
+    get:
+      tags: [Sources]
+      summary: List all sources
+      responses:
+        '200':
+          description: Every source, ordered by display name.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Source' }
+
+  /api/sources/{source_id}:
+    patch:
+      tags: [Sources]
+      summary: Update source settings
+      description: |
+        Disabling a source cancels its queued jobs and purges its channels
+        (except for the `custom` source). Changes that would introduce channel-number
+        collisions across outputs are rejected with `409` and rolled back.
+      parameters:
+        - $ref: '#/components/parameters/SourceId'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                is_enabled: { type: boolean }
+                scrape_interval:
+                  type: integer
+                  description: Minutes. Bounds are per-scraper; violations return 422 with min/max.
+                scrape_cron:
+                  type: [string, 'null']
+                  description: Cron expression; validated when croniter is available.
+                chnum_start:
+                  type: [integer, 'null']
+                  description: First channel number for this source. Positive, or null to clear.
+                epg_only: { type: boolean }
+                new_channel_policy:
+                  type: string
+                  enum: [inherit, enabled, review]
+      responses:
+        '200':
+          description: Updated source.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Source' }
+        '409':
+          description: Change would create channel-number overlaps.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OverlapError' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /api/sources/{source_id}/run:
+    post:
+      tags: [Sources]
+      summary: Queue a full scrape of one source
+      parameters:
+        - $ref: '#/components/parameters/SourceId'
+      responses:
+        '200': { $ref: '#/components/responses/QueuedSource' }
+        '409': { description: Source is disabled. }
+
+  /api/sources/force-refresh:
+    post:
+      tags: [Sources]
+      summary: Queue a scrape of every enabled source
+      description: Clears each source's last-scraped timestamp and error, then enqueues it. Sources with no scrape interval are skipped.
+      responses:
+        '200':
+          description: Queue result.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, const: queued }
+                  count: { type: integer }
+                  sources:
+                    type: array
+                    items: { type: string }
+
+  /api/sources/{source_id}/scrape-status:
+    get:
+      tags: [Sources]
+      summary: Poll scrape progress
+      parameters:
+        - $ref: '#/components/parameters/SourceId'
+      responses:
+        '200':
+          description: |
+            `running` includes progress fields written by the worker.
+            `idle` includes the last scrape time and error.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, enum: [idle, queued, running] }
+                  phase: { type: string }
+                  last_scraped_ms: { type: integer }
+                  last_error: { type: [string, 'null'] }
+                additionalProperties: true
+
+  /api/sources/{source_id}/stream-audit:
+    post:
+      tags: [Sources]
+      summary: Queue a stream audit for one source
+      description: Probes every channel's stream and classifies it live / dead / DRM / VOD.
+      parameters:
+        - $ref: '#/components/parameters/SourceId'
+      responses:
+        '200': { $ref: '#/components/responses/QueuedSource' }
+        '409': { description: Source is disabled. }
+
+  /api/sources/stream-audit-all:
+    post:
+      tags: [Sources]
+      summary: Queue a stream audit for every audit-capable enabled source
+      responses:
+        '200':
+          description: Queued sources.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, const: queued }
+                  count: { type: integer }
+                  sources:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: integer }
+                        name: { type: string }
+
+  /api/sources/{source_id}/stream-audit-recheck:
+    post:
+      tags: [Sources]
+      summary: Re-audit specific channels
+      parameters:
+        - $ref: '#/components/parameters/SourceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [channel_ids]
+              properties:
+                channel_ids:
+                  type: array
+                  items: { type: integer }
+      responses:
+        '200':
+          description: Queued.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, const: queued }
+                  count: { type: integer }
+        '400': { description: No channel_ids supplied. }
+        '409': { description: Source is disabled. }
+
+  /api/sources/{source_id}/audit-status:
+    get:
+      tags: [Sources]
+      summary: Poll stream-audit progress
+      description: Progress is treated as dead if no heartbeat has been written for 90 s.
+      parameters:
+        - $ref: '#/components/parameters/SourceId'
+      responses:
+        '200':
+          description: Audit status.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, enum: [idle, queued, running] }
+                  last_result: {}
+                  last_report: {}
+                additionalProperties: true
+
+  /api/sources/{source_id}/inactive-count:
+    get:
+      tags: [Sources]
+      summary: Count deletable inactive channels for a source
+      parameters:
+        - $ref: '#/components/parameters/SourceId'
+        - name: days
+          in: query
+          description: Minimum age, in days, since the channel was last seen.
+          schema: { type: integer, default: 7 }
+      responses:
+        '200':
+          description: Count.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  count: { type: integer }
+                  source: { type: string }
+                  days: { type: integer }
+
+  /api/sources/{source_id}/delete-inactive:
+    post:
+      tags: [Sources]
+      summary: Delete inactive channels for a source
+      description: DRM-disabled channels are never deleted. Channels from regions no longer configured are also eligible regardless of age.
+      parameters:
+        - $ref: '#/components/parameters/SourceId'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                days: { type: integer, default: 7 }
+      responses:
+        '200':
+          description: Deletion result.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deleted: { type: integer }
+                  source: { type: string }
+
+  /api/sources/{source_id}/channels:
+    delete:
+      tags: [Sources]
+      summary: Purge every channel belonging to a source
+      description: Queued as a background job. Programs are removed by cascade.
+      parameters:
+        - $ref: '#/components/parameters/SourceId'
+      responses:
+        '200':
+          description: Purge queued.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, const: queued }
+                  source: { type: string }
+                  matched: { type: integer }
+
+  /api/sources/chnum-overlaps:
+    get:
+      tags: [Sources]
+      summary: Report channel-number collisions across all outputs
+      responses:
+        '200':
+          description: Warning strings, empty when there are no collisions.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  warnings:
+                    type: array
+                    items: { type: string }
+
+  /api/sources/{source_id}/config:
+    get:
+      tags: [Sources]
+      summary: Get a source's configuration schema and current values
+      description: |
+        Secret fields are masked as `••••••••`. Sending that literal value back
+        in a save is treated as "unchanged" rather than overwriting the secret.
+      parameters:
+        - $ref: '#/components/parameters/SourceId'
+      responses:
+        '200':
+          description: Schema plus current values.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  schema:
+                    type: array
+                    items: { $ref: '#/components/schemas/ConfigField' }
+                  values:
+                    type: object
+                    additionalProperties: true
+                  config_complete: { type: boolean }
+                  config_status:
+                    type: string
+                    enum: [configured, required, optional]
+                  oauth_token_time: {}
+    post:
+      tags: [Sources]
+      summary: Save a source's configuration
+      description: |
+        Only keys present in the source's schema are stored. Changing any
+        credential field purges cached authentication state (tokens, cookies,
+        stored browser sessions) so the next run performs a fresh login.
+
+        Some sources trigger an immediate full scrape when the change alters the
+        channel lineup — reported via `full_scrape_queued`.
+      parameters:
+        - $ref: '#/components/parameters/SourceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: Save result.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, const: saved }
+                  source: { type: string }
+                  is_enabled: { type: boolean }
+                  auto_enabled:
+                    type: boolean
+                    description: True when saving a complete config auto-enabled a previously disabled source.
+                  full_scrape_queued: { type: boolean }
+                  deleted_channels: { type: integer }
+                  config_complete: { type: boolean }
+                  config_status: { type: string, enum: [configured, required, optional] }
+
+  /api/sources/{source_id}/pbs-station-search:
+    get:
+      tags: [Source sign-in]
+      summary: Search PBS stations by ZIP code
+      parameters:
+        - $ref: '#/components/parameters/SourceId'
+        - name: zip
+          in: query
+          schema: { type: string }
+      responses:
+        '200':
+          description: Matching stations.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  stations:
+                    type: array
+                    items: { type: object, additionalProperties: true }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '502': { description: PBS lookup failed. }
+
+  /api/sources/{source_id}/pbs-manual-feeds:
+    get:
+      tags: [Source sign-in]
+      summary: List hand-picked PBS feeds
+      parameters:
+        - $ref: '#/components/parameters/SourceId'
+      responses:
+        '200':
+          description: Configured manual feeds.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  feeds:
+                    type: array
+                    items: { $ref: '#/components/schemas/PBSManualFeed' }
+        '400': { description: Not a PBS source. }
+
+  /api/sources/{source_id}/pbs-add-manual-feed:
+    post:
+      tags: [Source sign-in]
+      summary: Add a hand-picked PBS feed
+      description: Queues an immediate full scrape when the feed is new, so it appears without waiting for the scheduled interval.
+      parameters:
+        - $ref: '#/components/parameters/SourceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [station_id, profile]
+              properties:
+                station_id: { type: string, description: PBS station UUID. }
+                profile: { type: string }
+                name: { type: string }
+                callsign: { type: string }
+      responses:
+        '200':
+          description: Updated feed list.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, const: ok }
+                  feeds:
+                    type: array
+                    items: { $ref: '#/components/schemas/PBSManualFeed' }
+                  scrape_queued: { type: boolean }
+                  warning:
+                    type: [string, 'null']
+                    description: Set when the profile is a shared national feed already provided by another station.
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /api/sources/{source_id}/pbs-remove-manual-feed:
+    post:
+      tags: [Source sign-in]
+      summary: Remove a hand-picked PBS feed
+      description: Deletes the matching channels immediately rather than waiting for the reconcile grace period.
+      parameters:
+        - $ref: '#/components/parameters/SourceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [station_id, profile]
+              properties:
+                station_id: { type: string }
+                profile: { type: string }
+      responses:
+        '200':
+          description: Updated feed list.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, const: ok }
+                  feeds:
+                    type: array
+                    items: { $ref: '#/components/schemas/PBSManualFeed' }
+                  deleted_channels: { type: integer }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /api/sources/{source_id}/sling-browser-login/start:
+    post:
+      tags: [Source sign-in]
+      summary: Start the interactive Sling browser sign-in
+      description: |
+        Launches an anti-detect Firefox session in a background worker, streams
+        screenshots through `/state`, and forwards clicks and keystrokes from
+        `/input`, so a human can solve the captcha. The OAuth token is captured
+        and saved when sign-in succeeds.
+      parameters:
+        - $ref: '#/components/parameters/SourceId'
+      responses:
+        '200': { $ref: '#/components/responses/LoginStarted' }
+        '400': { description: Not a Sling source. }
+
+  /api/sources/{source_id}/sling-browser-login/state:
+    get:
+      tags: [Source sign-in]
+      summary: Poll the Sling sign-in session
+      parameters:
+        - $ref: '#/components/parameters/SourceId'
+      responses:
+        '200': { $ref: '#/components/responses/BrowserLoginState' }
+        '400': { description: Not a Sling source. }
+
+  /api/sources/{source_id}/sling-browser-login/input:
+    post:
+      tags: [Source sign-in]
+      summary: Forward a click or keystroke to the Sling sign-in browser
+      parameters:
+        - $ref: '#/components/parameters/SourceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BrowserInput' }
+      responses:
+        '200': { $ref: '#/components/responses/OK' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /api/sources/{source_id}/sling-browser-login/stop:
+    post:
+      tags: [Source sign-in]
+      summary: Stop the Sling sign-in session
+      parameters:
+        - $ref: '#/components/parameters/SourceId'
+      responses:
+        '200':
+          description: Stopping.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, const: stopping }
+
+  /api/sources/{source_id}/amazon-auto-login:
+    post:
+      tags: [Source sign-in]
+      summary: Start the scripted Amazon sign-in
+      description: Requires `amazon_email` and `amazon_password` to already be saved on the source.
+      parameters:
+        - $ref: '#/components/parameters/SourceId'
+      responses:
+        '200':
+          description: Started.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, const: started }
+        '400': { description: Not an Amazon source, or credentials are not saved. }
+
+  /api/sources/{source_id}/amazon-auth-status:
+    get:
+      tags: [Source sign-in]
+      summary: Poll the Amazon sign-in
+      description: |
+        On first observing success, this endpoint atomically claims the result
+        and persists the captured cookies to the source config. Subsequent polls
+        see the status only.
+      parameters:
+        - $ref: '#/components/parameters/SourceId'
+      responses:
+        '200':
+          description: Sign-in status.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, enum: [idle, running, otp_required, success, error] }
+                additionalProperties: true
+
+  /api/sources/{source_id}/amazon-auth-otp:
+    post:
+      tags: [Source sign-in]
+      summary: Submit an Amazon one-time passcode
+      parameters:
+        - $ref: '#/components/parameters/SourceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [otp]
+              properties:
+                otp: { type: string }
+      responses:
+        '200': { $ref: '#/components/responses/OK' }
+        '400': { description: Missing otp. }
+
+  /api/sources/{source_id}/philo-login/send-code:
+    post:
+      tags: [Source sign-in]
+      summary: Request a Philo sign-in code
+      description: Philo uses passwordless sign-in. Falls back to the email saved on the source when `ident` is omitted.
+      parameters:
+        - $ref: '#/components/parameters/SourceId'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                ident: { type: string, description: Email address or phone number. }
+                voice: { type: boolean, description: Deliver the code by voice call. }
+      responses:
+        '200':
+          description: Code sent.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, const: sent }
+                  ident: { type: string }
+                  can_resend: { type: boolean }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /api/sources/{source_id}/philo-login/verify:
+    post:
+      tags: [Source sign-in]
+      summary: Complete Philo sign-in with the emailed code
+      description: On success the resulting session cookies (valid roughly one year) are saved to the source.
+      parameters:
+        - $ref: '#/components/parameters/SourceId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code]
+              properties:
+                code: { type: string }
+      responses:
+        '200':
+          description: Signed in.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, const: signed_in }
+                  config_complete: { type: boolean }
+        '400': { description: Invalid code, or the sign-in session expired. }
+
+  /api/sources/{source_id}/directv-auto-login:
+    post:
+      tags: [Source sign-in]
+      summary: Start the scripted DirecTV sign-in
+      description: Requires `username` and `password` to already be saved. There is no OTP endpoint; MFA or bot checks are reported through the status poll.
+      parameters:
+        - $ref: '#/components/parameters/SourceId'
+      responses:
+        '200':
+          description: Started.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, const: started }
+        '400': { description: Not a DirecTV source, or credentials are not saved. }
+
+  /api/sources/{source_id}/directv-auth-status:
+    get:
+      tags: [Source sign-in]
+      summary: Poll the DirecTV sign-in
+      description: Claims and persists the captured session on first success, as with Amazon.
+      parameters:
+        - $ref: '#/components/parameters/SourceId'
+      responses:
+        '200':
+          description: Sign-in status.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string }
+                additionalProperties: true
+
+  # ────────────────────────────── Channels ─────────────────────────────
+
+  /api/channels:
+    get:
+      tags: [Channels]
+      summary: List channels
+      parameters:
+        - name: page
+          in: query
+          schema: { type: integer, default: 1 }
+        - name: per_page
+          in: query
+          schema: { type: integer, default: 50 }
+        - name: source
+          in: query
+          description: Exact source name.
+          schema: { type: string }
+        - name: category
+          in: query
+          description: Substring match.
+          schema: { type: string }
+        - name: search
+          in: query
+          description: Substring match on channel name.
+          schema: { type: string }
+        - name: feed_eligible
+          in: query
+          description: Restrict to channels that can appear in a playlist (active, enabled, streamable, non-EPG-only source).
+          schema: { type: string, enum: ['1', 'true', 'yes'] }
+        - name: slim
+          in: query
+          description: Return a reduced field set — faster for large lineups.
+          schema: { type: string, enum: ['1', 'true'] }
+      responses:
+        '200':
+          description: Paginated channel list.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  channels:
+                    type: array
+                    items: { $ref: '#/components/schemas/Channel' }
+                  total: { type: integer }
+                  page: { type: integer }
+                  pages: { type: integer }
+
+  /api/channels/{channel_id}:
+    patch:
+      tags: [Channels]
+      summary: Update a channel
+      description: |
+        Setting `number` without `number_pinned` implicitly pins it. Pinning to a
+        number that another channel has locked, or that another channel currently
+        occupies in the Default feed, is rejected with `422` — the alternative
+        would silently renumber the other channel.
+
+        Enabling a channel clears its `pending` review marker and recoverable
+        disable reasons.
+      parameters:
+        - $ref: '#/components/parameters/ChannelId'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string }
+                logo_url: { type: [string, 'null'] }
+                logo_url_pinned: { type: boolean }
+                category: { type: [string, 'null'] }
+                category_override: { type: [string, 'null'] }
+                language: { type: [string, 'null'] }
+                language_override: { type: [string, 'null'] }
+                is_active: { type: boolean }
+                is_enabled: { type: boolean }
+                scrape_pinned: { type: boolean }
+                number: { type: [integer, 'null'] }
+                number_pinned: { type: boolean }
+                disable_reason: { type: [string, 'null'] }
+                is_duplicate: { type: boolean }
+                user_note: { type: [string, 'null'] }
+                gracenote_id: { type: [string, 'null'] }
+                gracenote_mode: { type: string, enum: [auto, manual, off] }
+                review_action: { type: string, enum: [keep_disabled] }
+      responses:
+        '200':
+          description: Updated channel.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Channel' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+    delete:
+      tags: [Channels]
+      summary: Delete a channel
+      description: Only permitted for channels that are inactive (or scrape-pinned) **and** have missed at least 3 scrapes.
+      parameters:
+        - $ref: '#/components/parameters/ChannelId'
+      responses:
+        '200': { $ref: '#/components/responses/Deleted' }
+        '409': { description: Channel is still active, or has not passed the missed-scrape threshold. }
+
+  /api/channels/inactive-count:
+    get:
+      tags: [Channels]
+      summary: Count deletable inactive channels across all sources
+      parameters:
+        - name: days
+          in: query
+          schema: { type: integer, default: 14 }
+      responses:
+        '200':
+          description: Total plus a per-source breakdown.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  count: { type: integer }
+                  days: { type: integer }
+                  by_source:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        source: { type: string }
+                        count: { type: integer }
+                        channels:
+                          type: array
+                          items:
+                            type: object
+                            properties:
+                              name: { type: string }
+                              last_seen_at: { type: [string, 'null'], format: date-time }
+
+  /api/channels/delete-inactive:
+    post:
+      tags: [Channels]
+      summary: Delete inactive channels across all sources
+      description: Scrape-pinned channels are never deleted.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                days: { type: integer, default: 14 }
+      responses:
+        '200':
+          description: Deletion result.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deleted: { type: integer }
+                  days: { type: integer }
+
+  /api/channels/bulk:
+    post:
+      tags: [Channels]
+      summary: Bulk enable, disable, or mark channels reviewed
+      description: Applied as a background job against the same filter vocabulary the admin channel list uses.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action]
+              properties:
+                action: { type: string, enum: [enable, disable, mark_reviewed] }
+                filters: { $ref: '#/components/schemas/ChannelFilters' }
+      responses:
+        '200':
+          description: Job result.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, enum: [queued, idle] }
+                  updated: { type: integer, description: Number of channels matched. }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /api/channels/gracenote-bulk:
+    post:
+      tags: [Gracenote]
+      summary: Bulk-change Gracenote mode for channels
+      description: |
+        Target either an explicit `ids` list or a filter set. `clear_ids` is the
+        only action that destroys stored IDs — `set_off` keeps the ID dormant so
+        it survives being re-enabled.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action]
+              properties:
+                action: { type: string, enum: [set_auto, set_manual, set_off, clear_ids] }
+                ids:
+                  type: array
+                  items: { type: integer }
+                filters: { $ref: '#/components/schemas/ChannelFilters' }
+      responses:
+        '200':
+          description: Number updated.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  updated: { type: integer }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /api/channels/{channel_id}/category-explain:
+    get:
+      tags: [Channels]
+      summary: Explain how a channel's category was chosen
+      parameters:
+        - $ref: '#/components/parameters/ChannelId'
+      responses:
+        '200':
+          description: Category derivation.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  channel_id: { type: integer }
+                  channel_name: { type: string }
+                  category: { type: [string, 'null'] }
+                  category_override: { type: [string, 'null'] }
+                  canonical_categories:
+                    type: array
+                    items: { type: string }
+                  source: { type: string }
+                  rule: { type: string }
+                  detail: { type: string }
+
+  /api/channels/{channel_id}/language-explain:
+    get:
+      tags: [Channels]
+      summary: Show a channel's language and the common-language picker list
+      parameters:
+        - $ref: '#/components/parameters/ChannelId'
+      responses:
+        '200':
+          description: Language information.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  channel_id: { type: integer }
+                  channel_name: { type: string }
+                  language: { type: string }
+                  language_override: { type: [string, 'null'] }
+                  common_languages:
+                    type: array
+                    items:
+                      type: array
+                      items: { type: string }
+
+  /api/channels/{channel_id}/inspect:
+    post:
+      tags: [Channels]
+      summary: Probe a channel's stream and classify it
+      description: |
+        Resolves the stream, parses the manifest, checks for DRM and VOD markers,
+        and pulls one segment to confirm bytes are flowing. Also refreshes the
+        channel's stored resolution/codec information as a side effect.
+
+        DRM-bridge channels are inspected over their DASH+Widevine path instead,
+        returning `bridge` — full decryption can only be proven in a browser CDM.
+
+        Always returns HTTP 200; the outcome is in the `status` field.
+      parameters:
+        - $ref: '#/components/parameters/ChannelId'
+      responses:
+        '200':
+          description: Inspection outcome.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum: [live, bridge, drm, dead, vod, no_data, error]
+                  detail: { type: string }
+                  segment_bytes: { type: integer }
+                  variants:
+                    type: array
+                    items: { $ref: '#/components/schemas/HLSVariant' }
+
+  /api/channels/{channel_id}/preview:
+    get:
+      tags: [Channels]
+      summary: Playback information and now/next programming for a channel
+      description: |
+        Returns the URLs the admin player should use — `play_url` for direct
+        clients, `preview_url` for the browser (often a same-origin proxy) — plus
+        the playback mode, DRM license URL, current and next programme, EPG depth,
+        and feed memberships.
+      parameters:
+        - $ref: '#/components/parameters/ChannelId'
+        - name: detect
+          in: query
+          description: Set to `0` to skip live re-detection for custom channels (faster).
+          schema: { type: string, enum: ['0', '1'], default: '1' }
+        - name: directv_bridge
+          in: query
+          schema: { type: string, enum: ['1'] }
+        - name: audio
+          in: query
+          schema: { type: string, enum: [aac, ec3, all] }
+      responses:
+        '200':
+          description: Preview payload.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ChannelPreview' }
+
+  /api/channels/{channel_id}/duplicates:
+    get:
+      tags: [Channels]
+      summary: Find channels that duplicate this one
+      description: |
+        Three tiers — `strict` (canonical name match), `soft` (after brand-word
+        normalisation such as TV/Channel/Network), and `gn` (same Gracenote ID,
+        different name).
+      parameters:
+        - $ref: '#/components/parameters/ChannelId'
+      responses:
+        '200':
+          description: Duplicate groups.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  channel: { $ref: '#/components/schemas/DuplicateEntry' }
+                  strict:
+                    type: array
+                    items: { $ref: '#/components/schemas/DuplicateEntry' }
+                  soft:
+                    type: array
+                    items: { $ref: '#/components/schemas/DuplicateEntry' }
+                  gn:
+                    type: array
+                    items: { $ref: '#/components/schemas/DuplicateEntry' }
+        '404': { $ref: '#/components/responses/NotFoundJSON' }
+
+  /api/channels/{channel_id}/feed-membership:
+    get:
+      tags: [Channels]
+      summary: Report which non-default feeds contain a channel
+      parameters:
+        - $ref: '#/components/parameters/ChannelId'
+      responses:
+        '200':
+          description: Per-feed membership.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    feed_id: { type: integer }
+                    status: { type: string, enum: [pinned, excluded, filtered, absent] }
+                    feed_channel_number: { type: [integer, 'null'] }
+
+  /api/channels/duplicate-summary:
+    get:
+      tags: [Channels]
+      summary: Duplicate statistics and reviewable soft-match groups
+      description: Cross-region variants of the same channel from one source are excluded — those are not true duplicates.
+      responses:
+        '200':
+          description: Summary.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  sources:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name: { type: string }
+                        display_name: { type: string }
+                        dup_count: { type: integer }
+                        gn_pct: { type: integer, description: Percentage of duplicates that have EPG data. }
+                        epg_only: { type: boolean }
+                  total_groups: { type: integer }
+                  total_affected: { type: integer }
+                  soft_groups:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        group_key: { type: string }
+                        names:
+                          type: array
+                          items: { type: string }
+                        channel_count: { type: integer }
+                        sources:
+                          type: array
+                          items: { type: string }
+                        match_reason: { type: string }
+
+  /api/channels/resolve-duplicates:
+    post:
+      tags: [Channels]
+      summary: Disable duplicates, keeping one winner per group
+      description: |
+        Winners are chosen by: healthy before unhealthy, has-Gracenote-ID before
+        not, better EPG quality, then the caller's source priority order. If every
+        channel in a group is unhealthy, all are disabled.
+
+        `soft` mode only acts on the `group_keys` supplied.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                mode: { type: string, enum: [strict, soft], default: strict }
+                source_priority:
+                  type: array
+                  items: { type: string }
+                  description: Source names, highest priority first.
+                group_keys:
+                  type: array
+                  items: { type: string }
+                  description: Required for soft mode.
+      responses:
+        '200':
+          description: Result.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  disabled: { type: integer }
+                  enabled: { type: integer }
+                  groups_resolved: { type: integer }
+
+  # ────────────────────────── Custom channels ──────────────────────────
+
+  /api/custom-channels:
+    get:
+      tags: [Custom channels]
+      summary: List custom channels
+      responses:
+        '200':
+          description: Channels belonging to the `custom` source.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Channel' }
+    post:
+      tags: [Custom channels]
+      summary: Create a custom channel
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CustomChannelInput' }
+      responses:
+        '201':
+          description: Created channel.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Channel' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '500': { description: The `custom` source has not been seeded. }
+        '503': { $ref: '#/components/responses/DatabaseBusy' }
+
+  /api/custom-channels/batch:
+    post:
+      tags: [Custom channels]
+      summary: Create several custom channels in one transaction
+      description: Invalid entries are skipped silently; the request fails only when nothing valid remains.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items: { $ref: '#/components/schemas/CustomChannelInput' }
+      responses:
+        '201':
+          description: Created channels.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Channel' }
+        '400': { description: Empty list, or no valid entries. }
+        '503': { $ref: '#/components/responses/DatabaseBusy' }
+
+  /api/custom-channels/{channel_id}:
+    put:
+      tags: [Custom channels]
+      summary: Update a custom channel
+      parameters:
+        - $ref: '#/components/parameters/ChannelId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CustomChannelInput' }
+      responses:
+        '200':
+          description: Updated channel.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Channel' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '403': { description: Not a custom channel. }
+    delete:
+      tags: [Custom channels]
+      summary: Delete a custom channel
+      parameters:
+        - $ref: '#/components/parameters/ChannelId'
+      responses:
+        '200': { $ref: '#/components/responses/Deleted' }
+        '403': { description: Not a custom channel. }
+        '503': { $ref: '#/components/responses/DatabaseBusy' }
+
+  /api/custom-channels/catalog:
+    get:
+      tags: [Custom channels]
+      summary: Built-in catalog of ready-made channels
+      description: Each entry carries `already_added`, matched against both stream and page URLs.
+      responses:
+        '200':
+          description: Catalog groups.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    name: { type: string }
+                    channels:
+                      type: array
+                      items:
+                        type: object
+                        properties:
+                          name: { type: string }
+                          stream_url: { type: string }
+                          already_added: { type: boolean }
+                        additionalProperties: true
+                  additionalProperties: true
+
+  /api/custom-channels/detect:
+    post:
+      tags: [Custom channels]
+      summary: Detect a playable stream from a URL (synchronous)
+      description: |
+        Accepts a page URL or a direct stream URL and returns the resolved stream,
+        its type, and any headers required to play it. Page URLs are driven through
+        yt-dlp or a headless browser, so this call can take tens of seconds — prefer
+        the asynchronous `/detect/start` variant for interactive use.
+
+        **This endpoint applies no host or private-address filtering.** Any
+        `http(s)` URL is fetched, and page URLs are loaded in a real browser
+        inside the container. Treat it as unrestricted server-side fetch.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [url]
+              properties:
+                url: { type: string, format: uri }
+      responses:
+        '200':
+          description: Detection result.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DetectResult' }
+        '400': { description: Missing url, or not an http(s) URL. }
+
+  /api/custom-channels/detect/start:
+    post:
+      tags: [Custom channels]
+      summary: Start an asynchronous stream detection
+      description: Same caveats as the synchronous variant. Poll the returned `status_url` for progress.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [url]
+              properties:
+                url: { type: string, format: uri }
+      responses:
+        '200':
+          description: Detection queued.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  detect_id: { type: string }
+                  status: { type: string, const: queued }
+                  status_url: { type: string }
+        '400': { description: Missing url, or not an http(s) URL. }
+
+  /api/custom-channels/detect/{detect_id}:
+    get:
+      tags: [Custom channels]
+      summary: Poll an asynchronous stream detection
+      description: |
+        State lives in Redis for 10 minutes while running, 3 minutes once done.
+        A detection whose worker died is synthesised as a timeout rather than
+        polling forever.
+      parameters:
+        - name: detect_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Detection state.
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/DetectResult'
+                  - type: object
+                    properties:
+                      detect_id: { type: string }
+                      status: { type: string, enum: [queued, running, done] }
+                      stage: { type: string }
+                      stage_text: { type: string }
+                      detail: { type: [string, 'null'] }
+                      url: { type: string }
+                      started_ms: { type: integer }
+        '404': { description: Detection session expired or unknown. }
+
+  /api/custom-channels/preview-manifest:
+    get:
+      tags: [Custom channels]
+      summary: Proxy an HLS manifest for the custom-channel preview player
+      description: |
+        Fetches server-side (bypassing browser CORS restrictions), resolves
+        master to variant, and rewrites segment URLs through
+        `/api/custom-channels/preview-segment`.
+
+        HTTPS only, and private address ranges are blocked. Note that the `h`
+        parameter injects arbitrary headers into the outbound request.
+      parameters:
+        - name: url
+          in: query
+          required: true
+          schema: { type: string, format: uri }
+        - $ref: '#/components/parameters/ProxyHeaders'
+      responses:
+        '200': { $ref: '#/components/responses/HLSManifest' }
+        '400': { description: Non-HTTPS URL. }
+        '403': { description: Blocked private address. }
+        '502': { description: Upstream fetch failed, or no usable variant. }
+
+  /api/custom-channels/preview-segment:
+    get:
+      tags: [Custom channels]
+      summary: Proxy one HLS segment for the custom-channel preview player
+      parameters:
+        - name: url
+          in: query
+          required: true
+          schema: { type: string, format: uri }
+        - $ref: '#/components/parameters/ProxyHeaders'
+      responses:
+        '200': { $ref: '#/components/responses/MediaSegment' }
+        '400': { description: Non-HTTPS URL. }
+        '403': { description: Blocked private address. }
+        '502': { description: Segment fetch failed. }
+
+  # ─────────────────────────────── Feeds ───────────────────────────────
+
+  /api/feeds:
+    get:
+      tags: [Feeds]
+      summary: List feeds
+      responses:
+        '200':
+          description: All feeds, with their output URLs.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Feed' }
+    post:
+      tags: [Feeds]
+      summary: Create a feed
+      description: Slug is derived from the name when omitted. Rejected if the new feed would introduce channel-number overlaps.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string }
+                slug: { type: string }
+                description: { type: string }
+                filters: { $ref: '#/components/schemas/FeedFilters' }
+                chnum_start: { type: [integer, 'null'] }
+                is_enabled: { type: boolean, default: true }
+      responses:
+        '201':
+          description: Created feed.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Feed' }
+        '400': { description: Missing name. }
+        '409':
+          description: Slug already exists, or channel-number overlaps were introduced.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OverlapError' }
+        '503': { $ref: '#/components/responses/DatabaseBusy' }
+
+  /api/feeds/{feed_id}:
+    get:
+      tags: [Feeds]
+      summary: Get one feed
+      parameters:
+        - $ref: '#/components/parameters/FeedId'
+      responses:
+        '200':
+          description: Feed.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Feed' }
+        '404': { $ref: '#/components/responses/NotFoundHTML' }
+    patch:
+      tags: [Feeds]
+      summary: Update a feed
+      description: The built-in `default` feed accepts only `chnum_start`; any other field returns `403`.
+      parameters:
+        - $ref: '#/components/parameters/FeedId'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string }
+                description: { type: string }
+                filters: { $ref: '#/components/schemas/FeedFilters' }
+                chnum_start: { type: [integer, 'null'] }
+                is_enabled: { type: boolean }
+      responses:
+        '200':
+          description: Updated feed.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Feed' }
+        '403': { description: Built-in feeds cannot be edited. }
+        '409':
+          description: Channel-number overlaps introduced.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OverlapError' }
+        '503': { $ref: '#/components/responses/DatabaseBusy' }
+    delete:
+      tags: [Feeds]
+      summary: Delete a feed
+      parameters:
+        - $ref: '#/components/parameters/FeedId'
+      responses:
+        '200':
+          description: Deleted.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, const: deleted }
+                  slug: { type: string }
+        '403': { description: Built-in feeds cannot be deleted. }
+        '503': { $ref: '#/components/responses/DatabaseBusy' }
+
+  /api/feeds/channel-membership:
+    get:
+      tags: [Feeds]
+      summary: Map every channel to the feeds containing it
+      parameters:
+        - name: exclude_id
+          in: query
+          description: Omit one feed from the result.
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Object keyed by channel ID, valued with feed names.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties:
+                  type: array
+                  items: { type: string }
+
+  /api/feeds/chnum-ranges:
+    get:
+      tags: [Feeds]
+      summary: Report the channel-number range each feed occupies
+      parameters:
+        - name: exclude_id
+          in: query
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Occupied ranges.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    feed_id: { type: integer }
+                    feed_name: { type: string }
+                    start: { type: integer }
+                    end: { type: integer }
+                    count: { type: integer, description: Standard-playlist channels. }
+                    gn_count: { type: integer, description: Gracenote-playlist channels. }
+                    explicit: { type: boolean, description: True when the feed has an explicit chnum_start. }
+
+  /api/feeds/preview-order:
+    post:
+      tags: [Feeds]
+      summary: Preview the channel list and numbering a feed definition would produce
+      description: |
+        Read-only despite being a POST — the filter payload is too large for a
+        query string. Supply `order` to preview an unsaved drag-and-drop ordering.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                filters: { $ref: '#/components/schemas/FeedFilters' }
+                chnum_start: { type: [integer, 'null'] }
+                feed_id: { type: integer }
+                order:
+                  type: array
+                  items: { type: integer }
+      responses:
+        '200':
+          description: Anticipated ordering.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  start: { type: integer }
+                  channels:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id: { type: integer }
+                        name: { type: string }
+                        source: { type: string }
+                        number: { type: [integer, 'null'] }
+                        pinned: { type: boolean }
+                        feed_pinned: { type: boolean }
+                        gracenote: { type: boolean }
+        '400': { description: order contained non-integer channel IDs. }
+
+  /api/feeds/{feed_id}/channel-order:
+    put:
+      tags: [Feeds]
+      summary: Persist a manual channel ordering
+      description: |
+        Rewrites the feed's number pool sequentially from its start value. A manual
+        order requires a durable explicit `chnum_start`; one is assigned from the
+        feed's namespace if not already set, because an auto-start shifts when
+        feeds are added or renamed and would silently destroy the ordering.
+      parameters:
+        - $ref: '#/components/parameters/FeedId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [order]
+              properties:
+                order:
+                  type: array
+                  items: { type: integer }
+                chnum_start: { type: [integer, 'null'] }
+      responses:
+        '200':
+          description: Updated feed.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Feed' }
+        '400': { description: Missing or malformed order list. }
+        '403': { description: Built-in feeds cannot be reordered. }
+        '409':
+          description: Channel-number overlaps introduced.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OverlapError' }
+        '503': { $ref: '#/components/responses/DatabaseBusy' }
+
+  /api/feeds/{feed_id}/chnum-lock-all:
+    post:
+      tags: [Feeds]
+      summary: Pin every member channel to its current number
+      description: |
+        Freezes numbering so later reassignment cannot reshuffle it. Already-pinned
+        channels are left alone. Note that pinning is a global property of the
+        channel, so this also fixes its number in every other feed it belongs to.
+      parameters:
+        - $ref: '#/components/parameters/FeedId'
+      responses:
+        '200':
+          description: Number of channels newly pinned.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  locked: { type: integer }
+        '503': { $ref: '#/components/responses/DatabaseBusy' }
+
+  /api/feeds/{feed_id}/reset-channel-numbers:
+    post:
+      tags: [Feeds]
+      summary: Regenerate a feed's channel numbers from its start value
+      parameters:
+        - $ref: '#/components/parameters/FeedId'
+      responses:
+        '200':
+          description: Reset result.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, const: reset }
+                  message: { type: string }
+                  feed: { $ref: '#/components/schemas/Feed' }
+        '400': { description: Non-default feed has no chnum_start set. }
+        '503': { $ref: '#/components/responses/DatabaseBusy' }
+
+  /api/feeds/{feed_id}/pin:
+    post:
+      tags: [Feeds]
+      summary: Pin a channel into a feed
+      description: Pinned channels are included regardless of the feed's filters.
+      parameters:
+        - $ref: '#/components/parameters/FeedId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [channel_id]
+              properties:
+                channel_id: { type: integer }
+      responses:
+        '200': { $ref: '#/components/responses/FeedMembershipChange' }
+        '400': { description: Missing channel_id. }
+        '403': { description: Built-in feeds cannot be modified. }
+
+  /api/feeds/{feed_id}/pin/{channel_id}:
+    delete:
+      tags: [Feeds]
+      summary: Remove a channel pin
+      parameters:
+        - $ref: '#/components/parameters/FeedId'
+        - $ref: '#/components/parameters/ChannelId'
+      responses:
+        '200': { $ref: '#/components/responses/FeedMembershipChange' }
+        '403': { description: Built-in feeds cannot be modified. }
+
+  /api/feeds/{feed_id}/exclude:
+    post:
+      tags: [Feeds]
+      summary: Exclude a channel from a feed
+      parameters:
+        - $ref: '#/components/parameters/FeedId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [channel_id]
+              properties:
+                channel_id: { type: integer }
+      responses:
+        '200': { $ref: '#/components/responses/FeedMembershipChange' }
+        '400': { description: Missing channel_id. }
+        '403': { description: Built-in feeds cannot be modified. }
+
+  /api/feeds/{feed_id}/exclude/{channel_id}:
+    delete:
+      tags: [Feeds]
+      summary: Remove a channel exclusion
+      parameters:
+        - $ref: '#/components/parameters/FeedId'
+        - $ref: '#/components/parameters/ChannelId'
+      responses:
+        '200': { $ref: '#/components/responses/FeedMembershipChange' }
+        '403': { description: Built-in feeds cannot be modified. }
+
+  # ───────────────────────────── Gracenote ─────────────────────────────
+
+  /api/gracenote-search:
+    get:
+      tags: [Gracenote]
+      summary: Search Gracenote stations by name
+      description: Proxied through the configured Channels DVR server, which holds the Gracenote index.
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema: { type: string }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 10, minimum: 1, maximum: 25 }
+      responses:
+        '200':
+          description: Matches.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items: { type: object, additionalProperties: true }
+        '400': { description: Missing q, or Channels DVR URL is not configured. }
+        '502': { description: Lookup failed. }
+
+  /api/channels/{channel_id}/gracenote-suggestions:
+    get:
+      tags: [Gracenote]
+      summary: Suggest Gracenote station IDs for a channel
+      parameters:
+        - $ref: '#/components/parameters/ChannelId'
+        - name: limit
+          in: query
+          schema: { type: integer, default: 10, minimum: 1, maximum: 25 }
+      responses:
+        '200':
+          description: |
+            Ranked suggestions. `dvr_missing` is set when no Channels DVR server
+            is configured, in which case `results` is empty.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items: { type: object, additionalProperties: true }
+                  dvr_missing: { type: boolean }
+                  channel:
+                    type: object
+                    properties:
+                      id: { type: integer }
+                      name: { type: string }
+                      source_name: { type: [string, 'null'] }
+                      country: { type: [string, 'null'] }
+                      language: { type: [string, 'null'] }
+                      category: { type: [string, 'null'] }
+                      gracenote_id: { type: [string, 'null'] }
+                      gracenote_source:
+                        type: [string, 'null']
+                        enum: [manual, csv, native, null]
+                      csv_suggestion:
+                        type: [object, 'null']
+                        properties:
+                          tmsid: { type: string }
+                          notes: { type: string }
+        '502': { description: Suggestion lookup failed. }
+
+  /api/stations/{station_id}/now-playing:
+    get:
+      tags: [Gracenote]
+      summary: Now/next programming for a Gracenote station ID
+      description: Sourced from tvtv.us, so a suggested station ID can be checked against what it is actually broadcasting.
+      parameters:
+        - name: station_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: Now/next data.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  found: { type: boolean }
+                additionalProperties: true
+        '404': { description: Station is not in the local index. }
+
+  /api/tvtv/cache/refresh:
+    post:
+      tags: [Gracenote]
+      summary: Queue a refresh of the tvtv guide cache
+      responses:
+        '202':
+          description: Queued, or already running.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status: { type: string, enum: [queued, already_running] }
+                  job_id: { type: string }
+
+  /api/gracenote/community-summary:
+    get:
+      tags: [Gracenote]
+      summary: Community-map coverage counts
+      responses:
+        '200':
+          description: Coverage.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total: { type: integer, description: Channels with a community mapping. }
+                  applied: { type: integer, description: Already using the mapped ID. }
+                  available: { type: integer, description: Auto-mode channels that could adopt it. }
+
+  /api/gracenote/community-map:
+    get:
+      tags: [Gracenote]
+      summary: Every channel with a community mapping
+      responses:
+        '200':
+          description: Mapping rows.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total: { type: integer }
+                  results:
+                    type: array
+                    items: { $ref: '#/components/schemas/CommunityMapRow' }
+
+  /api/gracenote/community-apply-all:
+    post:
+      tags: [Gracenote]
+      summary: Bulk-apply community Gracenote IDs
+      description: |
+        Defaults to a dry run — pass `dry_run: false` to write. `new_only: true`
+        leaves manual and off-mode channels untouched.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                dry_run: { type: boolean, default: true }
+                new_only: { type: boolean, default: false }
+      responses:
+        '200':
+          description: What was (or would be) changed.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  dry_run: { type: boolean }
+                  new_only: { type: boolean }
+                  applied:
+                    type: array
+                    items: { type: object, additionalProperties: true }
+                  overwritten:
+                    type: array
+                    items: { type: object, additionalProperties: true }
+                  already_done: { type: integer }
+                  total_changed: { type: integer }
+
+  /api/gracenote/community-clear-all:
+    post:
+      tags: [Gracenote]
+      summary: Clear community-mapped Gracenote IDs
+      description: Resets every community-mapped channel to no ID and auto mode. Defaults to a dry run.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                dry_run: { type: boolean, default: true }
+      responses:
+        '200':
+          description: What was (or would be) cleared.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  dry_run: { type: boolean }
+                  cleared:
+                    type: array
+                    items: { type: object, additionalProperties: true }
+                  already_clear: { type: integer }
+
+  /api/gracenote/my-contributions:
+    get:
+      tags: [Gracenote]
+      summary: Local mappings that differ from, or are absent from, the community map
+      responses:
+        '200':
+          description: Candidate contributions.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total: { type: integer }
+                  results:
+                    type: array
+                    items: { type: object, additionalProperties: true }
+
+  /api/gracenote/submit-contributions:
+    post:
+      tags: [Gracenote]
+      summary: Submit mappings to the community webhook
+      description: |
+        **Sends data to a third party.** Each selected channel is POSTed to the
+        configured contribution webhook — by default a Make.com endpoint owned by
+        the upstream project — carrying app version, source name, source channel
+        ID, Gracenote ID, channel name, and category.
+
+        Rate-limited server-side to one submission per 24 hours.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [channel_ids]
+              properties:
+                channel_ids:
+                  type: array
+                  items: { type: integer }
+      responses:
+        '200':
+          description: At least one mapping was accepted.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ContributionResult' }
+        '400': { description: No channels selected, or no webhook configured. }
+        '429':
+          description: Rate limited — one submission per 24 hours.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ContributionResult' }
+        '502':
+          description: Every submission failed.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ContributionResult' }
+
+  /api/gracenote/community-export:
+    get:
+      tags: [Gracenote]
+      summary: Export all active channels as a contribution file
+      responses:
+        '200':
+          description: JSON file download.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  schema_version: { type: integer, const: 1 }
+                  exported_at: { type: string, format: date-time }
+                  channel_count: { type: integer }
+                  channels:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        provider: { type: string }
+                        key: { type: string }
+                        channel_name: { type: string }
+                        tmsid: { type: string }
+
+  /api/gracenote/remote-map/status:
+    get:
+      tags: [Gracenote]
+      summary: Status of the remote community map
+      responses:
+        '200':
+          description: Remote map state.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  url: { type: string }
+                  url_is_default: { type: boolean }
+                additionalProperties: true
+
+  /api/gracenote/remote-map/refresh:
+    post:
+      tags: [Gracenote]
+      summary: Re-download the remote community map
+      description: |
+        **Fetches from a third party.** The default source is a GitHub gist owned
+        by the upstream project. The same fetch also runs automatically on every
+        worker start. Content is parsed as CSV data, never executed.
+      responses:
+        '200':
+          description: Refreshed.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  message: { type: string }
+                  url: { type: string }
+                additionalProperties: true
+        '502':
+          description: Fetch or parse failed.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean, const: false }
+                  message: { type: string }
+
+  # ───────────────────────────── Channels DVR ──────────────────────────
+
+  /api/dvr/test-connection:
+    get:
+      tags: [Channels DVR]
+      summary: Ping the configured Channels DVR server
+      responses:
+        '200':
+          description: Server information.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean, const: true }
+                  version: { type: string }
+                  username: { type: string }
+                  subscription: { type: string }
+        '400': { description: Channels DVR URL is not configured. }
+        '502': { description: Could not connect. }
+        '504': { description: Timed out. }
+
+  /api/feeds/{feed_id}/push-to-dvr:
+    post:
+      tags: [Channels DVR]
+      summary: Register a feed as Channels DVR source(s)
+      description: |
+        Registers up to two sources — a Gracenote-guided one (only when the feed
+        has Gracenote channels) and a standard one paired with the XMLTV feed.
+        Feed artifacts are rebuilt synchronously first so the DVR fetches current
+        content.
+
+        Feeds larger than 750 channels return `409` unless `force` is set.
+      parameters:
+        - $ref: '#/components/parameters/FeedId'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                force: { type: boolean }
+      responses:
+        '200': { $ref: '#/components/responses/DVRPushResult' }
+        '400': { description: DVR not configured, or the feed has no eligible channels. }
+        '409': { $ref: '#/components/responses/DVRSizeWarning' }
+        '502': { description: Could not reach Channels DVR, or it rejected the request. }
+        '503': { description: Timed out building feed artifacts. }
+        '504': { description: Channels DVR timed out. }
+
+  /api/feeds/{feed_id}/push-prismcast-to-dvr:
+    post:
+      tags: [Channels DVR]
+      summary: Register a feed's PrismCast output as Channels DVR source(s)
+      description: Registered under distinct names so they sit alongside, rather than replace, the standard push.
+      parameters:
+        - $ref: '#/components/parameters/FeedId'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                force: { type: boolean }
+      responses:
+        '200': { $ref: '#/components/responses/DVRPushResult' }
+        '400': { description: DVR or PrismCast not configured, or no eligible channels. }
+        '409': { $ref: '#/components/responses/DVRSizeWarning' }
+        '502': { description: Could not reach Channels DVR. }
+        '503': { description: Timed out building artifacts. }
+        '504': { description: Channels DVR timed out. }
+
+  /api/sources/{source_id}/push-to-dvr:
+    post:
+      tags: [Channels DVR]
+      summary: Register one source's channels as Channels DVR source(s)
+      parameters:
+        - $ref: '#/components/parameters/SourceId'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                force: { type: boolean }
+      responses:
+        '200': { $ref: '#/components/responses/DVRPushResult' }
+        '400': { description: DVR not configured, or no eligible channels. }
+        '409': { $ref: '#/components/responses/DVRSizeWarning' }
+        '502': { description: Could not reach Channels DVR. }
+        '504': { description: Channels DVR timed out. }
+
+  /api/raw-output/push-to-dvr:
+    post:
+      tags: [Channels DVR]
+      summary: Register the full unfiltered output as Channels DVR source(s)
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                force: { type: boolean }
+      responses:
+        '200': { $ref: '#/components/responses/DVRPushResult' }
+        '400': { description: DVR not configured, or no eligible channels. }
+        '409': { $ref: '#/components/responses/DVRSizeWarning' }
+        '502': { description: Could not reach Channels DVR. }
+        '504': { description: Channels DVR timed out. }
+
+  # ───────────────────────────── Settings ──────────────────────────────
+
+  /api/settings:
+    get:
+      tags: [Settings]
+      summary: Get global settings
+      description: |
+        Returned values are *effective* — environment variables are applied where
+        no database value is set. The `*_source` fields report which layer each
+        value came from.
+      responses:
+        '200':
+          description: Effective settings.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AppSettings' }
+    post:
+      tags: [Settings]
+      summary: Update global settings
+      description: |
+        Server URLs are normalised — a bare host gains a scheme, and the Channels
+        DVR URL gains port 8089 if none is given. Toggling the DRM bridge
+        immediately reconciles existing channels rather than waiting for the next
+        stream audit.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                channels_dvr_url: { type: [string, 'null'] }
+                public_base_url: { type: [string, 'null'] }
+                prismcast_url: { type: [string, 'null'] }
+                prismcast_inner_url: { type: [string, 'null'] }
+                prismcast_max_height:
+                  type: integer
+                  enum: [0, 360, 480, 720, 1080]
+                  description: 0 means unlimited.
+                drm_bridge_enabled: { type: boolean }
+                timezone_name: { type: [string, 'null'], description: IANA timezone name. }
+                auto_allow_new_channels: { type: boolean }
+                gracenote_auto_fill: { type: boolean }
+                dvr_epg_auto_refresh: { type: boolean }
+                image_proxy_enabled: { type: boolean }
+                m3u_rewrite_timestamps: { type: boolean }
+                gracenote_map_url: { type: [string, 'null'] }
+                gracenote_contribution_url: { type: [string, 'null'] }
+      responses:
+        '200':
+          description: Updated settings.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AppSettings' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /api/settings/gracenote-auto-clear:
+    post:
+      tags: [Settings]
+      summary: Disable Gracenote auto-fill and clear auto-assigned IDs
+      description: Manual IDs are preserved.
+      responses:
+        '200': { $ref: '#/components/responses/Queued' }
+
+  /api/settings/gracenote-clear-all:
+    post:
+      tags: [Settings]
+      summary: Disable auto-fill and clear every Gracenote ID
+      description: Also sets every channel to mode `off`.
+      responses:
+        '200': { $ref: '#/components/responses/Queued' }
+
+  /api/settings/prismcast/test:
+    post:
+      tags: [Settings]
+      summary: Run the PrismCast end-to-end diagnostic
+      description: |
+        Checks server reachability, secure-context requirements, port openness,
+        container topology, and performs a real capture. Returns per-check
+        pass/warn/fail results plus a large diagnostics bundle.
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                browser_origin: { type: string }
+                browser_secure_context: { type: boolean }
+      responses:
+        '200':
+          description: Diagnostic report.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  checks:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name: { type: string }
+                        status: { type: string, enum: [ok, warn, fail, info] }
+                        detail: { type: string }
+                        fix: { type: [string, 'null'] }
+                  diagnostics: { type: object, additionalProperties: true }
+                additionalProperties: true
+        '400': { description: PrismCast server URL is not set. }
+
+  /api/settings/backup-db:
+    get:
+      tags: [Settings]
+      summary: Download a gzipped copy of the database
+      description: |
+        Uses SQLite's online backup API, so it is safe to call while the server is
+        running.
+
+        The database contains every stored provider credential in plaintext.
+      responses:
+        '200':
+          description: Gzipped SQLite database.
+          content:
+            application/gzip:
+              schema: { type: string, format: binary }
+        '404': { description: Database file not found. }
+
+  /api/settings/restore-db:
+    post:
+      tags: [Settings]
+      summary: Replace the live database from an upload
+      description: |
+        Accepts `.db` or `.db.gz`, maximum 200 MB. The file is validated as SQLite,
+        swapped in atomically, stale write-ahead logs are dropped, and gunicorn
+        workers are signalled to reopen connections.
+
+        **Destructive and unauthenticated.**
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [db_file]
+              properties:
+                db_file: { type: string, format: binary }
+      responses:
+        '200': { $ref: '#/components/responses/OKStatus' }
+        '400': { description: No file, bad gzip, or not a SQLite database. }
+        '413': { description: Upload exceeds 200 MB. }
+        '500': { description: Write failed. }
+
+  /api/settings/local-backups:
+    get:
+      tags: [Settings]
+      summary: List nightly on-disk database backups
+      responses:
+        '200':
+          description: Backups, newest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  backups:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name: { type: string }
+                        size: { type: integer }
+                        mtime: { type: number }
+
+  /api/settings/restore-local-backup:
+    post:
+      tags: [Settings]
+      summary: Restore the database from a nightly backup
+      description: The name is validated against path traversal and must match the generated backup filename pattern.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string, pattern: '^fastchannels_backup_.*\.db\.gz$' }
+      responses:
+        '200': { $ref: '#/components/responses/OKStatus' }
+        '400': { description: Missing or invalid name, or the archive is corrupt. }
+        '404': { description: Backup not found. }
+        '500': { description: Write failed. }
+
+  # ──────────────────────────────── TVE ────────────────────────────────
+
+  /api/settings/tve/cox:
+    get:
+      tags: [TVE]
+      summary: Get the TV-provider account
+      description: |
+        Returns a safe projection — the password itself is never returned, only
+        `password_configured`. The **username is returned in plaintext**.
+      responses:
+        '200':
+          description: Account.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TVEAccount' }
+    post:
+      tags: [TVE]
+      summary: Update the TV-provider account
+      description: Sending a non-empty `password` replaces the stored one; omit it to leave it unchanged.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                provider_id: { type: string, description: MVPD identifier, e.g. "Cox". }
+                selected_mso_id: { type: string, description: Alias for provider_id. }
+                is_enabled: { type: boolean }
+                username: { type: string }
+                password: { type: string, format: password }
+                clear_password: { type: boolean }
+                auth_backend: { type: string, enum: [native, yt_dlp] }
+                adobe_mso_id: { type: string }
+                yt_dlp_mso_id: { type: string }
+                software_statement: { type: string }
+                clear_software_statement: { type: boolean }
+                home_zip_code: { type: string }
+      responses:
+        '200':
+          description: Updated account.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TVEAccount' }
+        '400': { description: Unsupported provider or auth backend. }
+
+  /api/settings/tve/status:
+    get:
+      tags: [TVE]
+      summary: Per-network TVE authorisation status
+      responses:
+        '200':
+          description: Network status list.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  networks:
+                    type: array
+                    items: { type: object, additionalProperties: true }
+
+  /api/settings/tve/reset:
+    post:
+      tags: [TVE]
+      summary: Wipe all TVE credentials and cached sign-ins
+      description: |
+        Deletes the account row, clears each TVE source's config, removes
+        credential-tied cache rows and Redis sign-in keys, and deletes the
+        on-disk browser profile holding provider SSO cookies. The home ZIP code
+        is preserved, being a preference rather than a credential.
+
+        Deliberately narrower than a full wipe — non-auth scraper caches are left
+        alone.
+      responses:
+        '200':
+          description: Reset result.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  sources_reset: { type: integer }
+                  browser_profile_removed: { type: boolean }
+
+  /api/settings/tve/cox/test:
+    post:
+      tags: [TVE]
+      summary: Verify TVE credentials against Adobe Pass
+      responses:
+        '200':
+          description: Authorised.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean, const: true }
+                  account: { $ref: '#/components/schemas/TVEAccount' }
+                  result: { type: object, additionalProperties: true }
+        '400': { description: Username and password are required. }
+        '502':
+          description: Authorisation failed.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean, const: false }
+                  error: { type: string }
+                  account: { $ref: '#/components/schemas/TVEAccount' }
+
+  /api/settings/tve/foxone/signin:
+    post:
+      tags: [TVE]
+      summary: Sign in to FOX One
+      description: |
+        FOX One authenticates through a scripted provider OAuth flow rather than
+        Adobe Pass, so this is a plain synchronous request with no browser. Always
+        performs a live login rather than reusing a cached token.
+      responses:
+        '200':
+          description: Signed in.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean, const: true }
+        '400': { description: Provider username and password are required. }
+        '502':
+          description: Sign-in failed.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean, const: false }
+                  error: { type: string }
+
+  /api/settings/tve/browser-login/requestors:
+    get:
+      tags: [TVE]
+      summary: List networks available for interactive sign-in
+      responses:
+        '200':
+          description: Requestor choices.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  requestors:
+                    type: array
+                    items: { type: object, additionalProperties: true }
+
+  /api/settings/tve/browser-login/start:
+    post:
+      tags: [TVE]
+      summary: Start an interactive MVPD sign-in
+      description: |
+        Opens the provider's real login page in an anti-detect browser inside the
+        container and polls Adobe Pass for the resulting token. Drive it through
+        `/state` and `/input`.
+
+        The `cascade` ("sign in to all") option is currently rejected — the shared
+        browser page has been observed dying mid-sweep and silently skipping
+        networks while still reporting success.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [requestor_id]
+              properties:
+                requestor_id: { type: string }
+                cascade: { type: boolean }
+      responses:
+        '200': { $ref: '#/components/responses/LoginStarted' }
+        '400': { description: TVE account not enabled, missing/unknown requestor, or cascade requested. }
+
+  /api/settings/tve/browser-login/state:
+    get:
+      tags: [TVE]
+      summary: Poll the MVPD sign-in session
+      responses:
+        '200': { $ref: '#/components/responses/BrowserLoginState' }
+
+  /api/settings/tve/browser-login/input:
+    post:
+      tags: [TVE]
+      summary: Forward a click or keystroke to the MVPD sign-in browser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BrowserInput' }
+      responses:
+        '200': { $ref: '#/components/responses/OK' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /api/settings/tve/browser-login/stop:
+    post:
+      tags: [TVE]
+      summary: Stop the MVPD sign-in session
+      responses:
+        '200': { $ref: '#/components/responses/Stopping' }
+
+  /api/settings/tve/amcn/browser-login/start:
+    post:
+      tags: [TVE]
+      summary: Start AMC Networks TVE sign-in
+      description: Shares the legacy sign-in session; `/state`, `/input` and `/stop` under this prefix are aliases of the generic routes.
+      responses:
+        '200': { $ref: '#/components/responses/LoginStarted' }
+        '400': { description: TVE account not enabled. }
+
+  /api/settings/tve/amcn/browser-login/state:
+    get:
+      tags: [TVE]
+      summary: Poll AMC Networks sign-in (alias)
+      responses:
+        '200': { $ref: '#/components/responses/BrowserLoginState' }
+
+  /api/settings/tve/amcn/browser-login/input:
+    post:
+      tags: [TVE]
+      summary: Forward input to AMC Networks sign-in (alias)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BrowserInput' }
+      responses:
+        '200': { $ref: '#/components/responses/OK' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /api/settings/tve/amcn/browser-login/stop:
+    post:
+      tags: [TVE]
+      summary: Stop AMC Networks sign-in (alias)
+      responses:
+        '200': { $ref: '#/components/responses/Stopping' }
+
+  /api/settings/tve/discovery/browser-login/start:
+    post:
+      tags: [TVE]
+      summary: Start Discovery TVE sign-in
+      responses:
+        '200': { $ref: '#/components/responses/LoginStarted' }
+        '400': { description: TVE account not enabled. }
+
+  /api/settings/tve/discovery/browser-login/state:
+    get:
+      tags: [TVE]
+      summary: Poll Discovery sign-in (alias)
+      responses:
+        '200': { $ref: '#/components/responses/BrowserLoginState' }
+
+  /api/settings/tve/discovery/browser-login/input:
+    post:
+      tags: [TVE]
+      summary: Forward input to Discovery sign-in (alias)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BrowserInput' }
+      responses:
+        '200': { $ref: '#/components/responses/OK' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /api/settings/tve/discovery/browser-login/stop:
+    post:
+      tags: [TVE]
+      summary: Stop Discovery sign-in (alias)
+      responses:
+        '200': { $ref: '#/components/responses/Stopping' }
+
+  /api/settings/tve/nbc/browser-login/start:
+    post:
+      tags: [TVE]
+      summary: Start NBC TVE sign-in
+      description: NBC uses a newer Adobe Pass generation, so it has its own session namespace.
+      responses:
+        '200': { $ref: '#/components/responses/LoginStarted' }
+        '400': { description: TVE account not enabled. }
+
+  /api/settings/tve/nbc/browser-login/state:
+    get:
+      tags: [TVE]
+      summary: Poll NBC sign-in
+      responses:
+        '200': { $ref: '#/components/responses/BrowserLoginState' }
+
+  /api/settings/tve/nbc/browser-login/input:
+    post:
+      tags: [TVE]
+      summary: Forward input to NBC sign-in
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BrowserInput' }
+      responses:
+        '200': { $ref: '#/components/responses/OK' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /api/settings/tve/nbc/browser-login/stop:
+    post:
+      tags: [TVE]
+      summary: Stop NBC sign-in
+      responses:
+        '200': { $ref: '#/components/responses/Stopping' }
+
+  /api/settings/tve/fox/browser-login/start:
+    post:
+      tags: [TVE]
+      summary: Start FOX Sports TVE sign-in
+      responses:
+        '200': { $ref: '#/components/responses/LoginStarted' }
+        '400': { description: TVE account not enabled. }
+
+  /api/settings/tve/fox/browser-login/state:
+    get:
+      tags: [TVE]
+      summary: Poll FOX Sports sign-in
+      responses:
+        '200': { $ref: '#/components/responses/BrowserLoginState' }
+
+  /api/settings/tve/fox/browser-login/input:
+    post:
+      tags: [TVE]
+      summary: Forward input to FOX Sports sign-in
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BrowserInput' }
+      responses:
+        '200': { $ref: '#/components/responses/OK' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+
+  /api/settings/tve/fox/browser-login/stop:
+    post:
+      tags: [TVE]
+      summary: Stop FOX Sports sign-in
+      responses:
+        '200': { $ref: '#/components/responses/Stopping' }
+
+  # ─────────────────────────────── System ──────────────────────────────
+
+  /api/logs:
+    get:
+      tags: [System]
+      summary: Tail the application log
+      description: |
+        Returns the last `n` lines of the container's application log. The log
+        contains request details, scraper diagnostics, and error traces.
+      parameters:
+        - name: n
+          in: query
+          description: Line count. Not bounded by the handler.
+          schema: { type: integer, default: 2500 }
+      responses:
+        '200':
+          description: Log lines, oldest first.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  lines:
+                    type: array
+                    items: { type: string }
+
+  /api/stats:
+    get:
+      tags: [System]
+      summary: Channel counts and category breakdown
+      description: Filter parameters may be repeated. The category breakdown is global and is not affected by the filters.
+      parameters:
+        - name: source
+          in: query
+          schema: { type: array, items: { type: string } }
+          explode: true
+        - name: category
+          in: query
+          schema: { type: array, items: { type: string } }
+          explode: true
+        - name: language
+          in: query
+          schema: { type: array, items: { type: string } }
+          explode: true
+        - name: country
+          in: query
+          schema: { type: array, items: { type: string } }
+          explode: true
+        - name: gracenote
+          in: query
+          schema: { type: string, enum: [has, missing] }
+      responses:
+        '200':
+          description: Counts.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total_channels: { type: integer }
+                  total_sources: { type: integer }
+                  categories:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name: { type: string }
+                        count: { type: integer }
+
+  /api/system-stats:
+    get:
+      tags: [System]
+      summary: Runtime, database, cache, and process statistics
+      responses:
+        '200':
+          description: System statistics.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SystemStats' }
+
+  /api/localnow/cities:
+    get:
+      tags: [System]
+      summary: Search Local Now markets by name
+      description: Requires at least two characters; shorter queries return an empty list.
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema: { type: string, minLength: 2 }
+      responses:
+        '200':
+          description: Matching markets.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    label: { type: string }
+                    dma: { type: string }
+                    market: { type: string }
+        '500': { $ref: '#/components/responses/Error' }
+
+components:
+
+  parameters:
+
+    SourceId:
+      name: source_id
+      in: path
+      required: true
+      description: Internal numeric source ID.
+      schema: { type: integer }
+
+    SourceName:
+      name: source_name
+      in: path
+      required: true
+      description: Scraper source name, e.g. `roku`, `pluto`, `custom`.
+      schema: { type: string }
+
+    ChannelId:
+      name: channel_id
+      in: path
+      required: true
+      description: Internal numeric channel ID.
+      schema: { type: integer }
+
+    ChannelSourceId:
+      name: channel_id
+      in: path
+      required: true
+      description: The source's own channel identifier, as it appears in playlist URLs.
+      schema: { type: string }
+
+    FeedId:
+      name: feed_id
+      in: path
+      required: true
+      schema: { type: integer }
+
+    FeedSlug:
+      name: slug
+      in: path
+      required: true
+      description: Feed slug. Only enabled feeds are served.
+      schema: { type: string }
+
+    ImageType:
+      name: img_type
+      in: path
+      required: true
+      schema: { type: string, enum: [logo, poster] }
+
+    ProxyUrl:
+      name: url
+      in: query
+      required: true
+      description: Absolute upstream URL to fetch.
+      schema: { type: string, format: uri }
+
+    ProxyHeaders:
+      name: h
+      in: query
+      description: |
+        JSON object of extra request headers to send upstream. Keys beginning
+        with an underscore are dropped. A `User-Agent` is supplied if absent.
+      schema: { type: string, default: '{}' }
+
+    FilterSource:
+      name: source
+      in: query
+      description: Restrict to these source names. Repeatable.
+      schema: { type: array, items: { type: string } }
+      explode: true
+
+    FilterCategory:
+      name: category
+      in: query
+      description: Restrict to these categories. Repeatable.
+      schema: { type: array, items: { type: string } }
+      explode: true
+
+    FilterLanguage:
+      name: language
+      in: query
+      description: Restrict to one language code.
+      schema: { type: string }
+
+    FilterSearch:
+      name: search
+      in: query
+      description: Substring match on channel name.
+      schema: { type: string }
+
+  responses:
+
+    M3U:
+      description: M3U playlist.
+      content:
+        application/x-mpegurl:
+          schema: { type: string }
+
+    HLSManifest:
+      description: HLS manifest.
+      content:
+        application/vnd.apple.mpegurl:
+          schema: { type: string }
+
+    DASHManifest:
+      description: DASH MPD manifest.
+      content:
+        application/dash+xml:
+          schema: { type: string }
+
+    XMLTV:
+      description: XMLTV guide document.
+      content:
+        application/xml:
+          schema: { type: string }
+
+    MediaSegment:
+      description: Streamed media bytes.
+      content:
+        video/MP2T:
+          schema: { type: string, format: binary }
+        application/octet-stream:
+          schema: { type: string, format: binary }
+
+    ArtifactWarming:
+      description: The artifact is still being built by the background worker.
+      headers:
+        Retry-After:
+          schema: { type: integer, default: 15 }
+      content:
+        text/plain:
+          schema: { type: string }
+
+    StreamUnavailable:
+      description: |
+        Transient upstream failure — timeout, CDN error, expired token, or an
+        active back-off after the source rate-limited us. Retry after the
+        indicated delay rather than immediately.
+      headers:
+        Retry-After:
+          schema: { type: integer, default: 30 }
+      content:
+        text/plain:
+          schema: { type: string, example: "Stream temporarily unavailable.\n" }
+
+    PrismCastNotConfigured:
+      description: No PrismCast server URL is set in settings.
+      content:
+        text/plain:
+          schema: { type: string }
+
+    NotFoundHTML:
+      description: Not found. Flask's default HTML error page, not JSON.
+      content:
+        text/html:
+          schema: { type: string }
+
+    NotFoundJSON:
+      description: Not found.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+
+    BadRequest:
+      description: Invalid request.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+
+    ValidationError:
+      description: A field failed validation.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+
+    Error:
+      description: Error.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+
+    DatabaseBusy:
+      description: SQLite is locked by a running scrape. Retry shortly.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+
+    OK:
+      description: Accepted.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              status: { type: string, const: ok }
+
+    OKStatus:
+      description: Completed.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              status: { type: string, const: ok }
+
+    Queued:
+      description: Work queued.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              status: { type: string, const: queued }
+
+    QueuedSource:
+      description: Job queued for a source.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              status: { type: string, const: queued }
+              source: { type: string }
+
+    Deleted:
+      description: Deleted.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              status: { type: string, const: deleted }
+              id: { type: integer }
+
+    Stopping:
+      description: Stopping.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              status: { type: string, const: stopping }
+
+    LoginStarted:
+      description: Session started, or one was already running.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              status: { type: string, enum: [started, already_running] }
+
+    BrowserLoginState:
+      description: |
+        Current sign-in session state. `screenshot` is a base64-encoded PNG of the
+        browser viewport, present while a session is live.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              state: { type: string, example: idle }
+              screenshot: { type: string, contentEncoding: base64 }
+              hint: { type: string }
+            additionalProperties: true
+
+    FeedMembershipChange:
+      description: Membership updated.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              status: { type: string, enum: [pinned, unpinned, excluded, unexcluded] }
+              feed_id: { type: integer }
+              channel_id: { type: integer }
+
+    DVRPushResult:
+      description: Sources registered in Channels DVR.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              ok: { type: boolean, const: true }
+              sources_added:
+                type: array
+                items: { type: string }
+
+    DVRSizeWarning:
+      description: |
+        The playlist exceeds the size Channels DVR handles comfortably. Re-send
+        with `force: true` to proceed anyway.
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error: { type: string }
+              requires_confirm: { type: boolean, const: true }
+              channel_count: { type: integer }
+              recommended_max: { type: integer, const: 750 }
+
+  schemas:
+
+    Error:
+      type: object
+      properties:
+        error: { type: string }
+
+    OverlapError:
+      type: object
+      description: Returned when a change would make two channels share a number in some output.
+      properties:
+        error: { type: string }
+        warnings:
+          type: array
+          items: { type: string }
+
+    Source:
+      type: object
+      properties:
+        id: { type: integer }
+        name: { type: string, description: Stable internal identifier, e.g. `roku`. }
+        display_name: { type: string }
+        scrape_interval: { type: [integer, 'null'], description: Minutes. 0 or null means never auto-scraped. }
+        scrape_cron: { type: [string, 'null'] }
+        is_enabled: { type: boolean }
+        last_scraped_at: { type: [string, 'null'], format: date-time }
+        last_channel_fetch_at: { type: [string, 'null'], format: date-time }
+        last_epg_success_at: { type: [string, 'null'], format: date-time }
+        last_audited_at: { type: [string, 'null'], format: date-time }
+        last_error: { type: [string, 'null'] }
+        channel_count: { type: integer, description: Active channels. }
+        drm_bridge_count: { type: integer }
+        chnum_start: { type: [integer, 'null'] }
+        epg_only: { type: boolean, description: Source supplies guide data only, no playable streams. }
+        new_channel_policy: { type: string, enum: [inherit, enabled, review] }
+
+    Channel:
+      type: object
+      properties:
+        id: { type: integer }
+        source_id: { type: integer }
+        source_name: { type: [string, 'null'] }
+        name: { type: string }
+        slug: { type: [string, 'null'] }
+        logo_url: { type: [string, 'null'] }
+        logo_display_url: { type: [string, 'null'], description: Local cached-proxy path. }
+        logo_url_pinned: { type: boolean }
+        stream_url: { type: [string, 'null'], description: May be a source-specific scheme such as `roku://…`. }
+        stream_type: { type: [string, 'null'], example: hls }
+        category: { type: [string, 'null'] }
+        category_override: { type: [string, 'null'] }
+        language: { type: [string, 'null'] }
+        language_override: { type: [string, 'null'] }
+        country: { type: [string, 'null'] }
+        number: { type: [integer, 'null'] }
+        number_pinned: { type: boolean }
+        gracenote_id: { type: [string, 'null'] }
+        gracenote_locked: { type: boolean }
+        gracenote_mode: { type: string, enum: [auto, manual, off] }
+        guide_key: { type: [string, 'null'] }
+        description: { type: [string, 'null'] }
+        user_note: { type: [string, 'null'] }
+        is_active: { type: boolean, description: Seen in the most recent scrapes. }
+        is_enabled: { type: boolean, description: Included in outputs. }
+        review_state: { type: string, enum: [pending, approved] }
+        first_seen_at: { type: [string, 'null'], format: date-time }
+        last_seen_at: { type: [string, 'null'], format: date-time }
+        identity_changed_at: { type: [string, 'null'], format: date-time }
+        previous_name: { type: [string, 'null'] }
+        previous_gracenote_id: { type: [string, 'null'] }
+        scrape_pinned: { type: boolean, description: Never auto-removed for being missing. }
+        disable_reason: { type: [string, 'null'], examples: [Dead, VOD, DRM, NotAuthorized] }
+        requires_drm_bridge: { type: boolean }
+        is_duplicate: { type: boolean }
+        missed_scrapes: { type: integer }
+        content_swap_count: { type: integer }
+        custom_headers: { type: object, additionalProperties: { type: string } }
+        proxy_segments: { type: boolean }
+        page_url: { type: [string, 'null'] }
+        redetect_on_play: { type: boolean }
+        guide_block_minutes: { type: [integer, 'null'] }
+      description: |
+        Note: `Channel.to_dict()` does **not** include `source_channel_id` or
+        `stream_info`, so neither appears in `/api/channels` responses despite
+        both existing on the model. To obtain the source channel ID — needed to
+        construct a `/play/{source}/{id}.m3u8` URL — use
+        `GET /api/channels/{id}/preview`, which returns it along with a
+        ready-made `play_url`. `stream_info` is surfaced by
+        `/api/channels/{id}/duplicates`.
+
+    ChannelFilters:
+      type: object
+      description: |
+        The filter vocabulary shared by the admin channel list and the bulk
+        endpoints. Omitted keys mean "no filter on this dimension".
+      properties:
+        channel_ids: { type: array, items: { type: integer } }
+        feed: { type: string, description: Feed slug. }
+        source: { type: string }
+        category: { type: string }
+        language: { type: string }
+        search: { type: string }
+        country: { type: string }
+        drm: { type: string, enum: ['0', '1', bridge, dead, vod] }
+        enabled: { type: string, enum: ['0', '1', enabled, disabled] }
+        review: { type: string, enum: [pending] }
+        presence: { type: string, enum: [inactive, enabled_inactive, missed, pinned, active] }
+        gracenote: { type: string, enum: ['0', '1', has_id, missing_id] }
+        gracenote_mode: { type: string, enum: [auto, manual, off] }
+        featured: { type: string, enum: ['1'] }
+        new: { type: string, enum: ['1', '3', '7', '14'], description: Created within this many days. }
+        epg: { type: string, enum: ['0', '1'], description: Has future programme data. }
+        resolution: { type: string, enum: ['4k', fhd, hd, sd, hevc, known] }
+        duplicates: { type: string, enum: ['1', unique] }
+
+    Feed:
+      type: object
+      properties:
+        id: { type: integer }
+        slug: { type: string }
+        name: { type: string }
+        description: { type: [string, 'null'] }
+        filters: { $ref: '#/components/schemas/FeedFilters' }
+        chnum_start: { type: [integer, 'null'] }
+        is_enabled: { type: boolean }
+        created_at: { type: [string, 'null'], format: date-time }
+        updated_at: { type: [string, 'null'], format: date-time }
+        m3u_url: { type: string }
+        epg_url: { type: string }
+        gracenote_url: { type: string }
+        native_m3u_url: { type: string }
+        native_epg_url: { type: string }
+
+    FeedFilters:
+      type: object
+      description: |
+        Feed membership definition. Supplying `channel_ids` overrides every other
+        filter — the feed becomes an explicit list.
+      properties:
+        channel_ids: { type: array, items: { type: integer } }
+        sources: { type: array, items: { type: string } }
+        categories: { type: array, items: { type: string } }
+        languages: { type: array, items: { type: string } }
+        countries: { type: array, items: { type: string } }
+        gracenote: { type: string, enum: [has, missing] }
+        pinned_channel_ids:
+          type: array
+          items: { type: integer }
+          description: Always included, regardless of the other filters.
+        excluded_channel_ids:
+          type: array
+          items: { type: integer }
+          description: Always excluded, unless also pinned.
+        max_channels: { type: integer, minimum: 1 }
+
+    ConfigField:
+      type: object
+      description: One field in a scraper's configuration schema.
+      properties:
+        key: { type: string }
+        label: { type: string }
+        type: { type: string }
+        secret: { type: boolean, description: Value is masked as `••••••••` on read. }
+        required: { type: boolean }
+        default: {}
+        help: { type: string }
+      additionalProperties: true
+
+    CustomChannelInput:
+      type: object
+      properties:
+        name: { type: string }
+        stream_url: { type: string, format: uri }
+        description: { type: string }
+        logo_url: { type: string, format: uri }
+        category: { type: string }
+        language: { type: string, default: en }
+        stream_type:
+          type: string
+          description: Inferred from the URL when omitted.
+          examples: [hls, dash, mp4]
+        custom_headers:
+          type: object
+          additionalProperties: { type: string }
+          description: Sent upstream when fetching manifests and segments.
+        proxy_segments:
+          type: boolean
+          description: Route segments through the server so custom headers are applied.
+        page_url:
+          type: string
+          description: Player page to re-detect from. Defaults to stream_url when redetect_on_play is set.
+        redetect_on_play:
+          type: boolean
+          description: Re-run stream detection on each play, for sources with expiring URLs.
+        guide_block_minutes: { type: [integer, 'null'] }
+      required: [name, stream_url]
+
+    DetectResult:
+      type: object
+      properties:
+        success: { type: boolean }
+        stream_url: { type: [string, 'null'] }
+        stream_type: { type: [string, 'null'] }
+        headers:
+          type: object
+          additionalProperties: { type: string }
+          description: Headers required to play the stream — store these as the channel's custom_headers.
+        needs_proxy: { type: boolean }
+        error: { type: [string, 'null'] }
+        resolver: { type: [string, 'null'], description: Which strategy resolved it, e.g. yt-dlp. }
+        is_page_url: { type: boolean }
+        is_youtube: { type: boolean }
+        elapsed_ms: { type: integer }
+
+    ChannelPreview:
+      type: object
+      properties:
+        channel:
+          type: object
+          properties:
+            id: { type: integer }
+            name: { type: string }
+            source_name: { type: [string, 'null'] }
+            source_display_name: { type: [string, 'null'] }
+            source_channel_id: { type: string }
+            stream_type: { type: [string, 'null'] }
+            playback_mode: { type: string, enum: [hls, dash, native, unsupported] }
+            category: { type: [string, 'null'] }
+            language: { type: [string, 'null'] }
+            country: { type: [string, 'null'] }
+            tags: { type: array, items: { type: string } }
+            logo_url: { type: [string, 'null'] }
+            logo_display_url: { type: [string, 'null'] }
+            disable_reason: { type: [string, 'null'] }
+            is_active: { type: boolean }
+            is_enabled: { type: boolean }
+            description: { type: [string, 'null'] }
+            license_url: { type: [string, 'null'] }
+        current_program: { $ref: '#/components/schemas/Program' }
+        next_program: { $ref: '#/components/schemas/Program' }
+        play_url: { type: [string, 'null'], description: Direct playback path for IPTV clients. }
+        preview_url: { type: [string, 'null'], description: Browser-safe path, often a same-origin proxy. }
+        needs_detection: { type: boolean }
+        epg_programs: { type: integer, description: Count of future programmes. }
+        epg_hours: { type: number, description: Hours of guide data ahead of now. }
+        feed_memberships:
+          type: array
+          items:
+            type: object
+            properties:
+              feed_id: { type: integer }
+              feed_name: { type: string }
+              feed_slug: { type: string }
+              status: { type: string, enum: [pinned, filtered] }
+              feed_channel_number: { type: [integer, 'null'] }
+              output: { type: string, enum: [gracenote, xmltv] }
+
+    Program:
+      type: [object, 'null']
+      properties:
+        title: { type: string }
+        description: { type: [string, 'null'] }
+        start_time: { type: string, format: date-time }
+        end_time: { type: string, format: date-time }
+        category: { type: [string, 'null'] }
+        episode_title: { type: [string, 'null'] }
+        season: { type: [integer, 'null'] }
+        episode: { type: [integer, 'null'] }
+        original_air_date: { type: [string, 'null'], format: date }
+        poster_url: { type: [string, 'null'] }
+
+    HLSVariant:
+      type: object
+      properties:
+        bandwidth: { type: integer }
+        resolution: { type: string, example: 1920x1080 }
+        resolution_est: { type: boolean, description: Estimated from bitrate because the manifest declared none. }
+        codecs: { type: string, example: H.264+AAC }
+        fps: { type: number }
+
+    DuplicateEntry:
+      type: object
+      properties:
+        id: { type: integer }
+        name: { type: string }
+        source: { type: string }
+        logo_url: { type: [string, 'null'] }
+        logo_display_url: { type: [string, 'null'] }
+        is_duplicate: { type: boolean }
+        is_enabled: { type: boolean }
+        is_active: { type: boolean }
+        scrape_pinned: { type: boolean }
+        disable_reason: { type: [string, 'null'] }
+        missed_scrapes: { type: integer }
+        category: { type: [string, 'null'] }
+        gracenote_id: { type: [string, 'null'] }
+        gracenote_mode: { type: string }
+        program_count: { type: integer }
+        stream_info:
+          type: [object, 'null']
+          properties:
+            max_resolution: { type: [string, 'null'] }
+            max_height: { type: [integer, 'null'] }
+            video_codec: { type: [string, 'null'] }
+            has_4k: { type: boolean }
+            has_hd: { type: boolean }
+            resolution_estimated: { type: boolean }
+            drm: { type: boolean }
+
+    CommunityMapRow:
+      type: object
+      properties:
+        channel_id: { type: integer }
+        channel_name: { type: string }
+        source_name: { type: string }
+        category: { type: string }
+        community_tmsid: { type: string }
+        notes: { type: string }
+        current_id: { type: string }
+        gracenote_mode: { type: string }
+        already_applied: { type: boolean }
+        is_enabled: { type: boolean }
+
+    ContributionResult:
+      type: object
+      properties:
+        ok: { type: boolean }
+        submitted: { type: integer }
+        failed: { type: integer }
+        failed_names: { type: array, items: { type: string } }
+        message: { type: string }
+        rate_limited: { type: boolean }
+
+    PBSManualFeed:
+      type: object
+      properties:
+        station_id: { type: string }
+        profile: { type: string }
+        label: { type: string }
+        station_name: { type: string }
+
+    TVEAccount:
+      type: object
+      description: Safe projection of a TV-provider account. The password is never returned.
+      properties:
+        provider_id: { type: string }
+        display_name: { type: string }
+        username: { type: string, description: Returned in plaintext. }
+        password_configured: { type: boolean }
+        is_enabled: { type: boolean }
+        auth_backend: { type: string, enum: [native, yt_dlp] }
+        adobe_mso_id: { type: string }
+        yt_dlp_mso_id: { type: string }
+        selected_mso_id: { type: string }
+        selected_mso_name: { type: string }
+        home_zip_code: { type: string }
+        last_auth_status: { type: [string, 'null'] }
+        last_auth_message: { type: [string, 'null'] }
+        last_auth_at: { type: [string, 'null'], format: date-time }
+        configured: { type: boolean }
+
+    AppSettings:
+      type: object
+      properties:
+        channels_dvr_url: { type: [string, 'null'] }
+        public_base_url: { type: [string, 'null'] }
+        timezone_name: { type: [string, 'null'] }
+        auto_allow_new_channels: { type: boolean }
+        gracenote_auto_fill: { type: boolean }
+        dvr_epg_auto_refresh: { type: boolean }
+        image_proxy_enabled: { type: boolean }
+        m3u_rewrite_timestamps: { type: boolean }
+        gracenote_map_url: { type: string }
+        gracenote_contribution_url: { type: string }
+        prismcast_url: { type: string }
+        prismcast_inner_url: { type: string }
+        prismcast_max_height: { type: integer, enum: [0, 360, 480, 720, 1080] }
+        drm_bridge_enabled: { type: boolean }
+        channels_dvr_url_source: { type: string, enum: [db, env, unset] }
+        public_base_url_source: { type: string, enum: [db, env, unset] }
+        timezone_name_source: { type: string, enum: [db, system] }
+
+    SystemStats:
+      type: object
+      properties:
+        uptime_seconds: { type: integer }
+        db:
+          type: object
+          properties:
+            size_bytes: { type: integer }
+            channels_total: { type: integer }
+            channels_active: { type: integer }
+            channels_drm: { type: integer }
+            channels_dead: { type: integer }
+            channels_vod: { type: integer }
+            sources_enabled: { type: integer }
+            sources_total: { type: integer }
+            programs_total: { type: integer }
+        image_cache:
+          type: object
+          properties:
+            logos_count: { type: integer }
+            logos_bytes: { type: integer }
+            posters_count: { type: integer }
+            posters_bytes: { type: integer }
+            logo_expiry: { type: string }
+            poster_ttl_days: { type: integer }
+        processes:
+          type: object
+          properties:
+            web_worker_count: { type: integer }
+            web_worker_rss_avg_bytes: { type: [integer, 'null'] }
+            background_worker_count: { type: integer }
+            background_worker_rss_avg_bytes: { type: [integer, 'null'] }
+        cpu:
+          type: object
+          properties:
+            loadavg: { type: [array, 'null'], items: { type: number } }
+            cpu_count: { type: [integer, 'null'] }
+            process_cpu_seconds: { type: [number, 'null'] }
+        memory:
+          type: object
+          properties:
+            container_bytes: { type: [integer, 'null'] }
+            container_limit_bytes: { type: [integer, 'null'] }
+            container_percent: { type: [number, 'null'] }
+            container_anon_bytes: { type: [integer, 'null'] }
+            container_file_cache_bytes: { type: [integer, 'null'] }
+            process_rss_bytes: { type: [integer, 'null'] }
+            process_vmsize_bytes: { type: [integer, 'null'] }
+            process_swap_bytes: { type: [integer, 'null'] }
+            host_mem_available_bytes: { type: [integer, 'null'] }
+            host_mem_total_bytes: { type: [integer, 'null'] }
+
+    BrowserInput:
+      type: object
+      description: A pointer or keyboard event forwarded to an interactive sign-in browser.
+      oneOf:
+        - type: object
+          required: [type, x, y]
+          properties:
+            type: { type: string, enum: [click, mousemove, mousedown, mouseup] }
+            x: { type: number }
+            y: { type: number }
+        - type: object
+          required: [type, key]
+          properties:
+            type: { type: string, const: key }
+            key: { type: string }
