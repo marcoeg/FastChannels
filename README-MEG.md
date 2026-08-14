@@ -541,17 +541,121 @@ python3 dev/news_origins.py --table | grep -i spokane
 
 ---
 
-## Repo hygiene
+## Repository
 
-`dev/` is in the project's `.gitignore`, so these scripts never show up in
-`git status` and survive `git pull` from upstream.
+This working copy lives in a **private** repo, independent of upstream:
 
-This file and any CSV/JSON you export are **not** ignored. Either keep them
-untracked, export to `/tmp` instead, or add to `.git/info/exclude`:
+| | |
+| --- | --- |
+| Repo | `github.com/marcoeg/fastchannels-private` (private) |
+| Fork? | **No** — created with `gh repo create` and pushed, so it is outside upstream's fork network and can be private. A GitHub fork cannot. |
+| History | 1,323 upstream commits + local additions, tags `v5.0.2`–`v5.0.4` |
+| Actions | **Disabled.** Upstream's `publish-image.yml` fires on every push to `main` and does a two-architecture QEMU build (Chromium, Camoufox, Node 24) — enough to consume a private repo's entire monthly Actions allowance in one run. |
+
+Re-enable Actions if you ever want your own image:
 
 ```bash
-printf 'README-MEG.md\nnews_origins.csv\nnews_origins.json\n' >> .git/info/exclude
+gh api -X PUT repos/marcoeg/fastchannels-private/actions/permissions -F enabled=true
 ```
 
-Related: `docs/openapi.yaml` and `docs/API.md` document the FastChannels HTTP
-API this script reads from.
+### Remotes
+
+```
+origin    git@github.com:marcoeg/fastchannels-private.git   your repo — push here
+upstream  git@github.com:kineticman/FastChannels.git        read-only reference
+```
+
+`main` tracks `origin/main`, so a bare `git push` / `git pull` always goes to
+your repo. You have `READ` on upstream, so a stray push there is rejected
+anyway; to make that failure immediate and obvious:
+
+```bash
+git remote set-url --push upstream DISABLED
+```
+
+### Taking upstream changes
+
+```bash
+git fetch upstream
+git merge upstream/main      # or: git rebase upstream/main
+git push
+```
+
+Expect conflicts in **`app/worker.py`** — the one tracked file this copy
+diverges on (the `FC_YTDLP_AUTO_UPGRADE` gate). To take upstream's version
+wholesale and re-apply the gate on top:
+
+```bash
+git checkout --theirs app/worker.py
+git apply -3 dev/ytdlp-gate.patch
+```
+
+### Local commits
+
+| Commit | Contents |
+| --- | --- |
+| `Add HTTP API documentation` | `docs/openapi.yaml`, `docs/API.md` |
+| `Add news-channel origin extractor` | `README-MEG.md`, `dev/news_origins.py`, `dev/markets.py` |
+| `Local hardening: …` | `docker-compose.override.yml`, `app/worker.py`, `dev/ytdlp-gate.patch` |
+
+The `app/worker.py` change is isolated in its own commit so it can be reverted
+or rebased independently of everything else.
+
+### What stays out of git
+
+`.git/info/exclude` (local-only, never committed, so it cannot conflict on a
+pull) covers:
+
+```
+news*.csv
+news*.json
+dev/__pycache__/
+```
+
+Those are derived exports — regenerable in about four minutes with
+`dev/news_origins.py --urls --resolve`. More to the point, **133 of the
+resolved CDN URLs carry provider session tokens**, which have no business in a
+repo even a private one.
+
+---
+
+## Local configuration
+
+`docker-compose.override.yml` is auto-loaded by `docker compose up` — no `-f`
+needed — and carries three deviations from upstream defaults:
+
+| Setting | Effect |
+| --- | --- |
+| `ports: !override ["127.0.0.1:5523:5523"]` | Loopback only. The `!override` tag is required: Compose *appends* to list fields by default, which would leave the original `0.0.0.0` mapping in place alongside it. |
+| `VERSION_CHECK_ENABLED: "0"` | Stops the 12-hourly GitHub releases poll. |
+| `FC_YTDLP_AUTO_UPGRADE: "0"` | Stops the weekly unattended `pip install` — **requires the `app/worker.py` gate**, which upstream does not have. |
+
+### Applying a config or code change
+
+The base `docker-compose.yml` has no bind mount for `app/`, so the container
+holds a `COPY` of the source. Editing `app/worker.py` on the host does nothing
+until you rebuild:
+
+```bash
+sudo docker compose up -d --build
+```
+
+`COPY . .` sits near the end of the Dockerfile, so only the last two layers
+re-run — the pip, Playwright and Camoufox layers stay cached. This is a fast
+rebuild, not a cold one.
+
+Verify the gate took effect:
+
+```bash
+sudo docker compose logs fastchannels | grep -i 'auto-upgrade'
+# [scheduler] yt-dlp auto-upgrade disabled (FC_YTDLP_AUTO_UPGRADE=0)
+```
+
+Absence of that line means the rebuild did not pick up the change.
+
+---
+
+## See also
+
+`docs/openapi.yaml` and `docs/API.md` document the FastChannels HTTP API these
+scripts read from — 182 paths, verified against the route handlers.
