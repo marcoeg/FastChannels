@@ -1,0 +1,557 @@
+# News Channel Origins
+
+Local additions to FastChannels — not part of the upstream project.
+
+`dev/news_origins.py` derives the **originating market and station** for every
+news channel in the lineup: which city and state a local news channel actually
+broadcasts from, and its call sign.
+
+| | |
+| --- | --- |
+| **Scripts** | `dev/news_origins.py`, `dev/markets.py` |
+| **Requires** | Python 3.9+ (dict-union syntax), standard library only. No pip install. Tested on 3.12.3. |
+| **Server** | A running FastChannels instance (default `http://127.0.0.1:5523`) |
+| **Writes** | Read-only by default. **`--resolve` is not** — see [the warning](#upstream-cdn-urls). |
+| **Coverage** | 283 of 293 local news channels (97%) |
+
+---
+
+## Why this exists
+
+FastChannels stores no origin field. Grepping the models turns up nothing
+geographic beyond `country`, which is `"US"` for all 494 news channels, so
+`GET /api/channels?category=News` cannot answer "where does this channel come
+from" — it only tells you which *provider* carries it (roku, vizio, xumo …),
+which is a different question.
+
+The origin is present in the data, but only as prose:
+
+```json
+{
+  "name":        "12 News KWCH Wichita",
+  "description": "The latest breaking news and severe weather coverage for Wichita, Kansas viewing area.",
+  "guide_key":   "93KWCH",
+  "source_name": "vizio",
+  "country":     "US"
+}
+```
+
+Wichita and KWCH are right there — nothing parses them. This script does.
+
+---
+
+## Quick start
+
+```bash
+# Coverage report
+python3 dev/news_origins.py
+
+# Every resolved channel, one per line
+python3 dev/news_origins.py --table
+
+# Export
+python3 dev/news_origins.py --csv news_origins.csv --json news_origins.json
+
+# Origins plus playable URLs, pointed at a LAN host
+python3 dev/news_origins.py --urls --public-base http://192.168.50.17:5523 --csv news.csv
+```
+
+The server must be running. If it is bound somewhere other than loopback:
+
+```bash
+python3 dev/news_origins.py --base http://192.168.1.50:5523
+```
+
+---
+
+## Usage
+
+```
+python3 dev/news_origins.py [--base URL] [--table] [--unresolved]
+                            [--csv PATH] [--json PATH]
+                            [--urls] [--public-base URL]
+                            [--resolve] [--resolve-delay SEC]
+```
+
+| Flag | Effect |
+| --- | --- |
+| `--base URL` | Server base URL. Default `http://127.0.0.1:5523`. |
+| `--table` | Print every resolved channel: call sign, market, source, confidence, name. |
+| `--unresolved` | List only the local channels whose market could not be recovered. Use this when tuning the tables. |
+| `--csv PATH` | Write all 494 rows as CSV. |
+| `--json PATH` | Write all 494 rows as JSON. |
+| `--urls` | Attach the playable `/play/…` URL and `source_channel_id` to every channel. |
+| `--public-base URL` | Rewrite emitted URLs to this host instead of localhost. See [URLs](#urls). |
+| `--resolve` | Follow each `/play` URL to the **upstream CDN URL**. Slow, live, and **mutates server state** — read the warning first. |
+| `--resolve-delay SEC` | Pause between `--resolve` requests. Default `0.4`. |
+
+The coverage report always prints. `--table` and `--unresolved` add sections
+above it; the two export flags can be combined with anything.
+
+---
+
+## Examples
+
+### Coverage report
+
+```console
+$ python3 dev/news_origins.py
+
+==============================================================================
+494 news channels: 293 local, 201 national/international
+==============================================================================
+
+Market resolved for 283/293 local channels (97%)
+Call sign resolved for 150/293 (51%)
+
+--- confidence ---
+    150  high
+    102  medium
+     31  low
+     10  none
+
+--- rule that fired ---
+    102  gazetteer:name:market
+     75  callsign-table:text
+     75  callsign-table:guide_key
+     22  gazetteer:name:state
+     10  (none)
+      6  gazetteer:name:macro-region
+      2  gazetteer:desc:market
+      1  gazetteer:desc:state
+
+--- coverage by source (local channels only) ---
+  source            resolved  total      %
+  vizio                   87     88    99%
+  roku                    72     76    95%
+  xumo                    47     49    96%
+  stirr                   34     34   100%
+  tcl                     23     23   100%
+  tubi                     9     10    90%
+  plex                     9      9   100%
+  samsung                  1      3    33%
+  lg-channels              1      1   100%
+
+--- top markets ---
+   15  New York, NY
+   13  San Francisco Bay Area, CA
+   10  Chicago, IL
+    9  Los Angeles, CA
+    8  Atlanta, GA
+```
+
+### Per-channel listing
+
+```console
+$ python3 dev/news_origins.py --table
+
+call   market                       source       conf    name
+-------------------------------------------------------------------------------
+KSBW   Monterey–Salinas, CA         plex         high    Very Central Coast by KSBW
+KCRA   Sacramento, CA               plex         high    Very Sacramento by KCRA
+WAPA   San Juan, PR                 plex         high    WAPA+
+-      Philadelphia, PA             roku         medium  6ABC Philadelphia
+-      Statewide, NC                roku         low     ABC11 North Carolina
+-      Houston, TX                  roku         medium  ABC13 Houston
+-      San Francisco Bay Area, CA   plex         medium  CBS News Bay Area
+```
+
+### What could not be resolved
+
+```console
+$ python3 dev/news_origins.py --unresolved
+
+--- 10 local channels with no recoverable market ---
+  [roku        ] ABC 20/20  (call sign: -)
+  [roku        ] ABC Localish  (call sign: -)
+  [roku        ] Channel 3 Eyewitness News  (call sign: -)
+  [roku        ] Kino  (call sign: -)
+  [samsung     ] Localish  (call sign: -)
+  [tubi        ] Localish  (call sign: -)
+  [vizio       ] Local Now  (call sign: -)
+  [xumo        ] Local Now  (call sign: -)
+  [xumo        ] Spectrum News+  (call sign: -)
+```
+
+These are national channels that the lineup has miscategorised as *Local News*
+— an upstream categorisation issue, not an extraction failure.
+
+### Useful one-liners
+
+```bash
+# How many channels per market, most first
+python3 dev/news_origins.py --json /tmp/o.json >/dev/null
+jq -r '.[] | select(.market) | .market' /tmp/o.json | sort | uniq -c | sort -rn
+
+# Every channel from one market, across all providers
+jq -r '.[] | select(.market=="Chicago, IL") | "\(.source)\t\(.name)"' /tmp/o.json
+
+# Only high-confidence rows (call-sign table hits)
+jq -r '.[] | select(.confidence=="high") | "\(.call_sign)\t\(.market)\t\(.name)"' /tmp/o.json
+
+# Which markets are covered by more than one provider
+jq -r '.[] | select(.market) | "\(.market)\t\(.source)"' /tmp/o.json \
+  | sort -u | cut -f1 | uniq -c | awk '$1>1'
+```
+
+---
+
+## URLs
+
+`--urls` adds a playable URL for each channel. It resolves **492 of 494**; the
+two misses are not feed-eligible (disabled, or no stream).
+
+```bash
+python3 dev/news_origins.py --urls --csv news.csv
+```
+
+The URLs cannot come from `/api/channels` — `Channel.to_dict()` omits
+`source_channel_id`, so there is nothing to build a `/play` path from. They are
+parsed out of the M3U outputs instead, which requires two fetches:
+
+| Playlist | News URLs |
+| --- | ---: |
+| `/m3u` | 430 |
+| `/m3u/gracenote` | 62 |
+| **total** | **492** |
+
+Channels carrying a Gracenote ID are partitioned into the second playlist and
+are absent from the first. Fetching only `/m3u` silently loses 62 channels. The
+`category` filter on these endpoints is an **exact** match, unlike
+`/api/channels`, which does a substring `LIKE` — so both `News` and
+`Local News` must be passed explicitly. The script handles all of this.
+
+### localhost vs a reachable host
+
+FastChannels emits `http://127.0.0.1:5523/play/…` whenever **Public Base URL**
+is unset. That is deliberate: `detected_base_url()` in `app/url.py` declines to
+guess inside Docker, because the container's own LAN detection returns an
+unreachable bridge address.
+
+```bash
+python3 dev/news_origins.py --urls --public-base http://192.168.50.17:5523
+```
+
+```
+http://192.168.50.17:5523/play/plex/6596546bfca6056ca69e3e3c.m3u8
+```
+
+**This only rewrites text.** If the container port is bound to loopback
+(`127.0.0.1:5523:5523` in `docker-compose.override.yml`) the rewritten URL is
+still unreachable from anywhere else — it will look correct and fail. To make
+LAN URLs actually work, both of these are required:
+
+1. Publish the port on the LAN interface — change the override to
+   `192.168.50.17:5523:5523` or plain `5523:5523`. Note the security trade-off:
+   the API has no authentication, so this exposes full admin to the network.
+2. Set **Public Base URL** in the app, so *every* output is correct — the M3U
+   and EPG a DVR consumes, not just this script:
+
+   ```bash
+   curl -s -X POST http://127.0.0.1:5523/api/settings \
+     -H 'Content-Type: application/json' \
+     -d '{"public_base_url":"http://192.168.50.17:5523"}'
+   ```
+
+   With that set, `--public-base` becomes unnecessary.
+
+### Upstream CDN URLs
+
+`--public-base` only changes *which interface of this machine* the URL points
+at. To get the provider's own URL — the actual remote origin — use `--resolve`,
+which follows the redirect and records `cdn_url`, `cdn_host` and `delivery`.
+
+```console
+$ python3 dev/news_origins.py --urls --resolve --csv news_remote.csv
+
+--- stream delivery (478 probed) ---
+   402  redirect  — direct provider URL
+    75  proxied   — served through FastChannels, no direct URL
+     1  error
+
+--- upstream hosts (175 distinct) ---
+    94  osm.sr.roku.com
+    42  dbrb49pjoymg4.cloudfront.net
+    35  epg.provider.plex.tv
+    23  live-manifest.production-public.tubi.io
+    21  cdn-uw2-prod.tsv2.amagi.tv
+    19  d4whmvwm0rdvi.cloudfront.net
+    12  dai.google.com
+```
+
+```
+xumo/99951223.m3u8  ->  https://dbrb49pjoymg4.cloudfront.net/10001/99951223/…
+```
+
+**Not every channel has a remote URL.** STIRR (46) and Samsung (29) are always
+`proxied`: STIRR issues IP-bound session tokens and Samsung emits relative
+playlist references, so both must be fetched server-side and the stream really
+does flow through FastChannels. For those, `cdn_url` is empty but `cdn_host`
+still names the upstream when it can be read out of the manifest body
+(Samsung → `pb-ycseayifkqre8.akamaized.net`).
+
+| `delivery` | Meaning | `cdn_url` |
+| --- | --- | --- |
+| `redirect` | Provider URL a client can fetch directly | set |
+| `proxied` | Streamed through FastChannels by design | empty; `cdn_host` may still name the upstream |
+| `error` | Nothing resolvable — reason in `cdn_host` | empty |
+
+> **`--resolve` changes server state. It is not a dry run.**
+>
+> It exercises the real `/play` path, which is what a player would hit — so the
+> server does everything it normally would, including its background health
+> check. On one 492-channel sweep that **auto-disabled 29 Roku channels** on
+> detecting DRM:
+>
+> ```
+> [play] DRM detected — auto-disabled channel CBS News Sacramento (roku/…)
+> ```
+>
+> This is correct application behaviour, not corruption — those channels are
+> genuinely DRM-protected and any real playback attempt would have done the
+> same. But your lineup shrinks, and a second sweep sees fewer channels than the
+> first. Reverse it per channel with
+> `PATCH /api/channels/{id}` `{"is_enabled": true}` (which clears a DRM
+> `disable_reason`), or globally by enabling the DRM bridge in Settings, which
+> recovers them onto the PrismCast path instead of disabling them.
+
+Other things to know:
+
+- **Slow and live.** One real request per channel — about four minutes for 492
+  at the default delay, every one hitting the provider.
+- **Rate limits.** Roku returns `403` under Cloudflare rate-limiting, and
+  FastChannels then applies a **source-wide five-minute cooldown** — every Roku
+  channel returns `503` until it expires. Raise `--resolve-delay` if
+  `cdn_host` starts showing `(503 unavailable …)`. Requests are naturally
+  interleaved across providers because `/api/channels` returns rows ordered by
+  name, so no one provider is hit in a solid block.
+- **Perishable URLs.** Most carry session tokens and some are bound to the IP
+  that resolved them. A resolved URL is a snapshot for analysis, not something
+  to hand to a player — use `play_url` for playback.
+
+---
+
+## How resolution works
+
+Every channel is first split by the app's own `category` field, rather than
+re-deriving the distinction:
+
+- **`Local News`** → a US market. 293 channels. Resolution is attempted.
+- **`News`** → a national or international network (BBC, Al Jazeera, Bloomberg,
+  DW). 201 channels. These have no market, and are reported as `scope: national`
+  with `confidence: n/a` rather than being force-fitted to a city.
+
+For local channels the rules run in precedence order, first hit wins:
+
+| # | Rule | Signal | Confidence |
+| --- | --- | --- | --- |
+| 0 | **Call-sign table** | Call sign from `guide_key` or the title, looked up in `CALLSIGN_MARKETS` | high |
+| A | STIRR description template | `"Live Asheville, NC news … from WLOS."` | high |
+| B | Name pattern | `"<CALLSIGN> <City> <ST>"` at end of title | high |
+| C | Description | `"…coverage for Wichita, Kansas viewing area."` | high |
+| D | Description | `"KMTV 3 News Now Omaha gives you…"` | medium |
+| E | Description | `"Channel 13 Las Vegas News KTNV…"` | medium |
+| F | **Name gazetteer** | A market name in the title — `FOX LOCAL Atlanta`, `CBS News Baltimore` | medium (market) / low (state) |
+| G | Description gazetteer | Same lookup against the description | low |
+
+Two rules do nearly all the work: the call-sign table (150) and the name
+gazetteer (102). The description rules exist because vizio and STIRR write
+templated copy that is more precise than their titles.
+
+**Granularity** is reported separately from confidence, because some feeds have
+no city by design:
+
+| `granularity` | Meaning | Example |
+| --- | --- | --- |
+| `market` | A real DMA | `Wichita, KS` |
+| `state` | Statewide feed | `CBS News Texas` → `Statewide, TX` |
+| `macro-region` | Multi-state brand | `Telemundo Noreste` → `Northeast` |
+| `none` | Unresolved, or national | — |
+
+### Why the call-sign table wins
+
+It is not just more precise — it is authoritative over the source data.
+Sinclair/STIRR describes WPDE as *"Myrtle Beach FL"*. Myrtle Beach is in South
+Carolina. The call sign resolves it correctly; the provider's own metadata does
+not.
+
+---
+
+## Output schema
+
+CSV and JSON carry the same 13 fields.
+
+| Field | Notes |
+| --- | --- |
+| `channel_id` | FastChannels internal ID — join key back to `/api/channels` |
+| `name` | Channel name as stored |
+| `source` | Provider carrying it (`roku`, `vizio`, …) — *not* the origin |
+| `category` | `Local News` or `News` |
+| `scope` | `local` or `national` |
+| `call_sign` | US broadcast call sign, or `null` |
+| `city` | Principal city of the DMA, or `Statewide` / a macro-region name |
+| `state` | Two-letter code, empty for macro-regions |
+| `confidence` | `high` / `medium` / `low` / `none` / `n/a` |
+| `granularity` | `market` / `state` / `macro-region` / `none` |
+| `rule` | Which rule fired — useful for auditing a specific row |
+| `evidence` | The text the match came from |
+| `market` | Convenience: `"City, ST"` |
+| `source_channel_id` | The source's own ID — the `{id}` in `/play/{source}/{id}.m3u8`. `--urls` only. |
+| `play_url` | Playable FastChannels URL. `--urls` only. |
+| `cdn_url` | Provider's own stream URL. Empty for `proxied` channels. `--resolve` only. |
+| `cdn_host` | Upstream hostname — set even when `proxied`, if readable. `(reason)` on failure. `--resolve` only. |
+| `delivery` | `redirect` / `proxied` / `error`. `--resolve` only. |
+
+```json
+{
+  "channel_id": 142,
+  "name": "News 12 New York",
+  "source": "lg-channels",
+  "category": "Local News",
+  "scope": "local",
+  "call_sign": null,
+  "city": "New York",
+  "state": "NY",
+  "confidence": "medium",
+  "granularity": "market",
+  "rule": "gazetteer:name:market",
+  "evidence": "News 12 New York",
+  "market": "New York, NY"
+}
+```
+
+Markets use the principal city of the DMA rather than the licence city, so
+sister stations group together. Combined markets keep both names
+(`Dallas–Fort Worth, TX`, `Minneapolis–St. Paul, MN`,
+`Grand Rapids–Kalamazoo, MI`).
+
+---
+
+## Accuracy
+
+Coverage is measured directly. Accuracy is measured by cross-validation: for the
+98 channels that carry **both** a call sign in the table **and** a market name in
+the title, the two independent signals are compared.
+
+```
+cross-checkable (call sign AND place in name): 98
+  agree    : 96
+  disagree : 2   ->  98% agreement
+```
+
+Both disagreements are the same market written two ways — `Grand Rapids–Kalamazoo`
+(table) versus `Grand Rapids` (title). No substantive errors.
+
+Reproduce it:
+
+```bash
+python3 - <<'PY'
+import json, sys, urllib.request
+sys.path.insert(0, 'dev')
+from markets import CALLSIGN_MARKETS
+from news_origins import lookup_place, extract
+
+url = "http://127.0.0.1:5523/api/channels?category=News&per_page=1000"
+ch = json.load(urllib.request.urlopen(url))["channels"]
+
+agree = disagree = 0
+for c in ch:
+    if c.get("category") != "Local News":
+        continue
+    o = extract(c)
+    if not o.call_sign or o.call_sign not in CALLSIGN_MARKETS:
+        continue
+    hit = lookup_place(c["name"] or "")
+    if not hit or hit[2] != "market":
+        continue
+    if (hit[0], hit[1]) == CALLSIGN_MARKETS[o.call_sign]:
+        agree += 1
+    else:
+        disagree += 1
+        print("MISMATCH", o.call_sign, c["name"], CALLSIGN_MARKETS[o.call_sign], hit[:2])
+print(f"{agree} agree, {disagree} disagree")
+PY
+```
+
+---
+
+## Known limits
+
+- **Extraction, not ground truth.** Names and descriptions are provider-written
+  marketing copy. The tables correct the common errors, but a channel whose
+  title names no place and whose call sign is absent cannot be resolved.
+- **31 rows are coarser than a market** — statewide feeds and Telemundo
+  macro-regions. These are reported at their true granularity rather than being
+  guessed into a city.
+- **10 rows are unresolved**, all national channels miscategorised upstream as
+  *Local News*.
+- **Not incremental.** Re-run after a scrape adds channels; there is no cache.
+- **US-only.** All current news channels are `country: US`. Non-US local news
+  would need a different gazetteer.
+- **Call signs are matched conservatively.** The regex requires uppercase
+  `K`/`W` plus 2–3 letters. A case-insensitive second pass runs *only* against
+  the known-call-sign table, so title-cased forms like `Wapa+` resolve without
+  matching ordinary words such as "west" or "kids".
+
+---
+
+## Maintaining the tables
+
+Both live in `dev/markets.py`. After a scrape adds channels, run
+`--unresolved` and extend whichever table is missing.
+
+**New call sign** — the highest-value addition, since it resolves every channel
+carrying it regardless of title:
+
+```python
+CALLSIGN_MARKETS = {
+    ...
+    "WXYZ": ("Detroit", "MI"),
+}
+```
+
+**New market name** in titles:
+
+```python
+CITY_MARKETS = {
+    ...
+    "spokane": ("Spokane", "WA"),
+}
+```
+
+**Regional brand** (`Bay Area`, `Tampa Bay`, `South Florida`):
+
+```python
+REGION_MARKETS = {
+    ...
+    "inland empire": ("Riverside–San Bernardino", "CA"),
+}
+```
+
+Lookup keys are lowercase and matched on word boundaries, longest first, with
+regions tried before cities before states — so `Kansas City` cannot be swallowed
+by `Kansas`, and `South Florida` beats `Florida`. Adding a short key that is a
+substring of a longer one is safe.
+
+Verify an addition did what you expected:
+
+```bash
+python3 dev/news_origins.py --table | grep -i spokane
+```
+
+---
+
+## Repo hygiene
+
+`dev/` is in the project's `.gitignore`, so these scripts never show up in
+`git status` and survive `git pull` from upstream.
+
+This file and any CSV/JSON you export are **not** ignored. Either keep them
+untracked, export to `/tmp` instead, or add to `.git/info/exclude`:
+
+```bash
+printf 'README-MEG.md\nnews_origins.csv\nnews_origins.json\n' >> .git/info/exclude
+```
+
+Related: `docs/openapi.yaml` and `docs/API.md` document the FastChannels HTTP
+API this script reads from.
