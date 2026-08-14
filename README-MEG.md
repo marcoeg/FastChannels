@@ -581,14 +581,23 @@ git merge upstream/main      # or: git rebase upstream/main
 git push
 ```
 
-Expect conflicts in **`app/worker.py`** — the one tracked file this copy
-diverges on (the `FC_YTDLP_AUTO_UPGRADE` gate). To take upstream's version
-wholesale and re-apply the gate on top:
+Two tracked files diverge from upstream, so expect conflicts there. Each has
+a saved patch under `dev/` (gitignored upstream, so it survives a pull):
+
+| File | Change | Patch |
+| --- | --- | --- |
+| `app/worker.py` | `FC_YTDLP_AUTO_UPGRADE` gate | `dev/ytdlp-gate.patch` |
+| `app/scrapers/xumo.py` | Follow one JSON-pointer hop when a channel resolves to a provider API instead of a manifest — fixes Shaka error 4015 on Local Now | `dev/xumo-indirection.patch` |
+
+To take upstream's version wholesale and re-apply on top:
 
 ```bash
-git checkout --theirs app/worker.py
-git apply -3 dev/ytdlp-gate.patch
+git checkout --theirs app/worker.py app/scrapers/xumo.py
+git apply -3 dev/ytdlp-gate.patch dev/xumo-indirection.patch
 ```
+
+The xumo fix is a genuine upstream bug rather than a local preference, so it
+is a reasonable candidate to contribute back.
 
 ### Local commits
 
