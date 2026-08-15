@@ -1,6 +1,6 @@
 ---
 name: fastchannels
-description: Query and control the FastChannels server running on this machine — a FAST-channel aggregator that scrapes free streaming services and publishes M3U playlists and XMLTV guide data. Use whenever the task involves live TV channels, streaming sources, EPG/guide data, M3U or XMLTV output, Channels DVR or Plex integration, or the FastChannels admin API at 127.0.0.1:5523. Covers listing and filtering channels, diagnosing playback failures, building feeds, Gracenote station mapping, and exporting channel data.
+description: Live TV channels, EPG and M3U via the FastChannels API.
 ---
 
 # FastChannels API
@@ -9,6 +9,21 @@ FastChannels scrapes free streaming services (Roku, Pluto, Xumo, Tubi, Samsung,
 Plex, STIRR, Vizio, TCL and others) and republishes them as M3U playlists and
 XMLTV guide data for Channels DVR, Plex, and generic IPTV clients. Everything
 its admin UI does, it does over the HTTP API described here.
+
+## When to use this
+
+Reach for this skill whenever a task involves:
+
+- live TV channels, channel lineups, or streaming sources
+- EPG or guide data — what is on now, guide gaps, stale programming
+- M3U playlists or XMLTV output
+- Channels DVR or Plex integration
+- anything naming FastChannels, or the API at `127.0.0.1:5523`
+
+What it lets you do: list and filter channels across every source, get a
+channel's playback URL, diagnose why a channel will not play, build and manage
+feeds (saved filters with their own numbering), map Gracenote station IDs,
+export channel data, and register outputs with Channels DVR.
 
 ## This install
 
@@ -209,16 +224,3 @@ with "Server is busy" or "Database busy". Retry.
 
 **Unmatched routes return Flask's HTML 404**, not JSON. Do not assume a JSON
 body on error.
-
-## Existing tooling in this repo
-
-Before writing new code, check `dev/` — these already solve common tasks and
-demonstrate the correct API usage patterns:
-
-- `dev/export_channels.py` — export every enabled channel in a category as CSV
-  or JSON with both playback endpoints. `--list-categories`, `--no-resolve` for
-  a strictly read-only run.
-- `dev/news_origins.py` — derive the originating market and call sign for local
-  news channels.
-
-Both are documented in `README-MEG.md`.
