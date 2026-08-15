@@ -118,6 +118,24 @@ getzep/graphiti.
 FalkorDB's Redis port is **not** published to the host, so ingestion goes over
 MCP HTTP at `127.0.0.1:8000`, not directly to the database.
 
+### Facts about the running deployment
+
+Read from `docker/compose.hermes.yml` and the live container, because two of
+them contradict what the config file suggests:
+
+| | |
+| --- | --- |
+| Memory graph | **`group_id=hermes`** — *not* `main`. `config-docker-falkordb.yaml` defaults to `main`, but compose overrides it with `GRAPHITI_GROUP_ID: ${GRAPHITI_GROUP_ID:-hermes}`. Any isolation check must compare against `hermes`. |
+| FalkorDB database | `hermes_graphiti` |
+| Concurrency | **`SEMAPHORE_LIMIT=2`** |
+| MCP client on this host | **absent** — `import mcp` fails, so ingestion needs the SDK in a virtualenv |
+
+`SEMAPHORE_LIMIT=2` is the one with teeth at full scale: 34,388 airings at
+roughly 200 ms each, two at a time, is about **three hours of wall clock per
+day of guide**. Fine for a single-channel test, but it is what decides whether
+hourly ingestion of the whole lineup is achievable at all — worth measuring at
+step 3 rather than discovering at step 4.
+
 ### `dev/epg_graph.py`
 
 - Fetch `/epg.xml`; keep airings starting in the next 24 hours.
@@ -139,7 +157,7 @@ hour is 34,388 × 24 = **825,312 writes/day**. Incremental is ~1,255/hour.
 34,388 edges/day accumulate. `--prune` removes edges past `invalid_at` via
 `delete_entity_edge`, holding the graph at roughly one day. `clear_graph`
 accepts a `group_id`, so `clear_graph(group_id="epg")` is a safe full reset
-that **cannot touch the `main` memory graph** — the isolation the "separate
+that **cannot touch the `hermes` memory graph** — the isolation the "separate
 graph" requirement was asking for.
 
 ### `dev/hermes/EPG-GRAPH-SKILL.md`
@@ -158,11 +176,61 @@ So cost and value are visible before committing to the whole thing:
 2. Ingest **one channel** for 24h. Does temporal search answer "what is on Al
    Jazeera at 21:00"?
 3. Ingest one **category** (News, 79 channels). Judge search quality at real
-   volume.
+   volume, and measure throughput against `SEMAPHORE_LIMIT`.
 4. Only then all 2,014 channels on an hourly timer.
 
 **Step 2 is where this proves itself**, at negligible cost, and is the point at
 which to decide whether to continue.
+
+### Step 1 in detail — patch `add_triplet`
+
+Two optional parameters on `add_triplet`, `valid_at` and `invalid_at`, parsed
+as ISO-8601 (naive treated as UTC, matching how `search_memory_facts`
+documents its own bounds) and passed into the `EntityEdge(...)` constructor.
+About a dozen lines, and a no-op when the arguments are omitted.
+
+`docker/Dockerfile.hermes` installs `graphiti-core` from PyPI (pinned
+`0.29.3`) but `COPY`s `main.py` and `src/` from the local checkout — so editing
+`src/graphiti_mcp_server.py` does take effect, and only the final layers
+rebuild:
+
+```bash
+cd /home/marco/opt/graphiti/mcp_server
+docker compose -f docker/compose.hermes.yml build graphiti-mcp
+docker compose -f docker/compose.hermes.yml up -d
+```
+
+**Risk:** this restarts the server Hermes uses for memory, so there is brief
+downtime. Graph data lives in the `falkordb_data` volume and is untouched.
+Reverting is a `git checkout` of the one file plus a rebuild. Keep the change
+as `dev/graphiti-valid-at.patch` so it survives a re-clone, the same convention
+as `dev/ytdlp-gate.patch`.
+
+### Step 2 in detail — Al Jazeera
+
+**Payload: 38 airings** in the next 24 hours, of 158 across the full five-day
+guide. Small enough to read by hand, real enough to mean something. Cost is 38
+embedding calls and no `gpt-5.5` — effectively free.
+
+What it has to demonstrate, ordered by how likely each is to fail:
+
+1. **Repeat airings stay distinct.** "News Live" airs repeatedly and must
+   produce **one** Programme node with **many** `AIRS` edges carrying different
+   `valid_at`. This is the schema's central claim. If `graphiti-core`
+   deduplicates edges by fact similarity, they collapse and the approach needs
+   rethinking — this is the cheapest possible place to find that out.
+2. `valid_at` survives the round trip at all — the entire point of step 1.
+3. Temporal filtering selects: a bracket over 21:00-22:00 returns that airing;
+   the same bracket shifted a day returns nothing.
+4. Isolation: `search_memory_facts(group_ids=["hermes"])` returns no EPG facts,
+   and Hermes' existing memories are unaffected.
+5. Rollback: `clear_graph(group_id="epg")` removes everything ingested and
+   leaves `hermes` answering as before.
+
+**What step 2 deliberately does not prove:** search quality at 2,014-channel
+volume — 38 facts retrieve trivially — and whether semantic search over
+boilerplate is useful at all. Al Jazeera is the *worst* case for that second
+question: 158 airings sharing 18 descriptions.
 
 ---
 
