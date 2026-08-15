@@ -1129,4 +1129,7 @@ Absence of that line means the rebuild did not pick up the change.
 - `docs/openapi.yaml` and `docs/API.md` — the FastChannels HTTP API these
   scripts read from. 184 paths, verified against the route handlers by
   `dev/check_api_docs.py`.
-- `.claude/skills/fastchannels/SKILL.md` — the same API described for an agent.
+- `dev/hermes/SKILL.md` — the same API described for the Hermes agent, with
+  `dev/hermes/PROMPT.md` as the onboarding message. Deliberately **not** under
+  `.claude/`, which Claude Code loads automatically — this skill is written for
+  a different agent and should not be picked up here.

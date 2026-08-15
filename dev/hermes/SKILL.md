@@ -1,6 +1,6 @@
 ---
 name: fastchannels
-description: Live TV, EPG, M3U playlists and recording via FastChannels.
+description: Live TV, EPG guide data and stream URLs via FastChannels.
 ---
 
 # FastChannels API
@@ -15,17 +15,17 @@ its admin UI does, it does over the HTTP API described here.
 Reach for this skill whenever a task involves:
 
 - live TV channels, channel lineups, or streaming sources
-- EPG or guide data — what is on now, guide gaps, stale programming
+- EPG or guide data — what is on now or later, guide gaps, stale programming
+- getting a playable stream URL for a channel
 - M3U playlists or XMLTV output
 - Channels DVR or Plex integration
-- recording a show — FastChannels cannot record; `record.py` on this machine
-  does, see [It does not record](#it-does-not-record--recordpy-does)
 - anything naming FastChannels, or the API at `127.0.0.1:5523`
 
 What it lets you do: list and filter channels across every source, get a
-channel's playback URL, diagnose why a channel will not play, build and manage
-feeds (saved filters with their own numbering), map Gracenote station IDs,
-export channel data, and register outputs with Channels DVR.
+channel's playback URL, read the full schedule for a channel, diagnose why a
+channel will not play, build and manage feeds (saved filters with their own
+numbering), map Gracenote station IDs, export channel data, and register
+outputs with Channels DVR.
 
 ## This install
 
@@ -51,41 +51,30 @@ Local configuration deviates from upstream defaults: the port is bound to
 `127.0.0.1` only, `VERSION_CHECK_ENABLED=0`, and `FC_YTDLP_AUTO_UPGRADE=0`
 (weekly unattended `pip install` from GitHub master is disabled).
 
-## It does not record — `record.py` does
+## The API is documented — read the spec first
 
-FastChannels has **no recording, timer, series-pass or storage model**, and
-nowhere to put a recording: `/data` holds the database, its backups, browser
-sign-in profiles and image/XML caches. The schema is `Channel` / `Program` /
-`Source` / `Feed` — guide metadata, not media. It is a scraper and publisher.
+FastChannels ships no API documentation. The spec in this repo was
+reverse-engineered from the route handlers and verified against the running
+server:
 
-**To record, use `record.py`** (repo root, symlink to `dev/record.py`). It
-captures with ffmpeg straight from FastChannels and schedules with systemd:
-
-```bash
-./record.py now       --channel "Al Jazeera" --duration 30m
-./record.py at        --channel "Al Jazeera" --start "18:00" --duration 1h
-./record.py programme --channel "Al Jazeera" --match "Newshour"   # from the guide
-./record.py epg       --channel "Al Jazeera" --json               # what is on
-./record.py list --json                                           # what is scheduled
-./record.py cancel <unit>
+```
+docs/openapi.yaml    184 paths, every parameter and response schema
+docs/API.md          the same thing as prose, with worked examples
 ```
 
-Recordings land in `~/news/recordings`, with a `.meta/<name>.json` sidecar
-carrying channel, URL, window, exit status and size — check that to find out
-whether something recorded and why not.
+**Read it before guessing at a route or a parameter.** It is the authority for
+the two things you will reach for most:
 
-Two things to tell a user rather than let them discover: `programme` pads 30s
-before and 120s after because guides drift, and HLS back-buffer means ffmpeg
-runs ahead of real time, so `-t` counts *stream* seconds and a recording can
-finish slightly before the programme ends.
+- **Guide data** — which endpoint returns a schedule, what each one filters on,
+  and the window it covers. `/epg.xml` takes `search`, `source`, `category` and
+  `language`; the per-channel routes differ in important ways. See
+  [Get EPG for a channel](#get-epg-for-a-channel).
+- **Stream endpoints** — how to build a playable URL for a channel, which
+  requires a field `/api/channels` does not return. See
+  [Get a channel's playback URL](#get-a-channels-playback-url).
 
-**No series rules.** Recurring recordings would need a daemon; schedule each
-airing instead.
-
-**Tvheadend was removed on 2026-08-15.** If you find a reference to it, or to
-`127.0.0.1:9981`, it is stale. It reached only 2,014 of the 2,220 channels — it
-ignores `tvc-guide-stationid`, so the whole `/m3u/gracenote` playlist,
-including *ABC News Live*, *60 Minutes* and *48 Hours*, was invisible to it.
+`dev/check_api_docs.py` verifies the spec against the route handlers, so drift
+is a bug rather than something to work around.
 
 ## Safety classification
 
