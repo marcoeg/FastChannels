@@ -1,0 +1,32 @@
+# Tvheadend, configured to record from FastChannels.
+#
+#   cd dev/tvheadend && sudo docker compose up -d
+#
+# network_mode: host is deliberate and load-bearing. FastChannels publishes on
+# 127.0.0.1:5523 only, and — more importantly — the URLs inside its M3U are
+# literal `http://127.0.0.1:5523/play/...` because Public Base URL is unset.
+# On the host network those resolve correctly from inside this container. On a
+# bridge network they would point at Tvheadend itself and every channel would
+# fail. The alternative is joining FastChannels' Docker network and setting
+# public_base_url to http://fastchannels:5523, which then breaks the links in
+# your browser — see README.md.
+#
+# Host networking also means Tvheadend binds 9981/9982 on all interfaces. It
+# has its own authentication, which the setup script configures.
+
+services:
+  tvheadend:
+    image: ghcr.io/tvheadend/tvheadend:latest
+    container_name: tvheadend
+    restart: unless-stopped
+    network_mode: host
+    # Run as your own uid so the bind-mounted config directory is writable and
+    # the XMLTV socket inside it is reachable from host scripts. Tvheadend
+    # needs no privileges here: IPTV only, no DVB hardware, ports are >1024.
+    user: "1000:1000"
+    command: ["-c", "/var/lib/tvheadend/config"]
+    volumes:
+      - ./config:/var/lib/tvheadend/config
+      - ./recordings:/recordings
+    environment:
+      TZ: America/Los_Angeles
