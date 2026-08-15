@@ -73,11 +73,33 @@ the socket — no image changes, no `tv_grab` protocol to implement:
 FastChannels /epg.xml  ──>  config/epggrab/xmltv.sock  ──>  Tvheadend
 ```
 
-Run it after each FastChannels scrape, or on a timer:
+### Keeping it fresh
+
+A systemd **user** service runs the loop. User units were the right fit here:
+lingering is already enabled for this account, so it starts at boot and
+survives logout without any `sudo`, and it matches the existing
+`hermes-gateway.service` pattern.
 
 ```bash
-python3 dev/tvheadend/push_epg.py --loop 6h
+cp dev/tvheadend/fastchannels-epg.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now fastchannels-epg.service
+
+systemctl --user status fastchannels-epg.service
+journalctl --user -u fastchannels-epg.service -f
 ```
+
+It pushes on start and every six hours. `Restart=always` with a 60s delay
+covers the ordinary failures — Tvheadend restarting, the container being
+rebuilt — since the socket only exists while Tvheadend is running.
+
+**No filesystem sandboxing in the unit, deliberately.** Connecting to a Unix
+socket needs write access to the socket file, which lives under `/home`. Every
+`ProtectSystem`/`ProtectHome` combination tried — including `full` with an
+explicit `ReadWritePaths` carve-out — failed with `[Errno 13] Permission
+denied` after 0 bytes, while the identical push worked by hand. Confirmed by
+stripping them, at which point it succeeded immediately. `NoNewPrivileges`
+creates no mount namespace and is kept.
 
 It streams rather than buffering (the full guide is tens of megabytes) and uses
 only the standard library, so `socat` is not needed — which matters, because

@@ -1,0 +1,38 @@
+[Unit]
+Description=Push FastChannels XMLTV into Tvheadend's EPG grabber
+Documentation=file:///home/marco/Development/FastChannels/dev/tvheadend/README.md
+# Both endpoints are local, but the container network has to be up first.
+After=network-online.target docker.service
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+WorkingDirectory=/home/marco/Development/FastChannels/dev/tvheadend
+ExecStart=/usr/bin/python3 /home/marco/Development/FastChannels/dev/tvheadend/push_epg.py --loop 6h
+# --loop pushes once per interval. The double-push a brand-new lineup needs is
+# handled by running push_epg.py by hand once; by the time this service takes
+# over, the grabber-to-channel links already exist.
+
+# The socket only exists while Tvheadend is running and the external XMLTV
+# grabber is enabled, so a push can fail for entirely ordinary reasons — a
+# restart, a rebuild. Keep retrying rather than giving up.
+Restart=always
+RestartSec=60
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=fastchannels-epg
+
+# Filesystem sandboxing is deliberately absent. Connecting to a Unix socket
+# needs write access to the socket file, which lives under /home; every
+# ProtectSystem/ProtectHome combination tried — including `full` with an
+# explicit ReadWritePaths carve-out — failed with "[Errno 13] Permission
+# denied" after 0 bytes, while the identical push works by hand. Verified by
+# stripping them: the push succeeds immediately. NoNewPrivileges creates no
+# mount namespace, so it is kept.
+NoNewPrivileges=true
+
+
+[Install]
+WantedBy=default.target
