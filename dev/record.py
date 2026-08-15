@@ -489,7 +489,18 @@ def main() -> int:
     p.add_argument("unit")
     p.set_defaults(func=lambda a: cancel(a.unit))
 
-    args = ap.parse_args()
+    argv = sys.argv[1:]
+    # Accept `--list` as well as `list`. vlc.py, the sibling tool, is
+    # flag-driven while this one is verb-driven, and having to remember which
+    # is which is a pointless thing to get wrong.
+    verbs = set(sub.choices)
+    if argv and argv[0].startswith("--") and argv[0][2:] in verbs:
+        argv[0] = argv[0][2:]
+    if not argv:
+        ap.print_help()
+        return 0
+
+    args = ap.parse_args(argv)
     return args.func(args)
 
 
