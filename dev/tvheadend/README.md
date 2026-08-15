@@ -123,6 +123,46 @@ and are dropped. Observed here as 2,014 channels linked and **0 events**, then
 91,796 events after an immediate re-push. `push_epg.py` now sends twice on a
 one-shot run; `--loop` and `--once` send once, since by then the links exist.
 
+## Playing streams in VLC
+
+VLC cannot open any Tvheadend URL as shipped, and the cause is authentication.
+`digest` is 1 — **Digest only** — and VLC leads with Basic:
+
+```
+no auth      -> 401
+basic auth   -> 401     <- VLC
+digest auth  -> 200
+```
+
+`http://user:pass@host/…` is also sent as Basic, so it 401s too.
+
+`dev/vlc.py` (symlinked at the repo root) uses Tvheadend's **persistent
+authentication code** instead: a per-user token in the password table, passed
+as `?auth=CODE`. No configuration change, no password on the wire, and the
+token is revocable by itself.
+
+```bash
+./vlc.py --via tvheadend --list-categories
+./vlc.py --via tvheadend --category "Local News" --play
+```
+
+It defaults to `--via fastchannels`, which needs no token at all and reaches
+the 206 Gracenote channels this network deliberately skips. Use
+`--via tvheadend` when a stream is flaky and you want Tvheadend to own the
+subscription and re-mux it, or when you are checking what the DVR itself sees.
+
+Enable the code under Configuration > Users > Passwords if it is ever reset:
+set *Persistent authentication* to Enable.
+
+**Use `/playlist/auth/…`, not `/playlist/…`.** The segment controls how entries
+*inside* the playlist are authenticated (`webui.c:92-97`). Plain `/playlist/…`
+returns bare entry URLs, so VLC opens the list and then 401s on every channel.
+
+**Recordings are out of scope for the code**, deliberately — `access.c:885`
+does `a->aa_rights &= ACCESS_ADVANCED_STREAMING|ACCESS_STREAMING`, and
+`/dvrfile/…` needs `ACCESS_RECORDER`. Play the `.ts` files in `recordings/`
+directly; `./vlc.py --recordings` lists them.
+
 ## Known limits
 
 **DRM channels will not work.** Tvheadend has no Widevine CDM, so anything
@@ -178,6 +218,7 @@ found.
 | `docker-compose.yml` | Tvheadend on the host network, config bind-mounted so the XMLTV socket is reachable |
 | `setup.py` | Creates the IPTV auto network and enables the XMLTV grabber, over the API. Idempotent. |
 | `push_epg.py` | Streams `/epg.xml` into the grabber socket |
+
 | `gen_openapi.py` | Generates `openapi.yaml` from the Tvheadend source |
 | `openapi.yaml` | 185 endpoints, 14 tags — documentation that does not otherwise exist |
 | `fastchannels-epg.service` | systemd user unit for the six-hourly EPG push |

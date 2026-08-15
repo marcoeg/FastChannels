@@ -41,7 +41,9 @@ Five things to internalise before you touch any of it:
    including destructive ones. The skill classifies endpoints as read-only,
    mutating, side-effecting and destructive — stay in the first two unless the
    task calls for more, and say what you changed when you do. Tvheadend does
-   have auth (digest, `admin` / `fastchannels`).
+   have auth — **digest only**, `admin` / `fastchannels`. Basic is refused, so
+   `curl --basic` and `http://user:pass@host/…` both 401. Handing a stream to a
+   player needs the `?auth=` token form; `vlc.py` at the repo root builds it.
 
 2. **Some reads are not reads.** Fetching a `/play/...` URL or calling
    `POST /api/channels/{id}/inspect` exercises the real playback path, and
@@ -61,8 +63,8 @@ Five things to internalise before you touch any of it:
    these — read that section rather than rediscovering them.
 
 5. **Check `dev/` before writing new code.** `dev/export_channels.py`,
-   `dev/news_origins.py` and the `dev/tvheadend/` tooling already solve the
-   common tasks and demonstrate correct usage.
+   `dev/news_origins.py`, `vlc.py` and the `dev/tvheadend/` tooling already
+   solve the common tasks and demonstrate correct usage.
 
 To confirm the skill loaded and both servers are reachable, run these and
 report what you get:

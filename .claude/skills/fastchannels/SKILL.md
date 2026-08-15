@@ -105,6 +105,36 @@ from the playlist with no stream opened.
 **DRM channels cannot be recorded.** Tvheadend has no Widevine CDM, so anything
 needing the PrismCast bridge is out — the same limit as any non-browser client.
 
+### Handing a stream to a player
+
+`vlc.py` (repo root, symlink to `dev/vlc.py`) does this for either server:
+
+```bash
+./vlc.py --list-categories                       # categories with counts
+./vlc.py --channel "Al Jazeera" --play           # FastChannels direct
+./vlc.py --category News --write ~/news.m3u
+./vlc.py --via tvheadend --category "Local News" --play
+./vlc.py --recordings                            # DVR files on disk
+```
+
+**Default to `--via fastchannels`.** No authentication, and it reaches the 206
+Gracenote channels Tvheadend does not carry — 2,220 against 2,014. Use
+`--via tvheadend` when a stream is flaky and you want Tvheadend to own the
+subscription and re-mux to MPEG-TS, or when checking what the DVR sees.
+
+Never hand out a bare `http://127.0.0.1:9981/playlist/…` or `/stream/…` URL.
+Tvheadend's `digest` is 1 — **Digest only** — and VLC and most simple players
+lead with Basic, which is refused:
+
+```
+no auth -> 401     basic -> 401     digest -> 200
+```
+
+`http://user:pass@host/…` is sent as Basic too, so it fails the same way. The
+way through is the **persistent authentication code**, a per-user token from
+`passwd/entry/grid` passed as `?auth=CODE`. Fetch it at run time; never
+hard-code it into a file that lands in the repo.
+
 ### Tvheadend's API is documented here, and nowhere else
 
 Tvheadend ships no API documentation — 134 markdown files covering the UI and
@@ -346,6 +376,24 @@ name, source, category and language but **not by channel ID**;
 `/admin/guide/programs`, and it returns a fixed five-hour window with
 display-formatted times. Do not assume `/admin` is all HTML — two of its
 eleven routes return JSON.
+
+**`/m3u` descriptions break player playlists.** `tvg-description` and
+`tvc-guide-description` carry commas, and VLC splits the `#EXTINF` title on a
+comma inside the quoted attributes rather than the separator — so the playlist
+shows sentence fragments instead of channel names, but only for channels whose
+description has a comma. Strip those attributes before handing an M3U to a
+player; `vlc.py` does this.
+
+**Tvheadend refuses Basic auth.** `digest` is 1, so `--basic` and
+`http://user:pass@host/…` both return 401; only `--digest` works from the shell.
+For players, use the `?auth=CODE` token instead (see `vlc.py`) —
+and use `/playlist/auth/…`, because plain `/playlist/…` returns entry URLs with
+no credential, so the list opens and every channel inside it then 401s.
+
+**The Tvheadend auth code cannot touch recordings.** `access.c:885` clamps it
+to `ACCESS_ADVANCED_STREAMING|ACCESS_STREAMING`, and `/dvrfile/…` requires
+`ACCESS_RECORDER`. Granting the account more permissions does not change this.
+Read recordings from `dev/tvheadend/recordings/` instead.
 
 **Always fetch both playlists.** Channels holding a Gracenote ID are
 partitioned into `/m3u/gracenote` and are **absent** from `/m3u`. Fetching only

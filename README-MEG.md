@@ -5,7 +5,7 @@ part of the upstream project.
 
 | | |
 | --- | --- |
-| **Tools** | `dev/news_origins.py` — where local news channels broadcast from<br>`dev/export_channels.py` — export a category with both playback endpoints |
+| **Tools** | `vlc.py` — hand a channel to VLC, from either server<br>`dev/news_origins.py` — where local news channels broadcast from<br>`dev/export_channels.py` — export a category with both playback endpoints |
 | **DVR** | Tvheadend, fed from FastChannels — see [Recording](#recording-tvheadend-as-the-dvr) |
 | **Requires** | Python 3.9+, standard library only. No pip install. Tested on 3.12.3. |
 | **Server** | A running FastChannels instance (default `http://127.0.0.1:5523`) |
@@ -900,6 +900,112 @@ apparent oversight.
 - **`network_mode: host` is load-bearing.** FastChannels emits literal
   `http://127.0.0.1:5523/play/…` URLs because Public Base URL is unset; on a
   bridge network those would point at Tvheadend itself.
+
+---
+
+## Watching in VLC — `vlc.py`
+
+Symlinked at the repo root; the file lives at `dev/vlc.py`. Two servers can
+serve the same channel, and `--via` picks which.
+
+```bash
+./vlc.py --list-categories                  # categories with counts
+./vlc.py --channel "Al Jazeera" --play      # one channel
+./vlc.py --category News --play             # the whole category
+./vlc.py --category News --write ~/news.m3u
+./vlc.py --source pluto --play              # one provider
+./vlc.py --via tvheadend --category "Local News" --play
+./vlc.py --recordings                       # DVR files on disk
+```
+
+### Which `--via`
+
+**`fastchannels` (default)** is the simpler path. FastChannels has no
+authentication, so nothing needs a token, and it publishes 206
+Gracenote-partitioned channels Tvheadend does not carry — **2,220 against
+2,014**. It works whether or not Tvheadend is running.
+
+**`tvheadend`** is worth it when a stream is flaky: Tvheadend owns the
+subscription and re-muxes everything to MPEG-TS, and it is the only path that
+can also record. It costs an auth token and misses the Gracenote set.
+
+Neither helps with DRM — anything needing the PrismCast/Widevine bridge will
+not play in VLC from either server.
+
+### Why Tvheadend needs a token
+
+Every Tvheadend URL fails in VLC with *"unable to open the MRL"*, and the cause
+is authentication, not VLC. `digest` is set to 1 — **Digest only**:
+
+```
+no auth      -> 401
+basic auth   -> 401     <- what VLC sends
+digest auth  -> 200
+```
+
+VLC leads with Basic and does not usefully fall back. `http://user:pass@host/…`
+does not help either — that is sent as Basic too, so it also 401s.
+
+The fix needs no configuration change and no weakening of the auth scheme:
+Tvheadend's **persistent authentication code**, a per-user token in the
+password table passed as `?auth=CODE`. No password crosses the wire and the
+token is revocable on its own. The script fetches it from the API at run time
+rather than storing it, and `--write` chmods its output to `600` because every
+line embeds it.
+
+**`/playlist/auth/…`, not `/playlist/…`.** The path segment decides how the
+entry URLs *inside* the playlist are authenticated (`webui.c:92-97` — `""` /
+`"/ticket"` / `"/auth"`). Plain `/playlist/…` loads but yields bare entries:
+
+```
+http://127.0.0.1:9981/stream/channelid/756779645?profile=pass
+```
+
+so VLC opens the list and then 401s on every channel. `/playlist/auth/…`
+stamps the code into each one.
+
+### Three FastChannels edges it handles for you
+
+**Channel names in the player.** FastChannels puts full descriptions in the
+M3U as `tvg-description` / `tvc-guide-description`, and those contain commas:
+
+```
+#EXTINF:-1 … tvg-description="…challenging outdoor jobs, WeatherSpy is
+reinventing the way we watch weather." …,WeatherSpy
+```
+
+VLC splits the title on a comma *inside the quoted attributes* instead of on
+the separator comma, so its playlist shows a sentence fragment where the
+channel name should be. Only channels whose description happens to contain no
+comma render correctly, which makes the breakage look random. The script
+rewrites every `#EXTINF` down to the attributes a player actually uses
+(`tvg-id`, `tvg-name`, `tvg-chno`, `tvg-logo`, `group-title`) with commas and
+quotes stripped from the values, so no comma appears before the separator.
+Side benefit: the full lineup drops from 1.2 MB to 588 KB.
+
+Tvheadend does not emit descriptions, so `--via tvheadend` was never affected.
+
+**Both playlists, always.** `/m3u` and `/m3u/gracenote` are *disjoint*, not a
+superset and subset. `--source pluto` is 176 channels from the first and 169
+from the second: taking only `/m3u` loses nearly half. `--via fastchannels`
+fetches both and merges them, which is why `--write`/`--play` produce a file
+rather than handing VLC a single URL.
+
+**Categories match exactly.** `/m3u?category=News` returns `News` and *not*
+`Local News` — they are separate categories, and the playlist endpoints do not
+substring match the way `/api/channels` does.
+
+### Recordings
+
+The Tvheadend auth code cannot play them, by design — `access.c:885` clamps it:
+
+```c
+a->aa_rights &= ACCESS_ADVANCED_STREAMING|ACCESS_STREAMING;
+```
+
+`/dvrfile/…` requires `ACCESS_RECORDER`, which that mask can never carry, so it
+401s regardless of the account's permissions. `--recordings` lists the files in
+`dev/tvheadend/recordings/` instead; VLC opens those directly with no auth.
 
 ---
 
