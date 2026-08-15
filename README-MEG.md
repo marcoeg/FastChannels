@@ -1,22 +1,33 @@
-# News Channel Origins
+# FastChannels — local additions
 
-Local additions to FastChannels — not part of the upstream project.
-
-`dev/news_origins.py` derives the **originating market and station** for every
-news channel in the lineup: which city and state a local news channel actually
-broadcasts from, and its call sign.
+Local tooling and configuration for this FastChannels install. None of it is
+part of the upstream project.
 
 | | |
 | --- | --- |
-| **Scripts** | `dev/news_origins.py`, `dev/markets.py` |
-| **Requires** | Python 3.9+ (dict-union syntax), standard library only. No pip install. Tested on 3.12.3. |
+| **Tools** | `dev/news_origins.py` — where local news channels broadcast from<br>`dev/export_channels.py` — export a category with both playback endpoints |
+| **Requires** | Python 3.9+, standard library only. No pip install. Tested on 3.12.3. |
 | **Server** | A running FastChannels instance (default `http://127.0.0.1:5523`) |
-| **Writes** | Read-only by default. **`--resolve` is not** — see [the warning](#upstream-cdn-urls). |
-| **Coverage** | 283 of 293 local news channels (97%) |
+| **Reference** | `docs/openapi.yaml` and `docs/API.md` document the HTTP API both scripts read |
+
+Both scripts talk to the server's API and write nothing to it, with one
+exception: resolving a channel's **remote** stream URL exercises the real
+`/play` path, which can cause the server to auto-disable channels it finds to
+be DRM-protected or dead. Each script has a flag to skip that.
+
+Operational notes on this install — the private repo, remotes, and the
+`docker-compose.override.yml` deviations — are in
+[Repository](#repository) and [Local configuration](#local-configuration).
 
 ---
 
-## Why this exists
+## Origins extractor — `dev/news_origins.py`
+
+Derives the originating market and station for news channels: which city
+and state a local channel broadcasts from, and its call sign. Resolves
+283 of 293 local channels (97%).
+
+### Why this exists
 
 FastChannels stores no origin field. Grepping the models turns up nothing
 geographic beyond `country`, which is `"US"` for all 494 news channels, so
@@ -40,7 +51,7 @@ Wichita and KWCH are right there — nothing parses them. This script does.
 
 ---
 
-## Quick start
+### Quick start
 
 ```bash
 # Coverage report
@@ -64,7 +75,7 @@ python3 dev/news_origins.py --base http://192.168.1.50:5523
 
 ---
 
-## Usage
+### Usage
 
 ```
 python3 dev/news_origins.py [--base URL] [--table] [--unresolved]
@@ -90,9 +101,9 @@ above it; the two export flags can be combined with anything.
 
 ---
 
-## Examples
+### Examples
 
-### Coverage report
+#### Coverage report
 
 ```console
 $ python3 dev/news_origins.py
@@ -140,7 +151,7 @@ Call sign resolved for 150/293 (51%)
     8  Atlanta, GA
 ```
 
-### Per-channel listing
+#### Per-channel listing
 
 ```console
 $ python3 dev/news_origins.py --table
@@ -156,7 +167,7 @@ WAPA   San Juan, PR                 plex         high    WAPA+
 -      San Francisco Bay Area, CA   plex         medium  CBS News Bay Area
 ```
 
-### What could not be resolved
+#### What could not be resolved
 
 ```console
 $ python3 dev/news_origins.py --unresolved
@@ -176,7 +187,7 @@ $ python3 dev/news_origins.py --unresolved
 These are national channels that the lineup has miscategorised as *Local News*
 — an upstream categorisation issue, not an extraction failure.
 
-### Useful one-liners
+#### Useful one-liners
 
 ```bash
 # How many channels per market, most first
@@ -196,7 +207,7 @@ jq -r '.[] | select(.market) | "\(.market)\t\(.source)"' /tmp/o.json \
 
 ---
 
-## URLs
+### URLs
 
 `--urls` adds a playable URL for each channel. It resolves **492 of 494**; the
 two misses are not feed-eligible (disabled, or no stream).
@@ -221,7 +232,7 @@ are absent from the first. Fetching only `/m3u` silently loses 62 channels. The
 `/api/channels`, which does a substring `LIKE` — so both `News` and
 `Local News` must be passed explicitly. The script handles all of this.
 
-### localhost vs a reachable host
+#### localhost vs a reachable host
 
 FastChannels emits `http://127.0.0.1:5523/play/…` whenever **Public Base URL**
 is unset. That is deliberate: `detected_base_url()` in `app/url.py` declines to
@@ -255,7 +266,7 @@ LAN URLs actually work, both of these are required:
 
    With that set, `--public-base` becomes unnecessary.
 
-### Upstream CDN URLs
+#### Upstream CDN URLs
 
 `--public-base` only changes *which interface of this machine* the URL points
 at. To get the provider's own URL — the actual remote origin — use `--resolve`,
@@ -331,7 +342,7 @@ Other things to know:
 
 ---
 
-## How resolution works
+### How resolution works
 
 Every channel is first split by the app's own `category` field, rather than
 re-deriving the distinction:
@@ -368,7 +379,7 @@ no city by design:
 | `macro-region` | Multi-state brand | `Telemundo Noreste` → `Northeast` |
 | `none` | Unresolved, or national | — |
 
-### Why the call-sign table wins
+#### Why the call-sign table wins
 
 It is not just more precise — it is authoritative over the source data.
 Sinclair/STIRR describes WPDE as *"Myrtle Beach FL"*. Myrtle Beach is in South
@@ -377,7 +388,7 @@ not.
 
 ---
 
-## Output schema
+### Output schema
 
 CSV and JSON carry the same 13 fields.
 
@@ -427,7 +438,7 @@ sister stations group together. Combined markets keep both names
 
 ---
 
-## Accuracy
+### Accuracy
 
 Coverage is measured directly. Accuracy is measured by cross-validation: for the
 98 channels that carry **both** a call sign in the table **and** a market name in
@@ -475,7 +486,7 @@ PY
 
 ---
 
-## Known limits
+### Known limits
 
 - **Extraction, not ground truth.** Names and descriptions are provider-written
   marketing copy. The tables correct the common errors, but a channel whose
@@ -495,7 +506,7 @@ PY
 
 ---
 
-## Maintaining the tables
+### Maintaining the tables
 
 Both live in `dev/markets.py`. After a scrape adds channels, run
 `--unresolved` and extend whichever table is missing.
@@ -538,6 +549,163 @@ Verify an addition did what you expected:
 ```bash
 python3 dev/news_origins.py --table | grep -i spokane
 ```
+
+---
+
+## Category exporter — `dev/export_channels.py`
+
+Exports every **enabled** channel in a category as CSV or JSON, carrying both
+playback endpoints and as much per-channel detail as the API exposes.
+
+### Why it needs three sources
+
+No single endpoint can answer this. `/api/channels` returns a 42-field record
+but **omits `source_channel_id`**, so it cannot yield a playback URL on its
+own. The script joins:
+
+| Source | Contributes |
+| --- | --- |
+| `/api/channels` | the channel record — name, category, language, country, Gracenote state, flags, timestamps |
+| `/m3u` **and** `/m3u/gracenote` | `local_url`, `source_channel_id`, feed channel number, proxied logo, stream codecs, Gracenote station ID |
+| `/play/<src>/<id>.m3u8` | one hop to `remote_url` — the provider's own stream URL |
+
+Both playlists are fetched because channels carrying a Gracenote ID are
+partitioned into `/m3u/gracenote` and are **absent** from `/m3u`. Fetching one
+silently loses them.
+
+Rows are joined on `(source_name, name)`, which is unique across the lineup.
+
+### Quick start
+
+```bash
+# what categories exist, with counts
+python3 dev/export_channels.py --list-categories
+
+# a category as JSON on stdout
+python3 dev/export_channels.py "Local News"
+
+# as CSV, to a file, URLs pointed at a LAN host
+python3 dev/export_channels.py "Local News" --format csv -o local-news.csv \
+  --public-base http://192.168.50.17:5523
+
+# read-only and fast — skips the remote lookup
+python3 dev/export_channels.py Sports --no-resolve
+```
+
+### Usage
+
+```
+export_channels.py [--list-categories] [--base URL] [--public-base URL]
+                   [--format {json,csv}] [-o PATH] [--contains]
+                   [--include-disabled] [--no-resolve] [--resolve-delay SEC]
+                   [--epg] [category]
+```
+
+| Flag | Effect |
+| --- | --- |
+| `--list-categories` | Print every category with its channel count, then exit. |
+| `--base URL` | Server URL. Default `http://127.0.0.1:5523`. |
+| `--public-base URL` | Rewrite `local_url` to this host. The server emits localhost whenever Public Base URL is unset — see [localhost vs a reachable host](#localhost-vs-a-reachable-host). |
+| `--format {json,csv}` | Default `json`. |
+| `-o PATH` | Write to a file instead of stdout. Progress goes to stderr either way, so piping stdout is safe. |
+| `--contains` | Substring match — `News` also matches `Local News`. |
+| `--include-disabled` | Include channels with `is_enabled = false`. |
+| `--no-resolve` | Skip the remote lookup. Strictly read-only and much faster. |
+| `--resolve-delay SEC` | Pause between remote lookups. Default `0.4`. |
+| `--epg` | Add now/next programming — one extra request per channel. |
+
+### Category matching is exact
+
+`--list-categories` prints the 34 valid names. `News` and `Local News` are
+**distinct categories**, and the default is an exact match:
+
+```console
+$ python3 dev/export_channels.py News --no-resolve | …
+79 enabled channels
+
+$ python3 dev/export_channels.py News --contains --no-resolve | …
+272 enabled channels        # Local News 193 + News 79
+```
+
+The server's `/api/channels` does a substring `LIKE` and would quietly return
+both; `--contains` opts into that. The M3U endpoints, by contrast, match
+exactly — the script passes every matched category value explicitly so the two
+stay consistent.
+
+Counts from `--list-categories` are *active* channels, while the export filters
+to *enabled*, so the export is usually smaller. International lists 12 and
+exports 9.
+
+### Output
+
+54 fields per channel, or 62 with `--epg`. CSV leads with identity and
+playback columns and appends the rest alphabetically, so a future server field
+lands in the output rather than being dropped.
+
+| Field | Notes |
+| --- | --- |
+| `local_url` | FastChannels playback URL. Resolves tokens and expiring URLs at play time — **give this to a player.** |
+| `remote_url` | The provider's own stream URL. Empty when `delivery` is not `redirect`. |
+| `remote_host` | Upstream hostname, or `(reason)` when resolution failed. |
+| `delivery` | `redirect` / `proxied` / `error` — see below. |
+| `source_channel_id` | The `{id}` in `/play/{source}/{id}.m3u8`. Not available from `/api/channels`. |
+| `feed_channel_number` | `tvg-chno` — the number as it appears in the playlist. |
+| `playlist` | `standard` or `gracenote` — which output carries this channel. |
+| `video_codec` / `audio_codec` | From the playlist; present only where the server knows them. |
+| `gracenote_station_id` | `tvc-guide-stationid`, on Gracenote-partitioned rows. |
+| `logo_proxy_url` | Cached logo served by this instance. |
+| `now_title` / `next_title` / `epg_hours` | `--epg` only. |
+
+Not every channel has a remote URL. Sources whose CDN issues IP-bound tokens or
+relative playlists must be fetched server-side, so they report
+`delivery: proxied` with an empty `remote_url`; `remote_host` still names the
+upstream when the manifest body reveals it.
+
+### `--no-resolve` is the read-only mode
+
+> Without it, the script follows each `local_url` through the real `/play`
+> path. That is what a player does, so the server behaves normally — including
+> its background health check, which **may auto-disable channels it finds to be
+> DRM-protected or dead**. Twenty-nine Roku channels were disabled this way
+> during development. It is correct application behaviour, not corruption, and
+> is reversible with `PATCH /api/channels/{id}` `{"is_enabled": true}` or by
+> enabling the DRM bridge in Settings.
+
+Resolving is also slow — one live request per channel, about four minutes for
+500 at the default delay — and can trip provider rate limits. Roku returns
+`403` under Cloudflare rate-limiting, after which FastChannels applies a
+source-wide five-minute cooldown; raise `--resolve-delay` if `remote_host`
+starts showing `(503 unavailable …)`.
+
+Resolved URLs carry session tokens and are sometimes bound to the IP that
+resolved them, so treat them as analysis snapshots rather than durable links.
+
+### Example
+
+```console
+$ python3 dev/export_channels.py "Local News" --no-resolve --format csv -o ln.csv
+193 enabled channel(s); 193 with a playable URL (0 not in either playlist)
+wrote ln.csv (193 rows)
+```
+
+```json
+{
+  "id": 3205,
+  "name": "12 News KWCH Wichita",
+  "source_name": "vizio",
+  "category": "Local News",
+  "feed_channel_number": "7946",
+  "source_channel_id": "93KWCH",
+  "playlist": "standard",
+  "local_url": "http://127.0.0.1:5523/play/vizio/93KWCH.m3u8",
+  "video_codec": "h264",
+  "audio_codec": "aac",
+  "logo_proxy_url": "http://127.0.0.1:5523/logos/711a3abd…jpg"
+}
+```
+
+Exit codes: `0` on success, `1` when the category matches nothing (the message
+lists the valid names) or the server is unreachable.
 
 ---
 
@@ -661,42 +829,6 @@ sudo docker compose logs fastchannels | grep -i 'auto-upgrade'
 ```
 
 Absence of that line means the rebuild did not pick up the change.
-
----
-
-## Companion: category export
-
-`dev/export_channels.py` exports every **enabled** channel in a category with
-both playback endpoints, as CSV or JSON.
-
-```bash
-python3 dev/export_channels.py --list-categories
-python3 dev/export_channels.py "Local News" --format csv -o local-news.csv
-python3 dev/export_channels.py Sports --no-resolve            # read-only, fast
-python3 dev/export_channels.py News --public-base http://192.168.50.17:5523
-```
-
-It joins three sources the server never joins for you:
-
-| Source | Contributes |
-| --- | --- |
-| `/api/channels` | the 42-field channel record — but no `source_channel_id`, so no way to build a playback URL |
-| `/m3u` + `/m3u/gracenote` | `local_url`, feed channel number, proxied logo, stream codecs, Gracenote station ID |
-| `/play/<src>/<id>.m3u8` | followed one hop to `remote_url` — the provider's own stream URL |
-
-Both playlists are fetched because Gracenote-carrying channels are partitioned
-into `/m3u/gracenote` and absent from `/m3u`. Categories are matched **exactly**
-(`--contains` for substring), since `News` and `Local News` are distinct.
-
-54 fields per channel by default; `--epg` adds now/next programming at the cost
-of one extra request per channel.
-
-> `--no-resolve` is strictly read-only. Without it the script exercises the real
-> `/play` path, so the server runs its normal health check and **may
-> auto-disable channels it finds DRM-protected or dead** — that is how 29 Roku
-> channels got disabled during development. Remote URLs also carry session
-> tokens and are sometimes IP-bound, so they are analysis snapshots, not durable
-> links; use `local_url` for playback.
 
 ---
 
