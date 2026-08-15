@@ -918,6 +918,23 @@ serve the same channel, and `--via` picks which.
 ./vlc.py --recordings                       # DVR files on disk
 ```
 
+### One window per channel
+
+VLC has **no "open in a new window" action** — picking an item in its playlist
+replaces whatever that instance is playing. Watching two channels at once means
+two VLC *processes*, so `--play` passes `--no-one-instance` and every
+invocation gets its own viewer:
+
+```bash
+./vlc.py --channel "Al Jazeera" --play
+./vlc.py --channel "Euronews" --play      # second window, first keeps playing
+```
+
+The flag is passed explicitly rather than relying on VLC's `one-instance`
+preference. It defaults to disabled, but a file manager or distro preset can
+flip it, and then a second launch would silently hijack the window already
+playing something. `--reuse` asks for that hand-off deliberately.
+
 ### Which `--via`
 
 **`fastchannels` (default)** is the simpler path. FastChannels has no

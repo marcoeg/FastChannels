@@ -47,6 +47,15 @@ the other, so `--via fastchannels` fetches both and merges them.
 match; the playlist endpoints do not.) `--list-categories` shows the real
 names with counts.
 
+One window per channel
+----------------------
+VLC has no "open in a new window" action: picking an item in its playlist
+replaces whatever that instance is playing, so watching two channels at once
+means two VLC *processes*. `--play` therefore passes `--no-one-instance` and
+each invocation gets its own viewer. Run it again per channel to stack them
+up. `--reuse` asks for the old behaviour — hand the URL to a running VLC —
+which only does anything if the `one-instance` preference is enabled.
+
 Recordings
 ----------
 Tvheadend's auth code cannot play them, by design — access.c:885 clamps it to
@@ -62,6 +71,10 @@ Usage:
     ./vlc.py --source pluto --play            # one provider
     ./vlc.py --via tvheadend --category "Local News" --play
     ./vlc.py --recordings                     # DVR files on disk
+
+    # each --play opens its own window, so these stack rather than replace
+    ./vlc.py --channel "Al Jazeera" --play
+    ./vlc.py --channel "Euronews" --play
 """
 from __future__ import annotations
 
@@ -323,17 +336,30 @@ def list_recordings() -> int:
     return 0
 
 
-def launch(target: str) -> None:
+def launch(target: str, reuse: bool = False) -> None:
+    """Start VLC on `target`, in its own window by default.
+
+    VLC has no "open in a new window" action: picking an item in its playlist
+    replaces whatever that instance is playing. A second viewer means a second
+    *process*, so --no-one-instance is passed explicitly rather than trusting
+    the `one-instance` preference — it defaults to disabled, but a desktop
+    file manager or a distro preset can flip it, and then this would silently
+    hijack the window already playing something.
+
+    --reuse asks for the opposite: hand the URL to a running VLC if there is
+    one, which only does anything when one-instance is enabled.
+    """
     vlc = shutil.which("vlc")
     if not vlc:
         sys.exit("vlc not found on PATH")
+    mode = ["--one-instance", "--playlist-enqueue"] if reuse else ["--no-one-instance"]
     subprocess.Popen(
-        [vlc, target],
+        [vlc, *mode, target],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         start_new_session=True,
     )
-    print("launched VLC")
+    print("launched VLC" + (" (reusing a running instance if any)" if reuse else ""))
 
 
 def save(body: str, dest: pathlib.Path, secret: bool) -> int:
@@ -365,7 +391,10 @@ def main() -> int:
                     dest="list_categories", help="list categories and exit")
     ap.add_argument("--recordings", action="store_true", help="list DVR files on disk and exit")
     ap.add_argument("--write", metavar="PATH", help="save the playlist as a local .m3u")
-    ap.add_argument("--play", action="store_true", help="launch VLC on the result")
+    ap.add_argument("--play", action="store_true",
+                    help="launch VLC on the result, in its own window")
+    ap.add_argument("--reuse", action="store_true",
+                    help="with --play, hand off to a running VLC instead of a new window")
     args = ap.parse_args()
 
     if args.recordings:
@@ -388,13 +417,13 @@ def main() -> int:
             n = save(tvh_fetch(url), dest, secret=True)
             print(f"wrote {n} channel(s) to {dest}")
             if args.play:
-                launch(str(dest))
+                launch(str(dest), args.reuse)
             return 0
 
         print(url)
         if args.play:
             # VLC can take the URL directly — every entry inside carries the code.
-            launch(url)
+            launch(url, args.reuse)
         return 0
 
     # ---- FastChannels ----------------------------------------------------
@@ -429,7 +458,7 @@ def main() -> int:
     if args.write:
         print(f"wrote {n} channel(s) to {dest}")
     if args.play:
-        launch(str(dest))
+        launch(str(dest), args.reuse)
     return 0
 
 
