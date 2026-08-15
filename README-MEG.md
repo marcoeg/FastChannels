@@ -612,7 +612,8 @@ export_channels.py [--list-categories] [--base URL] [--public-base URL]
 | `--include-disabled` | Include channels with `is_enabled = false`. |
 | `--no-resolve` | Skip the remote lookup. Strictly read-only and much faster. |
 | `--resolve-delay SEC` | Pause between remote lookups. Default `0.4`. |
-| `--epg` | Add now/next programming — one extra request per channel. |
+| `--epg [MODE]` | Attach programme data: `now`, `window` or `full`. Bare `--epg` means `now`. See [EPG modes](#epg-modes). |
+| `--epg-offset HOURS` | Shift the `window` mode window. Server clamps to ±48. |
 
 ### Category matching is exact
 
@@ -654,7 +655,47 @@ lands in the output rather than being dropped.
 | `video_codec` / `audio_codec` | From the playlist; present only where the server knows them. |
 | `gracenote_station_id` | `tvc-guide-stationid`, on Gracenote-partitioned rows. |
 | `logo_proxy_url` | Cached logo served by this instance. |
-| `now_title` / `next_title` / `epg_hours` | `--epg` only. |
+| `now_title` / `next_title` / `epg_hours` | `--epg now` only. |
+| `programs` | Array of programmes. `--epg window` / `full`, **JSON output only**. |
+| `epg_count` / `epg_first` / `epg_last` | Programme count and schedule bounds. `--epg window` / `full`. |
+| `xmltv_id` | `{source}.{source_channel_id}` — the join key XMLTV uses. |
+
+### EPG modes
+
+The server exposes programme data three different ways and they are not
+interchangeable. `--epg` picks one:
+
+| Mode | Route | Cost | Returns |
+| --- | --- | --- | --- |
+| `now` | `/api/channels/{id}/preview` | one request **per channel** | now/next titles plus `epg_programs` and `epg_hours` |
+| `window` | `/admin/guide/programs` | batched, 100 ids per request | a fixed **five-hour** window; `--epg-offset` shifts it |
+| `full` | `/epg.xml` | **one request** for the whole export | the complete stored schedule with real timestamps |
+
+`full` is the best value — one request, real ISO timestamps, hundreds of
+programmes per channel — and is what you usually want.
+
+**But `full` misses Gracenote-partitioned channels.** `/epg.xml` omits them for
+the same reason `/m3u` does: their guide is meant to come from Gracenote, not
+from this server's XMLTV. On a News export that is 19 of 79 channels. Their
+programmes *are* in the database, so `--epg window` reaches them. The exporter
+says so rather than leaving a silent gap:
+
+```console
+$ python3 dev/export_channels.py News --no-resolve --epg full
+  57/79 channels have programme data
+  19 of the 22 without data are Gracenote-partitioned and absent from
+  /epg.xml by design — use --epg window to reach them
+```
+
+`window` times are **display strings** in the server's timezone (`"8:00 AM"`)
+next to `left`/`width` percentages, because that route backs the admin guide
+grid. `full` gives real timestamps. Prefer `full` unless you specifically need
+Gracenote channels or a bounded window.
+
+CSV output drops the `programs` array — hundreds of programmes JSON-encoded
+into one cell exceeds Python's own 131072-byte field limit and is unreadable in
+a spreadsheet. `epg_count`, `epg_first` and `epg_last` are kept. Use
+`--format json` when you want the programmes themselves.
 
 Not every channel has a remote URL. Sources whose CDN issues IP-bound tokens or
 relative playlists must be fetched server-side, so they report

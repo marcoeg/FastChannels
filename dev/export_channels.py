@@ -66,6 +66,7 @@ LEAD_COLUMNS = [
     "source_channel_id", "stream_type", "video_codec", "audio_codec",
     "gracenote_id", "gracenote_station_id", "gracenote_mode",
     "is_enabled", "is_active", "disable_reason", "requires_drm_bridge",
+    "epg_count", "epg_first", "epg_last", "epg_programs", "epg_hours",
 ]
 
 
@@ -122,10 +123,14 @@ def fetch_playlists(base: str, categories: list[str]) -> dict[tuple[str, str], d
             if line.startswith("#EXTINF"):
                 attrs = dict(_EXTINF_ATTR.findall(line))
                 display = line.rsplit(",", 1)[-1].strip()
-                source, _, scid = (attrs.get("channel-id") or "").partition(".")
+                chan_id = attrs.get("channel-id") or ""
+                source, _, scid = chan_id.partition(".")
                 pending = {
                     "_key": (source, (attrs.get("tvg-name") or display).lower()),
                     "source_channel_id": scid or None,
+                    # The XMLTV <channel id> and <programme channel> use this
+                    # verbatim, so it is the join key for full-schedule EPG.
+                    "xmltv_id": chan_id or None,
                     "playlist": kind,
                     **{dest: attrs.get(src) for src, dest in M3U_FIELDS.items()},
                 }
@@ -209,8 +214,25 @@ def _upstream_from_manifest(url: str, own_netloc: str, timeout: int) -> str | No
     return None
 
 
-def fetch_epg(base: str, channel_id: int) -> dict:
-    """Now/next programme for one channel. One request per channel."""
+# ── EPG ──────────────────────────────────────────────────────────────────────
+# Three server routes expose programme data, none of them interchangeable:
+#
+#   /api/channels/{id}/preview      now/next + how much guide data exists.
+#                                   One request per channel.
+#   /admin/guide/programs           the only route that selects by channel ID,
+#                                   but a fixed five-hour window and times as
+#                                   display strings. Batches many IDs per call.
+#   /epg.xml?category=…             the full stored schedule with real
+#                                   timestamps. One request for the whole
+#                                   export — cheapest and most complete.
+#
+# `full` is the best default when you want programmes; `now` stays available
+# because epg_hours is the quickest way to spot thin or stale guide data.
+GUIDE_BATCH = 100
+
+
+def fetch_epg_now(base: str, channel_id: int) -> dict:
+    """Now/next for one channel. One request per channel."""
     try:
         data = get_json(f"{base}/api/channels/{channel_id}/preview?detect=0", timeout=30)
     except Exception:  # noqa: BLE001
@@ -222,6 +244,81 @@ def fetch_epg(base: str, channel_id: int) -> dict:
         out[f"{prefix}_title"] = prog.get("title")
         out[f"{prefix}_start"] = prog.get("start_time")
         out[f"{prefix}_end"] = prog.get("end_time")
+    return out
+
+
+def fetch_epg_window(base: str, channel_ids: list[int], offset: int = 0) -> dict[int, list]:
+    """Five-hour window per channel, batched. Keyed by channel ID.
+
+    Times come back as display strings in the server's timezone, alongside
+    left/width percentages used by the admin guide grid — they are kept as-is
+    rather than reinterpreted, since parsing "8:00 AM" back into an instant
+    needs the server's timezone and would silently guess the date.
+    """
+    out: dict[int, list] = {}
+    for i in range(0, len(channel_ids), GUIDE_BATCH):
+        batch = channel_ids[i:i + GUIDE_BATCH]
+        ids = ",".join(str(c) for c in batch)
+        url = f"{base}/admin/guide/programs?{urlencode({'channel_ids': ids, 'offset': offset})}"
+        try:
+            data = get_json(url, timeout=60)
+        except Exception as exc:  # noqa: BLE001
+            print(f"warning: guide window batch failed: {exc}", file=sys.stderr)
+            continue
+        for cid, progs in data.items():
+            out[int(cid)] = progs
+    return out
+
+
+def _xmltv_time(value: str | None) -> str | None:
+    """'20260815130000 +0000' -> '2026-08-15T13:00:00+00:00'."""
+    if not value:
+        return None
+    from datetime import datetime
+    raw = value.strip()
+    try:
+        dt = datetime.strptime(raw, "%Y%m%d%H%M%S %z")
+    except ValueError:
+        try:
+            dt = datetime.strptime(raw.split()[0], "%Y%m%d%H%M%S")
+        except ValueError:
+            return raw
+    return dt.isoformat()
+
+
+def fetch_epg_full(base: str, categories: list[str]) -> dict[str, list]:
+    """Complete stored schedule, keyed by XMLTV channel id. One request."""
+    import xml.etree.ElementTree as ET
+
+    query = urlencode([("category", c) for c in categories])
+    try:
+        body = get_text(f"{base}/epg.xml?{query}", timeout=180)
+    except Exception as exc:  # noqa: BLE001
+        print(f"warning: could not fetch /epg.xml: {exc}", file=sys.stderr)
+        return {}
+    try:
+        root = ET.fromstring(body)
+    except ET.ParseError as exc:
+        print(f"warning: /epg.xml did not parse: {exc}", file=sys.stderr)
+        return {}
+
+    out: dict[str, list] = {}
+    for p in root.findall("programme"):
+        icon = p.find("icon")
+        out.setdefault(p.get("channel") or "", []).append({
+            "title": p.findtext("title"),
+            "sub_title": p.findtext("sub-title"),
+            "desc": p.findtext("desc"),
+            "category": p.findtext("category"),
+            "episode_num": p.findtext("episode-num"),
+            "rating": (p.find("rating").findtext("value")
+                       if p.find("rating") is not None else None),
+            "icon": icon.get("src") if icon is not None else None,
+            "start": _xmltv_time(p.get("start")),
+            "stop": _xmltv_time(p.get("stop")),
+        })
+    for progs in out.values():
+        progs.sort(key=lambda x: x["start"] or "")
     return out
 
 
@@ -268,10 +365,43 @@ def build_rows(args) -> list[dict]:
                 print(f"  {i}/{len(targets)}", file=sys.stderr)
             time.sleep(args.resolve_delay)
 
-    if args.epg:
-        print(f"fetching EPG for {len(rows)} channels…", file=sys.stderr)
+    if args.epg == "now":
+        print(f"fetching now/next for {len(rows)} channels "
+              f"(one request each)…", file=sys.stderr)
         for row in rows:
-            row.update(fetch_epg(base, row["id"]))
+            row.update(fetch_epg_now(base, row["id"]))
+
+    elif args.epg == "window":
+        ids = [r["id"] for r in rows]
+        print(f"fetching a 5h guide window for {len(ids)} channels "
+              f"in batches of {GUIDE_BATCH}…", file=sys.stderr)
+        window = fetch_epg_window(base, ids, args.epg_offset)
+        for row in rows:
+            progs = window.get(row["id"], [])
+            row["programs"] = progs
+            row["epg_count"] = len(progs)
+
+    elif args.epg == "full":
+        print("fetching the full schedule from /epg.xml (one request)…", file=sys.stderr)
+        schedule = fetch_epg_full(base, categories)
+        for row in rows:
+            progs = schedule.get(row.get("xmltv_id") or "", [])
+            row["programs"] = progs
+            row["epg_count"] = len(progs)
+            row["epg_first"] = progs[0]["start"] if progs else None
+            row["epg_last"] = progs[-1]["stop"] if progs else None
+        matched = sum(1 for r in rows if r["epg_count"])
+        print(f"  {matched}/{len(rows)} channels have programme data", file=sys.stderr)
+        # /epg.xml omits Gracenote-partitioned channels for the same reason
+        # /m3u does: their guide is meant to come from Gracenote, not from this
+        # server's XMLTV. Their programmes are still in the database, so
+        # --epg window reaches them. Say so rather than leave a silent gap.
+        gn_gap = sum(1 for r in rows
+                     if not r["epg_count"] and r.get("playlist") == "gracenote")
+        if gn_gap:
+            print(f"  {gn_gap} of the {len(rows) - matched} without data are "
+                  f"Gracenote-partitioned and absent from /epg.xml by design — "
+                  f"use --epg window to reach them", file=sys.stderr)
 
     return rows
 
@@ -286,6 +416,16 @@ def write_output(rows: list[dict], args) -> None:
     if args.format == "json":
         text = json.dumps(rows, indent=2, ensure_ascii=False, default=str)
     else:
+        # A channel can carry hundreds of programmes; JSON-encoding that array
+        # into one cell produces a file that is valid CSV but unreadable in
+        # practice — Python's own reader rejects fields over 131072 bytes, and
+        # spreadsheets fare worse. Drop the array and keep the summary columns;
+        # use --format json when the programmes themselves are wanted.
+        if any(r.get("programs") for r in rows):
+            rows = [{k: v for k, v in r.items() if k != "programs"} for r in rows]
+            print("note: 'programs' omitted from CSV (nested array) — "
+                  "epg_count/epg_first/epg_last are retained; "
+                  "use --format json for the programmes", file=sys.stderr)
         columns = order_columns(rows)
         import io
         buf = io.StringIO()
@@ -335,8 +475,14 @@ def main() -> int:
                     help="skip the remote lookup; read-only and much faster")
     ap.add_argument("--resolve-delay", type=float, default=0.4, metavar="SEC",
                     help="pause between remote lookups (default 0.4)")
-    ap.add_argument("--epg", action="store_true",
-                    help="include now/next programme (one extra request per channel)")
+    ap.add_argument("--epg", nargs="?", const="now", default=None,
+                    choices=("now", "window", "full"), metavar="MODE",
+                    help="attach programme data. now = now/next + guide depth "
+                         "(one request per channel); window = five-hour schedule "
+                         "by channel id, batched; full = complete stored schedule "
+                         "from /epg.xml in a single request. Bare --epg means now.")
+    ap.add_argument("--epg-offset", type=int, default=0, metavar="HOURS",
+                    help="shift the --epg window, clamped by the server to +/-48 (window mode only)")
     args = ap.parse_args()
     args.base = args.base.rstrip("/")
 
