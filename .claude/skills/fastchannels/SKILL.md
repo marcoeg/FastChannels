@@ -85,7 +85,7 @@ plaintext provider credentials — do not write it anywhere shared.
 | `/play/…`, `/watch/…` | Stream resolution, manifest proxies, DRM license proxy |
 | `/logos/…`, `/images/proxy/…` | Cached image proxy |
 | `/api/…`, `/api/feeds/…` | Control API — ~130 operations |
-| `/admin/…` | Server-rendered HTML pages, **not** an API |
+| `/admin/…` | HTML pages — **except** `/admin/guide/programs` and `/admin/channels/chnum-map`, which return JSON |
 
 Full machine-readable reference: `docs/openapi.yaml` in this repo (182 paths,
 verified against the route handlers). `docs/API.md` is the prose companion.
@@ -120,6 +120,34 @@ curl -s "$BASE/api/channels/1314/preview?detect=0" | jq '{play_url, preview_url,
 # in bulk — parse the M3U outputs, which carry channel-id and the URL together
 curl -s "$BASE/m3u?category=News&category=Local%20News" | grep -A1 '^#EXTINF'
 ```
+
+### Get EPG for a channel
+
+Three routes, none of them obvious. Pick by what you need:
+
+```bash
+# FULL SCHEDULE — everything stored, real timestamps. Best default.
+# Filters by name/source/category/language, NOT by channel id.
+curl -s "$BASE/epg.xml?search=Al%20Jazeera"          # 157 programmes, XMLTV
+
+# BY CHANNEL ID — the only route that takes ids. Fixed 5-hour window.
+curl -s "$BASE/admin/guide/programs?channel_ids=1314,2577"
+curl -s "$BASE/admin/guide/programs?channel_ids=2577&offset=5"   # shift window +5h
+
+# NOW/NEXT ONLY — plus how much guide data exists at all.
+curl -s "$BASE/api/channels/2577/preview?detect=0" \
+  | jq '{epg_programs, epg_hours, now: .current_program.title, next: .next_program.title}'
+```
+
+`/admin/guide/programs` returns a five-hour window keyed by channel ID, with
+every requested ID present (empty array when nothing airs). `offset` shifts the
+window in hours, clamped to ±48, so stepping it by 5 pages through roughly four
+days. Its times are **display strings** in the server's timezone (`"8:00 AM"`)
+next to `left`/`width` percentages for the guide grid — convenient for a UI,
+awkward for data. Use `/epg.xml` when you want real timestamps.
+
+`epg_hours` from `preview` is the quickest way to spot a channel with thin or
+stale guide data.
 
 ### Diagnose a channel that will not play
 
@@ -193,6 +221,13 @@ on the model but not in `/api/channels` responses. Use
 does a substring `LIKE` and returns `News` *and* `Local News`. The `/m3u`
 endpoints match **exactly**, so both values must be passed:
 `?category=News&category=Local%20News`. They are distinct categories.
+
+**No `/api` route returns a channel's full schedule.** `/epg.xml` filters by
+name, source, category and language but **not by channel ID**;
+`/api/channels/{id}/preview` gives only now/next. The one ID-based route is
+`/admin/guide/programs`, and it returns a fixed five-hour window with
+display-formatted times. Do not assume `/admin` is all HTML — two of its
+eleven routes return JSON.
 
 **Always fetch both playlists.** Channels holding a Gracenote ID are
 partitioned into `/m3u/gracenote` and are **absent** from `/m3u`. Fetching only

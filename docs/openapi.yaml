@@ -33,7 +33,12 @@ info:
     | `/logos/…`, `/posters/…`, `/images/proxy/…` | Cached image proxy |
     | `/api/…` | Control API (sources, channels, settings, diagnostics) |
     | `/api/feeds/…` | Feed management |
-    | `/admin/…` | Server-rendered HTML pages — **not** part of this API |
+    | `/admin/…` | Server-rendered HTML pages, **except** the two JSON endpoints documented under the *Admin (JSON)* tag |
+
+    Nine of the eleven `/admin` routes render HTML and are out of scope here.
+    The two that return JSON are documented because one of them,
+    `/admin/guide/programs`, is the only route that returns programme data
+    selected by channel **ID** — there is no `/api` equivalent.
 
     ## Conventions
 
@@ -92,6 +97,13 @@ tags:
     description: TV Everywhere (MVPD / Adobe Pass) account and per-network sign-in.
   - name: System
     description: Logs, statistics, and diagnostics.
+  - name: Admin (JSON)
+    description: |
+      The two `/admin` routes that return JSON rather than HTML. They exist to
+      back the admin UI, so their response shapes are tuned for display and can
+      change without notice — treat them as less stable than `/api`. Documented
+      because `/admin/guide/programs` is the only way to fetch programme data by
+      channel ID.
 
 paths:
 
@@ -3820,6 +3832,95 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/SystemStats' }
 
+  /admin/guide/programs:
+    get:
+      tags: [Admin (JSON)]
+      summary: Programme schedule for specific channels
+      description: |
+        The **only** route that returns programme data selected by channel ID —
+        `/epg.xml` filters by name, source, category and language, but not by ID.
+
+        Returns a fixed **five-hour** window. `offset` shifts that window in
+        hours (clamped to ±48), so stepping it in increments of 5 pages through
+        roughly four days of guide data.
+
+        Shaped for the admin guide grid, not for general consumption: times are
+        pre-formatted strings in the server's configured timezone (`"8:00 AM"`),
+        and `left`/`width` are percentage offsets within the window used to
+        position bars. For a full schedule with real timestamps use
+        `GET /epg.xml?search=<name>`; for just now/next use
+        `GET /api/channels/{id}/preview`.
+
+        Channels with no programmes in the window are present as empty arrays,
+        so every requested ID appears in the response.
+      parameters:
+        - name: channel_ids
+          in: query
+          required: true
+          description: Comma-separated internal channel IDs. Omitting it returns `{}`.
+          schema: { type: string, examples: ["1314,2577"] }
+        - name: offset
+          in: query
+          description: Shift the five-hour window by this many hours. Clamped to ±48.
+          schema: { type: integer, default: 0, minimum: -48, maximum: 48 }
+        - name: anchor
+          in: query
+          description: |
+            Unix timestamp for the window start, used by the guide page so bars
+            align exactly with its tick marks. Takes precedence over `offset`.
+          schema: { type: integer }
+      responses:
+        '200':
+          description: Object keyed by channel ID (as a string).
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties:
+                  type: array
+                  items: { $ref: '#/components/schemas/GuideProgram' }
+        '400':
+          description: "`channel_ids` contained a non-integer value."
+
+  /admin/channels/chnum-map:
+    get:
+      tags: [Admin (JSON)]
+      summary: Resolved channel numbers and pin state for specific channels
+      description: |
+        Returns the number each channel would carry in the Default feed, which
+        pins are set, and which pinned numbers collide. Backs the channel list's
+        number column.
+
+        `chnum_map` only contains channels that resolve to a number — a channel
+        that is disabled, inactive or otherwise not feed-eligible is absent from
+        it while still appearing in `pinned`.
+      parameters:
+        - name: ids
+          in: query
+          required: true
+          description: Comma-separated internal channel IDs. Non-integer entries are skipped.
+          schema: { type: string, examples: ["1314,2577"] }
+      responses:
+        '200':
+          description: Number map, pin state, and conflicts.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  chnum_map:
+                    type: object
+                    additionalProperties: { type: integer }
+                    description: Channel ID (string key) to resolved channel number.
+                  pinned:
+                    type: object
+                    additionalProperties: { type: boolean }
+                    description: Channel ID (string key) to whether its number is pinned.
+                  conflict_ids:
+                    type: array
+                    items: { type: integer }
+                    description: Requested channels whose pinned number is shared with another pinned channel.
+
   /api/localnow/cities:
     get:
       tags: [System]
@@ -4420,6 +4521,28 @@ components:
         episode: { type: [integer, 'null'] }
         original_air_date: { type: [string, 'null'], format: date }
         poster_url: { type: [string, 'null'] }
+
+    GuideProgram:
+      type: object
+      description: |
+        One programme as the admin guide grid consumes it. Times are display
+        strings in the server's configured timezone, not timestamps; `left` and
+        `width` are percentages of the five-hour window.
+      properties:
+        title: { type: string }
+        desc: { type: string, description: Truncated to 300 characters. }
+        cat: { type: string }
+        start: { type: string, description: 'Local display time, e.g. "8:00 AM".' }
+        end: { type: string, description: 'Local display time, e.g. "9:00 AM".' }
+        left: { type: number, description: Percentage offset from the window start. }
+        width: { type: number, description: Percentage of the window this programme spans. }
+        current: { type: boolean, description: True when this programme is airing now. }
+        rating: { type: string }
+        poster: { type: string }
+        episode_title: { type: string }
+        season: { type: [integer, 'null'] }
+        episode: { type: [integer, 'null'] }
+        program_type: { type: string }
 
     HLSVariant:
       type: object

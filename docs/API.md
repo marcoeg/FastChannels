@@ -76,7 +76,7 @@ curl -s $BASE/epg.xml | head -3
 | `/play/…`, `/watch/…` | Stream resolution, manifest/segment proxies, DRM license proxy | Media players, the browser watch page, PrismCast |
 | `/logos/…`, `/posters/…`, `/images/proxy/…` | Cached image proxy | Whatever renders the guide |
 | `/api/…`, `/api/feeds/…` | Control API | The admin UI — and you |
-| `/admin/…` | Server-rendered HTML pages | Browsers only — **not** an API |
+| `/admin/…` | Mostly server-rendered HTML, plus two JSON endpoints | Browsers — except `/admin/guide/programs` and `/admin/channels/chnum-map` |
 
 ### Outputs — the part you actually subscribe to
 
@@ -215,6 +215,20 @@ curl -s -X POST $BASE/api/channels/bulk -H 'Content-Type: application/json' \
 
 For Gracenote, `set_off` keeps the stored ID dormant so it survives re-enabling;
 `clear_ids` is the only action that destroys it.
+
+### Get EPG for a channel
+
+Three routes with different trade-offs, and no single obvious one:
+
+| Need | Route |
+| --- | --- |
+| Full schedule, real timestamps | `GET /epg.xml?search=<name>` — filters by name/source/category/language, **not** by channel ID |
+| Selected by channel ID | `GET /admin/guide/programs?channel_ids=1,2,3` — fixed five-hour window; `offset` shifts it in hours (±48) |
+| Now/next, plus guide depth | `GET /api/channels/{id}/preview` — also returns `epg_programs` and `epg_hours` |
+
+`/admin/guide/programs` backs the admin guide grid, so its times are display
+strings in the server's timezone (`"8:00 AM"`) alongside `left`/`width`
+percentages. It is the only route that selects programmes by channel ID.
 
 ### Diagnose a channel that will not play
 
