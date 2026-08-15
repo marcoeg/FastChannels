@@ -33,7 +33,14 @@ outputs with Channels DVR.
 Base URL   http://127.0.0.1:5523      (also on the LAN as http://nucbox.local:5523)
 Version    5.0.4
 Runtime    Docker, container `fastchannels`
+Repo root  /home/marco/Development/FastChannels
 ```
+
+**Every file path in this document is relative to that repo root.** Nothing
+here lives in your own working directory, so resolve paths against it — e.g.
+the spec is `/home/marco/Development/FastChannels/docs/openapi.yaml`.
+If that directory does not exist on the machine you are running on, the API is
+still usable over HTTP but none of the local files are.
 
 Get live figures rather than assuming — counts change with every scrape:
 
@@ -63,8 +70,9 @@ reverse-engineered from the route handlers and verified against the running
 server:
 
 ```
-docs/openapi.yaml    184 paths, every parameter and response schema
-docs/API.md          the same thing as prose, with worked examples
+/home/marco/Development/FastChannels/
+  docs/openapi.yaml    184 paths, every parameter and response schema
+  docs/API.md          the same thing as prose, with worked examples
 ```
 
 **Read it before guessing at a route or a parameter.** It is the authority for
@@ -78,8 +86,8 @@ the two things you will reach for most:
   requires a field `/api/channels` does not return. See
   [Get a channel's playback URL](#get-a-channels-playback-url).
 
-`dev/check_api_docs.py` verifies the spec against the route handlers, so drift
-is a bug rather than something to work around.
+`dev/check_api_docs.py` (under the repo root) verifies the spec against the
+route handlers, so drift is a bug rather than something to work around.
 
 ## Safety classification
 
@@ -119,9 +127,9 @@ plaintext provider credentials — do not write it anywhere shared.
 | `/api/…`, `/api/feeds/…` | Control API — ~130 operations |
 | `/admin/…` | HTML pages — **except** `/admin/guide/programs` and `/admin/channels/chnum-map`, which return JSON |
 
-Full machine-readable reference: `docs/openapi.yaml` in this repo (184 paths,
-verified against the route handlers by `dev/check_api_docs.py`). `docs/API.md`
-is the prose companion.
+Full machine-readable reference: `/home/marco/Development/FastChannels/docs/openapi.yaml`
+(184 paths, verified against the route handlers by `dev/check_api_docs.py`).
+`docs/API.md` beside it is the prose companion.
 
 ## Core recipes
 

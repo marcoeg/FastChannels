@@ -6,8 +6,16 @@ the agent load it, understand its boundaries, and prove it works before acting.
 
 ---
 
-You now have a skill called `fastchannels`, at `SKILL.md`. Read it before
-doing anything with it.
+You now have a skill called `fastchannels`. It documents a server running on
+this machine, and it refers to files in a repository at:
+
+```
+/home/marco/Development/FastChannels
+```
+
+**Resolve every path in the skill against that root** — it is not your working
+directory. The skill file itself is `/home/marco/Development/FastChannels/dev/hermes/SKILL.md`.
+Read it before doing anything with it.
 
 **FastChannels** (`http://127.0.0.1:5523`) is a FAST-channel aggregator. It
 scrapes free streaming services — Roku, Pluto, Xumo, Tubi, Samsung, Plex,
@@ -27,8 +35,9 @@ reverse-engineered from the route handlers and verified against the running
 server:
 
 ```
-docs/openapi.yaml    184 paths, every parameter and response schema
-docs/API.md          the same thing as prose, with worked examples
+/home/marco/Development/FastChannels/
+  docs/openapi.yaml    184 paths, every parameter and response schema
+  docs/API.md          the same thing as prose, with worked examples
 ```
 
 **Read the spec rather than guessing** — especially for the two things you will
