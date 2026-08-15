@@ -40,8 +40,13 @@ TVH = "http://127.0.0.1:9981"
 FASTCHANNELS = "http://127.0.0.1:5523"
 NETWORK_NAME = "FastChannels"
 NETWORK_CLASS = "iptv_auto_network"
-# Bind-mounted to dev/tvheadend/recordings by docker-compose.yml.
+# Container path. Bind-mounted from RECORDINGS_HOST by docker-compose.yml;
+# the container side deliberately never changes, so the DVR config's storage
+# setting and the filenames already in the database stay valid if the host
+# directory moves.
 RECORDINGS_PATH = "/recordings"
+# Host side of that mount. Must match docker-compose.yml.
+RECORDINGS_HOST = pathlib.Path.home() / "news" / "tvheadend" / "recordings"
 
 
 class Tvheadend:
@@ -96,7 +101,7 @@ def ensure_superuser(user: str, password: str) -> bool:
     # bind source as root, which the container — running as your uid — then
     # cannot write to, and the failure surfaces later as a recording error
     # rather than a startup one.
-    (HERE / "recordings").mkdir(parents=True, exist_ok=True)
+    RECORDINGS_HOST.mkdir(parents=True, exist_ok=True)
     if SUPERUSER.exists():
         return False
     SUPERUSER.write_text(json.dumps({"username": user, "password": password}, indent=2))
@@ -179,7 +184,35 @@ def enable_xmltv(tvh: Tvheadend, dry_run: bool) -> str | None:
     uuid = target["uuid"]
     if not dry_run:
         tvh.call("idnode/save", node=json.dumps({"uuid": uuid, "enabled": True}))
+        disable_ota_epg(tvh)
     return uuid
+
+
+def disable_ota_epg(tvh: Tvheadend) -> None:
+    """Stop Tvheadend scraping EPG out of the transport stream.
+
+    This is the same hazard as `scan_create`, arriving by a different route.
+    The over-the-air grabber opens a subscription per mux to read EIT tables —
+    meaningful for DVB, useless here because the guide arrives as XMLTV over a
+    socket, and actively harmful: it opens real provider streams, and it holds
+    the IPTV inputs while doing so.
+
+    The defaults are `ota_initial=True` (scan on every startup) and an
+    `ota_cron` firing at 02:04 and 14:04, each mux held up to `ota_timeout`
+    600s. Observed here as ten "epggrab" subscriptions in state Bad pinning
+    both IPTV inputs, during which every recording failed with "No input
+    source available" and streaming returned no data. It is a nasty failure
+    because it clears itself before you look, and reappears after each
+    restart.
+
+    epgauto_default stops newly created muxes opting back in.
+    """
+    tvh.call("epggrab/config/save",
+             node=json.dumps({"ota_initial": False, "ota_cron": ""}))
+    for net in tvh.call("mpegts/network/grid", limit="999").get("entries", []):
+        if net.get("networkname") == NETWORK_NAME:
+            tvh.call("idnode/save", node=json.dumps(
+                {"uuid": net["uuid"], "epgauto_default": False}))
 
 
 def main() -> int:

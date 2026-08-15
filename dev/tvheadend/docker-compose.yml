@@ -27,6 +27,20 @@ services:
     command: ["-c", "/var/lib/tvheadend/config"]
     volumes:
       - ./config:/var/lib/tvheadend/config
-      - ./recordings:/recordings
+      # Recordings live outside the repo. The container path stays /recordings
+      # so the DVR config's storage setting and every filename already in the
+      # database remain valid — only the host side moves. Spelled absolutely
+      # rather than with ${HOME}, which would resolve to /root under sudo.
+      # Create it before starting: Docker creates a missing bind source as
+      # root, and Tvheadend runs as uid 1000 and could not then write to it.
+      - /home/marco/news/tvheadend/recordings:/recordings
+      # TZ below is inert without these. This image ships no tzdata at all —
+      # no /etc/localtime, no /usr/share/zoneinfo — so glibc cannot resolve a
+      # zone name and silently falls back to UTC. The symptom is subtle: only
+      # *formatted* times are wrong (recording filenames, the EPG grid, log
+      # stamps), while scheduling stays correct because Tvheadend stores Unix
+      # timestamps. A recording made at 12:35 PDT was named ..._1935.ts.
+      - /usr/share/zoneinfo:/usr/share/zoneinfo:ro
+      - /etc/localtime:/etc/localtime:ro
     environment:
       TZ: America/Los_Angeles

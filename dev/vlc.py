@@ -93,7 +93,8 @@ import urllib.request
 HERE = pathlib.Path(__file__).resolve().parent
 TVH_DIR = HERE / "tvheadend"
 SUPERUSER = TVH_DIR / "config" / "superuser"
-RECORDINGS = TVH_DIR / "recordings"
+# Host side of the /recordings bind mount. Must match docker-compose.yml.
+RECORDINGS = pathlib.Path.home() / "news" / "tvheadend" / "recordings"
 
 FASTCHANNELS = "http://127.0.0.1:5523"
 TVH = "http://127.0.0.1:9981"

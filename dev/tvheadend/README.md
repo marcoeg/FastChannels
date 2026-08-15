@@ -177,15 +177,31 @@ Matroska.
 The extension is never hardcoded — `pathname` ends in `$x`, filled from the
 active muxer, so changing the profile changes the extension by itself.
 
+Recordings live in **`~/news/tvheadend/recordings`**, outside the repo. The
+container path stays `/recordings`, so moving the host directory leaves the DVR
+config and every filename in the database valid. Create it before starting —
+Docker creates a missing bind source as root and Tvheadend runs as uid 1000.
+
 ```
-pathname = $c - $t - %F %H-%M$n.$x
-           -> Al Jazeera - Newshour - 2026-08-15 14-12.ts
+pathname = $c_$t_%F_%H%M$n.$x
+           -> Al-Jazeera_final-check_2026-08-15_1248.ts
 ```
 
-`%H-%M` rather than `%R`, because `%R` emits `14:12` and colons in filenames
-are tiresome to quote. `docs/property/pathname.md` lists every specifier;
-`$q` gives a Plex/Jellyfin layout but needs episode and genre data that
-FAST-channel guides rarely carry.
+No spaces. Underscores separate fields; whitespace inside a name becomes `-`,
+which is not configurable — `dvr_rec.c:292` hardcodes it, and `_` is reserved
+for unsafe characters under `clean-title`. `docs/property/pathname.md` lists
+every specifier; `$q` gives a Plex/Jellyfin layout but needs episode and genre
+data FAST-channel guides rarely carry.
+
+**Two traps that cost real recordings.** `TZ` in the compose file is inert on
+its own: this image ships no tzdata, so glibc falls back to UTC and only
+*formatted* times go wrong — a 12:35 PDT recording was named `…_1935.ts` while
+scheduling stayed correct. `/usr/share/zoneinfo` and `/etc/localtime` are now
+bind-mounted. And the **OTA EPG grabber** opens a subscription per mux to read
+EIT out of the transport, which is useless here and pins the IPTV inputs: ten
+`epggrab` subscriptions in state Bad meant every recording failed with "No
+input source available". `setup.py` disables it (`ota_initial`, `ota_cron`,
+`epgauto_default`).
 
 ## Known limits
 

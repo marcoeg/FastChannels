@@ -861,6 +861,26 @@ come straight from the playlist. **Zero streams opened** while creating all
 **The bouquet is created disabled.** Services existed but the channel count
 stayed at 0 until it was enabled. `setup.py` does this now.
 
+**The container had no timezone, and TZ alone does not fix it.** The compose
+file set `TZ=America/Los_Angeles` and the variable was present in the
+container, yet it reported UTC — `ghcr.io/tvheadend/tvheadend` ships no tzdata
+at all, so glibc cannot resolve a zone name and falls back silently. The
+symptom is narrow: only *formatted* times are wrong — recording filenames, the
+EPG grid, log stamps — while scheduling stays correct, because Tvheadend
+stores Unix timestamps. A recording made at 12:35 PDT was named `…_1935.ts`.
+Bind-mounting `/usr/share/zoneinfo` and `/etc/localtime` read-only fixes it.
+
+**The OTA EPG grabber silently starves the DVR.** This is `scan_create`'s
+hazard arriving by another route. Tvheadend's over-the-air grabber opens a
+subscription per mux to read EIT tables out of the transport — pointless here,
+since the guide arrives as XMLTV over a socket. Defaults are
+`ota_initial=True` (every startup) plus an `ota_cron` at 02:04 and 14:04, each
+mux held up to 600s. Observed as ten `epggrab` subscriptions in state **Bad**
+pinning both IPTV inputs, during which every recording failed with *"No input
+source available"* and streaming returned no data at all. It clears itself
+before you think to look and returns after each restart, which makes it easy
+to misread as a flaky channel. `setup.py` now disables it.
+
 **The first EPG push stores no programmes.** The parse creates and links the
 grabber channels from `<channel>`, but the `<programme>` elements in the *same*
 document are processed against links that did not yet exist. 2,014 channels
@@ -918,18 +938,26 @@ The extension is never hardcoded. `pathname` ends in `$x`, which Tvheadend
 fills from the *active muxer*, so switching the profile changes the extension
 automatically.
 
+Recordings are written to **`~/news/tvheadend/recordings`**, outside the repo.
+The *container* path stays `/recordings`, so the DVR config's storage setting
+and every filename already in the database survive a move of the host
+directory — only the bind mount source changes. Create the directory before
+starting: Docker creates a missing bind source as root, and Tvheadend runs as
+uid 1000.
+
 `pathname` is set to:
 
 ```
-$c - $t - %F %H-%M$n.$x        ->  Al Jazeera - Newshour - 2026-08-15 14-12.ts
+$c_$t_%F_%H%M$n.$x     ->  Al-Jazeera_final-check_2026-08-15_1248.ts
 ```
 
-Channel, title, then ISO date and time. `$n` is a uniquifier that stays empty
-unless the name already exists. `%H-%M` rather than `%R` deliberately — `%R`
-emits `14:12`, and a colon in a filename is legal on Linux but tiresome to
-quote in a shell. `$q` is available for a Plex/Jellyfin `tvshows/…SxxEyy`
-layout, but it depends on episode and genre data that FAST-channel guides
-mostly do not carry.
+No spaces anywhere. Underscores separate the fields; whitespace *inside* a
+channel or programme name becomes `-`, which is not a choice — `dvr_rec.c:292`
+hardcodes `-` and offers no setting. `_` is used only for unsafe characters,
+under `clean-title`. `$n` is a uniquifier that stays empty unless the name
+already exists, and `%H%M` avoids `%R`'s colon. `$q` is available for a
+Plex/Jellyfin `tvshows/…SxxEyy` layout, but depends on episode and genre data
+FAST-channel guides mostly do not carry.
 
 ### Limits
 
