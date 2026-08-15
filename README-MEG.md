@@ -886,6 +886,51 @@ explicit `ReadWritePaths` carve-out — failed with `[Errno 13] Permission
 denied`. The comment in the unit records this so it is not re-added as an
 apparent oversight.
 
+### Recording files: container and naming
+
+Recordings land as `.ts`, and that is correct rather than a fallback. The DVR
+uses the `pass` stream profile — **MPEG-TS Pass-thru** — which copies the
+broadcast stream with no transcode, no quality loss and negligible CPU, and
+tolerates a truncated write better than a seekable container would.
+
+**MP4 is not an option here at all.** This Tvheadend is built without libav, so
+there is no `profile-transcode`. The complete muxer list is:
+
+```
+profile-mpegts        MPEG-TS Pass-thru    <-- in use
+profile-mpegts-spawn  MPEG-TS Spawn
+profile-matroska      Matroska (mkv)
+profile-htsp / profile-audio
+```
+
+Matroska is the only alternative container, and it is also a straight remux.
+Worth remembering if the **44.1 kHz AAC** problem resurfaces: that sample rate
+is off-spec for MPEG-TS, which is why some players silently drop the audio
+track on those channels, and Matroska has no such constraint. Verified on the
+two test recordings:
+
+```
+FastChannels DVR test.ts         mpegts   h264 1920x1080   aac 44100 Hz
+News audio test - Al Jazeera.ts  mpegts   h264 1920x1080   aac 48000 Hz
+```
+
+The extension is never hardcoded. `pathname` ends in `$x`, which Tvheadend
+fills from the *active muxer*, so switching the profile changes the extension
+automatically.
+
+`pathname` is set to:
+
+```
+$c - $t - %F %H-%M$n.$x        ->  Al Jazeera - Newshour - 2026-08-15 14-12.ts
+```
+
+Channel, title, then ISO date and time. `$n` is a uniquifier that stays empty
+unless the name already exists. `%H-%M` rather than `%R` deliberately — `%R`
+emits `14:12`, and a colon in a filename is legal on Linux but tiresome to
+quote in a shell. `$q` is available for a Plex/Jellyfin `tvshows/…SxxEyy`
+layout, but it depends on episode and genre data that FAST-channel guides
+mostly do not carry.
+
 ### Limits
 
 - **DRM channels will not work.** No Widevine CDM in Tvheadend, so anything

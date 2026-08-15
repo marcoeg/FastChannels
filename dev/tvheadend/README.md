@@ -163,6 +163,30 @@ does `a->aa_rights &= ACCESS_ADVANCED_STREAMING|ACCESS_STREAMING`, and
 `/dvrfile/…` needs `ACCESS_RECORDER`. Play the `.ts` files in `recordings/`
 directly; `./vlc.py --recordings` lists them.
 
+## Recording files
+
+`.ts` is deliberate, not a fallback: the DVR uses the `pass` profile
+(MPEG-TS Pass-thru), which copies the stream with no transcode and tolerates a
+truncated write. **MP4 is not available** — this build has no
+`profile-transcode` (no libav), leaving `profile-mpegts`, `profile-matroska`,
+`profile-htsp` and `profile-audio`. Matroska is the only other container and is
+also a straight remux; it is the fix to reach for if the 44.1 kHz AAC channels
+lose their audio track, since that rate is off-spec for MPEG-TS but fine in
+Matroska.
+
+The extension is never hardcoded — `pathname` ends in `$x`, filled from the
+active muxer, so changing the profile changes the extension by itself.
+
+```
+pathname = $c - $t - %F %H-%M$n.$x
+           -> Al Jazeera - Newshour - 2026-08-15 14-12.ts
+```
+
+`%H-%M` rather than `%R`, because `%R` emits `14:12` and colons in filenames
+are tiresome to quote. `docs/property/pathname.md` lists every specifier;
+`$q` gives a Plex/Jellyfin layout but needs episode and genre data that
+FAST-channel guides rarely carry.
+
 ## Known limits
 
 **DRM channels will not work.** Tvheadend has no Widevine CDM, so anything
