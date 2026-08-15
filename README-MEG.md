@@ -664,6 +664,42 @@ Absence of that line means the rebuild did not pick up the change.
 
 ---
 
+## Companion: category export
+
+`dev/export_channels.py` exports every **enabled** channel in a category with
+both playback endpoints, as CSV or JSON.
+
+```bash
+python3 dev/export_channels.py --list-categories
+python3 dev/export_channels.py "Local News" --format csv -o local-news.csv
+python3 dev/export_channels.py Sports --no-resolve            # read-only, fast
+python3 dev/export_channels.py News --public-base http://192.168.50.17:5523
+```
+
+It joins three sources the server never joins for you:
+
+| Source | Contributes |
+| --- | --- |
+| `/api/channels` | the 42-field channel record — but no `source_channel_id`, so no way to build a playback URL |
+| `/m3u` + `/m3u/gracenote` | `local_url`, feed channel number, proxied logo, stream codecs, Gracenote station ID |
+| `/play/<src>/<id>.m3u8` | followed one hop to `remote_url` — the provider's own stream URL |
+
+Both playlists are fetched because Gracenote-carrying channels are partitioned
+into `/m3u/gracenote` and absent from `/m3u`. Categories are matched **exactly**
+(`--contains` for substring), since `News` and `Local News` are distinct.
+
+54 fields per channel by default; `--epg` adds now/next programming at the cost
+of one extra request per channel.
+
+> `--no-resolve` is strictly read-only. Without it the script exercises the real
+> `/play` path, so the server runs its normal health check and **may
+> auto-disable channels it finds DRM-protected or dead** — that is how 29 Roku
+> channels got disabled during development. Remote URLs also carry session
+> tokens and are sometimes IP-bound, so they are analysis snapshots, not durable
+> links; use `local_url` for playback.
+
+---
+
 ## See also
 
 `docs/openapi.yaml` and `docs/API.md` document the FastChannels HTTP API these
