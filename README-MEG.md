@@ -919,6 +919,46 @@ authentication, so nothing here needs a token.
 ./vlc.py --recordings                       # what record.py has captured
 ```
 
+### When a channel spins in VLC — `--relay`
+
+Some channels carry **server-side ad insertion**: content segments come from
+the content CDN, ad segments from a different host, and the playlist switches
+origin mid-stream. Put a `TYPE=SUBTITLES` rendition on top and VLC's adaptive
+demuxer stalls instead of playing. NHRA on `freelivesports` is the example that
+surfaced it — ffmpeg plays the same URL without complaint, but logs what VLC
+is choking on:
+
+```
+Cannot reuse HTTP connection for different host:
+    d35p4ep9ync6qx.cloudfront.net != stream.ads.ottera.tv
+Can't support the subtitle(uri: .../subtitles_0_0_0_f.m3u8)
+```
+
+`--relay` puts ffmpeg in front: it does the HLS work and hands VLC a plain
+MPEG-TS stream on stdin, so there is no manifest to parse, no host switching
+and no renditions to trip over.
+
+```bash
+./vlc.py --channel NHRA --relay
+```
+
+Requires `--channel` — it plays one stream, not a playlist. The cost is that
+VLC receives a stream rather than a playlist, so seeking and the channel name
+in the title bar are gone. Reach for it when a channel spins, not by default.
+
+Diagnosing a suspect channel is worth doing before assuming the channel is
+dead, since the manifest chain is usually healthy:
+
+```bash
+# does ffmpeg manage where VLC does not?
+ffmpeg -loglevel warning -i "http://127.0.0.1:5523/play/<src>/<id>.m3u8" \
+       -t 15 -c copy -f mpegts /tmp/probe.ts
+```
+
+If that captures cleanly, the stream is fine and the player is the problem —
+use `--relay`. `ffplay` (shipped with ffmpeg) is another option, since it uses
+the same demuxer.
+
 ### One window per channel
 
 VLC has **no "open in a new window" action** — picking an item in its playlist

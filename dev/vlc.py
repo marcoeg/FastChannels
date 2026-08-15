@@ -235,6 +235,56 @@ def launch(target: str, reuse: bool = False) -> None:
     print("launched VLC" + (" (reusing a running instance if any)" if reuse else ""))
 
 
+def relay(url: str, name: str) -> int:
+    """Play through ffmpeg instead of letting VLC parse the HLS itself.
+
+    Some channels carry server-side ad insertion: content segments come from
+    the content CDN, ad segments from a different host, and the playlist
+    switches origin mid-stream. Add a SUBTITLES rendition on top and VLC's
+    adaptive demuxer spins instead of playing. NHRA on freelivesports does
+    exactly this —
+
+        Cannot reuse HTTP connection for different host:
+            d35p4ep9ync6qx.cloudfront.net != stream.ads.ottera.tv
+        Can't support the subtitle(uri: .../subtitles_0_0_0_f.m3u8)
+
+    — while ffmpeg handles it without complaint. So let ffmpeg do the HLS work
+    and hand VLC a plain MPEG-TS stream on stdin: no manifest parsing, no host
+    switching, no renditions to trip over.
+
+    The cost is that VLC gets a stream rather than a playlist, so seeking and
+    the channel name in the title bar are gone. Use it when a channel spins,
+    not by default.
+    """
+    ffmpeg = shutil.which("ffmpeg")
+    vlc = shutil.which("vlc")
+    if not ffmpeg:
+        sys.exit("ffmpeg not found on PATH — needed for --relay")
+    if not vlc:
+        sys.exit("vlc not found on PATH")
+
+    # Loopback rather than the published base URL: this is a local pipe, and
+    # there is no reason to put mDNS resolution in front of it.
+    parts = urllib.parse.urlsplit(url)
+    base = urllib.parse.urlsplit(FASTCHANNELS)
+    local = urllib.parse.urlunsplit(
+        (base.scheme, base.netloc, parts.path, parts.query, parts.fragment))
+
+    print(f"relaying {name} through ffmpeg — close VLC to stop")
+    ff = subprocess.Popen(
+        [ffmpeg, "-hide_banner", "-loglevel", "error", "-nostdin",
+         "-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "30",
+         "-rw_timeout", "30000000", "-i", local, "-c", "copy", "-f", "mpegts", "-"],
+        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    player = subprocess.Popen([vlc, "--no-one-instance", "-"], stdin=ff.stdout,
+                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    # Let ffmpeg see VLC's exit: the parent must not hold the read end open.
+    ff.stdout.close()
+    player.wait()
+    ff.terminate()
+    return 0
+
+
 def save(body: str, dest: pathlib.Path) -> int:
     count = body.count("#EXTINF")
     if not count:
@@ -264,6 +314,8 @@ def main() -> int:
                     help="launch VLC on the result, in its own window")
     ap.add_argument("--reuse", action="store_true",
                     help="with --play, hand off to a running VLC instead of a new window")
+    ap.add_argument("--relay", action="store_true",
+                    help="pipe one channel through ffmpeg into VLC — use when a channel spins")
     args = ap.parse_args()
 
     if args.recordings:
@@ -279,6 +331,14 @@ def main() -> int:
     body = fc_playlist(args.category, args.source, search)
     if args.channel:
         body = fc_filter_channel(body, args.channel)
+
+    if args.relay:
+        if not args.channel:
+            sys.exit("--relay needs --channel: it plays one stream, not a playlist")
+        lines = body.splitlines()
+        url = next((l for l in lines if l.startswith("http")), None)
+        name = next((extinf_name(l) for l in lines if l.startswith("#EXTINF")), args.channel)
+        return relay(url, name)
 
     dest = pathlib.Path(args.write).expanduser() if args.write else None
     if dest is None and not args.play:
