@@ -18,6 +18,8 @@ Reach for this skill whenever a task involves:
 - EPG or guide data — what is on now, guide gaps, stale programming
 - M3U playlists or XMLTV output
 - Channels DVR or Plex integration
+- recording a show — read [It is not a DVR](#it-is-not-a-dvr) first; this
+  server cannot record, but it is what feeds the thing that can
 - anything naming FastChannels, or the API at `127.0.0.1:5523`
 
 What it lets you do: list and filter channels across every source, get a
@@ -48,6 +50,45 @@ destructive ones — see the safety section.
 Local configuration deviates from upstream defaults: the port is bound to
 `127.0.0.1` only, `VERSION_CHECK_ENABLED=0`, and `FC_YTDLP_AUTO_UPGRADE=0`
 (weekly unattended `pip install` from GitHub master is disabled).
+
+## It is not a DVR
+
+FastChannels **does not record anything**. There is no recording, timer,
+series-pass or storage model anywhere in it, and nowhere to put a recording —
+`/data` holds only the database, its backups, browser sign-in profiles, and
+image/XML caches. The database stores `Channel`, `Program`, `Source` and `Feed`:
+guide metadata, not media.
+
+It is a **scraper and publisher**. It harvests channels and EPG from ~37 free
+streaming services and republishes them in the two formats a DVR understands —
+M3U playlists and XMLTV guide data — plus `/play/...` to resolve a channel to a
+live stream on demand. Think tuner-plus-guide-provider, not recorder.
+
+**Channels DVR** is a separate commercial product, running elsewhere on the
+network, that does the recording. FastChannels feeds it. If asked to record
+something, say so plainly and offer to register the relevant playlist with the
+DVR instead.
+
+The integration runs both ways:
+
+| Direction | What |
+| --- | --- |
+| Out → DVR | `PUT /providers/m3u/sources/{name}` registers a playlist as a DVR source; `GET /status` checks connectivity; `GET /dvr/lineups` then `PUT /dvr/lineups/{id}` nudges a guide refresh, hourly |
+| In ← you | `GET /api/dvr/test-connection`, `POST /api/feeds/{id}/push-to-dvr`, `POST /api/feeds/{id}/push-prismcast-to-dvr`, `POST /api/sources/{id}/push-to-dvr`, `POST /api/raw-output/push-to-dvr` |
+
+Settings that matter: `channels_dvr_url` (where the DVR lives) and
+`dvr_epg_auto_refresh` (the hourly nudge), both via `POST /api/settings`.
+
+**Gracenote lookups depend on the DVR.** FastChannels holds no Gracenote
+licence, so `/api/gracenote-search` and `/api/channels/{id}/gracenote-suggestions`
+proxy through the configured Channels DVR. With no `channels_dvr_url` set they
+return `400` — that is a missing dependency, not a bug. **This install has no
+DVR configured**, so those two endpoints currently fail.
+
+Two things that resemble recording but are not: **PrismCast** captures DRM
+streams through a headless Chrome and re-streams them live — nothing is
+retained; and the nightly `/data/backups` job backs up the SQLite database, not
+media.
 
 ## Safety classification
 
