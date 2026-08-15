@@ -5,7 +5,7 @@ part of the upstream project.
 
 | | |
 | --- | --- |
-| **Tools** | `vlc.py` — hand a channel to VLC, from either server<br>`dev/news_origins.py` — where local news channels broadcast from<br>`dev/export_channels.py` — export a category with both playback endpoints |
+| **Tools** | `record.py` — record a channel, now or scheduled<br>`vlc.py` — hand a channel to VLC, from either server<br>`dev/news_origins.py` — where local news channels broadcast from<br>`dev/export_channels.py` — export a category with both playback endpoints |
 | **DVR** | Tvheadend, fed from FastChannels — see [Recording](#recording-tvheadend-as-the-dvr) |
 | **Requires** | Python 3.9+, standard library only. No pip install. Tested on 3.12.3. |
 | **Server** | A running FastChannels instance (default `http://127.0.0.1:5523`) |
@@ -794,7 +794,94 @@ lists the valid names) or the server is unreachable.
 
 ---
 
+## Recording — `record.py`
+
+The DVR. Symlinked at the repo root; the file is `dev/record.py`. It records
+straight from FastChannels with ffmpeg, and hands scheduling to systemd.
+
+```bash
+./record.py now       --channel "Al Jazeera" --duration 30m
+./record.py at        --channel "Al Jazeera" --start "18:00" --duration 1h
+./record.py programme --channel "Al Jazeera" --match "Newshour"
+./record.py epg       --channel "Al Jazeera"        # what is on, to pick from
+./record.py list                                    # what is scheduled
+./record.py cancel fcrec-newshour-1786824833
+```
+
+`--mp4` remuxes after capture, `--out DIR` redirects, and `--json` on
+`epg`/`list`/`programme` makes it comfortable to drive from an agent.
+Recordings land in `~/news/recordings`.
+
+### Why this replaced Tvheadend
+
+The decisive number: **206 channels Tvheadend cannot reach at all.** It ignores
+`tvc-guide-stationid`, so the entire `/m3u/gracenote` playlist is invisible to
+it — and that playlist holds *ABC News Live*, *60 Minutes* and *48 Hours*.
+Verified: Tvheadend's channel grid has no "48 Hours"; `record.py` records it.
+
+The rest is friction removed. No XMLTV socket shim with a double-push quirk,
+no digest-only auth that VLC cannot use, no recordings unreachable over HTTP,
+and none of the defaults that silently broke recording — `scan_create` opening
+every stream, an OTA EPG grabber pinning both IPTV inputs so that *every*
+recording failed with "No input source available", and a `TZ` setting that did
+nothing because the image ships no tzdata.
+
+### How it works
+
+Capture is a plain copy, no re-encode:
+
+```
+ffmpeg -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 30 \
+       -i <play-url> -t <seconds> -c copy -f mpegts <out>.ts
+```
+
+Scheduling is one transient systemd timer per recording, and there is **no
+state file** — `systemctl --user list-timers` is the database:
+
+```
+systemd-run --user --unit=fcrec-<slug>-<epoch> \
+  --on-calendar="2026-08-15 18:00:00" \
+  --timer-property=RemainAfterElapse=no \
+  <record.py> now --channel ... --duration ...
+```
+
+`RemainAfterElapse=no` matters: without it a fired timer lingers and `list`
+fills with corpses. Lingering is already enabled for this account, so timers
+survive logout and fire at boot.
+
+The channel URL is resolved when the recording **starts**, never when it is
+scheduled — FastChannels re-resolves `/play/...` per request and upstream
+session tokens expire, so a URL captured hours earlier would be stale.
+
+Each run leaves `.meta/<name>.json` (channel, URL, window, exit status, size)
+and `.meta/<name>.log` (ffmpeg stderr) beside the recording. Enough to answer
+"did it record, and if not why" without reintroducing a database.
+
+### Two nuances
+
+**Guides drift**, so `programme` pads by default: 30s before, 120s after.
+`now` and `at` pad nothing, because you stated the window.
+
+**HLS gives you back-buffer.** ffmpeg starts from segments the CDN already
+published, so it runs ahead of real time before settling — a 45s capture
+completed in 36s of wall clock. `-t` counts *stream* seconds, not wall-clock,
+so a recording can finish before the programme really ends. The 120s end-pad
+absorbs a typical 30-60s buffer.
+
+### What it deliberately does not do
+
+- **Series rules.** "Record Newshour every day" needs a daemon and dedup state.
+  Excluded by choice; schedule each airing instead.
+- **HTSP.** Kodi and other Tvheadend clients. Unused here.
+- **A web UI.** `record.py list`, `ls`, and `vlc.py --recordings` cover it.
+
+---
+
 ## Recording: Tvheadend as the DVR
+
+> **Being retired.** `record.py` above replaces this. Tvheadend is still
+> running until the replacement has proven itself in real use; this section is
+> kept until it is removed.
 
 **FastChannels does not record anything.** No recording, timer, series-pass or
 storage model exists in it, and there is nowhere to put a recording — `/data`

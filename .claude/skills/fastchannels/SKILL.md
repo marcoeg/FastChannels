@@ -18,8 +18,8 @@ Reach for this skill whenever a task involves:
 - EPG or guide data — what is on now, guide gaps, stale programming
 - M3U playlists or XMLTV output
 - Channels DVR or Plex integration
-- recording a show — FastChannels cannot record, but Tvheadend on this machine
-  can; see [It does not record](#it-does-not-record--tvheadend-does)
+- recording a show — FastChannels cannot record; `record.py` on this machine
+  does, see [It does not record](#it-does-not-record--recordpy-does)
 - anything naming FastChannels, or the API at `127.0.0.1:5523`
 
 What it lets you do: list and filter channels across every source, get a
@@ -51,21 +51,53 @@ Local configuration deviates from upstream defaults: the port is bound to
 `127.0.0.1` only, `VERSION_CHECK_ENABLED=0`, and `FC_YTDLP_AUTO_UPGRADE=0`
 (weekly unattended `pip install` from GitHub master is disabled).
 
-## It does not record — Tvheadend does
+## It does not record — `record.py` does
 
 FastChannels has **no recording, timer, series-pass or storage model**, and
 nowhere to put a recording: `/data` holds the database, its backups, browser
 sign-in profiles and image/XML caches. The schema is `Channel` / `Program` /
 `Source` / `Feed` — guide metadata, not media. It is a scraper and publisher.
 
-**This install has a DVR attached: Tvheadend, fed from FastChannels.** If asked
-to record something, that is where it happens.
+**To record, use `record.py`** (repo root, symlink to `dev/record.py`). It
+captures with ffmpeg straight from FastChannels and schedules with systemd:
+
+```bash
+./record.py now       --channel "Al Jazeera" --duration 30m
+./record.py at        --channel "Al Jazeera" --start "18:00" --duration 1h
+./record.py programme --channel "Al Jazeera" --match "Newshour"   # from the guide
+./record.py epg       --channel "Al Jazeera" --json               # what is on
+./record.py list --json                                           # what is scheduled
+./record.py cancel <unit>
+```
+
+Recordings land in `~/news/recordings`, with a `.meta/<name>.json` sidecar
+carrying channel, URL, window, exit status and size — check that to find out
+whether something recorded and why not.
+
+Two things to tell a user rather than let them discover: `programme` pads 30s
+before and 120s after because guides drift, and HLS back-buffer means ffmpeg
+runs ahead of real time, so `-t` counts *stream* seconds and a recording can
+finish slightly before the programme ends.
+
+**No series rules.** Recurring recordings would need a daemon; schedule each
+airing instead.
+
+**Tvheadend is being retired** and should not be used for new work. It reaches
+only 2,014 of the 2,220 channels — it ignores `tvc-guide-stationid`, so the
+whole `/m3u/gracenote` playlist, including *ABC News Live*, *60 Minutes* and
+*48 Hours*, is invisible to it. It is still running for now; the section below
+documents it until it is removed.
+
+## Legacy: Tvheadend as the DVR
+
+Still running, still works, but superseded by `record.py` above. Documented
+here until it is removed; do not build anything new on it.
 
 ```
 Tvheadend 4.3   http://127.0.0.1:9981   admin / fastchannels   (digest auth)
   2,014 channels mirroring the FastChannels lineup
   ~91,000 EPG events, refreshed six-hourly by fastchannels-epg.service
-  recordings -> dev/tvheadend/recordings
+  recordings -> ~/news/tvheadend/recordings
 ```
 
 Its API is form-encoded like FastChannels' is, but needs digest auth:
