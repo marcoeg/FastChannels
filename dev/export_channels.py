@@ -80,6 +80,57 @@ def get_text(url: str, timeout: int = 60) -> str:
         return r.read().decode("utf-8", "replace")
 
 
+def server_timezone(base: str) -> str:
+    """The timezone the server itself displays times in.
+
+    XMLTV emits UTC (`+0000`) and /api/channels/{id}/preview returns UTC ISO,
+    while /admin/guide/programs formats in this zone — so without normalising,
+    the three EPG modes disagree with each other and with the admin UI.
+    """
+    try:
+        return get_json(f"{base}/api/settings", timeout=15).get("timezone_name") or "UTC"
+    except Exception:  # noqa: BLE001
+        return "UTC"
+
+
+def convert_iso(value: str | None, tz) -> str | None:
+    """Re-express an ISO timestamp in *tz*. Naive input is assumed UTC."""
+    if not value or tz is None:
+        return value
+    from datetime import datetime, timezone as _tz
+    try:
+        dt = datetime.fromisoformat(value)
+    except ValueError:
+        return value
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=_tz.utc)
+    return dt.astimezone(tz).isoformat()
+
+
+# Fields holding an ISO instant that should follow the chosen timezone.
+_TIME_FIELDS = ("epg_first", "epg_last",
+                "now_start", "now_end", "next_start", "next_end")
+
+
+def localise_times(rows: list[dict], tz) -> None:
+    """Rewrite programme and now/next timestamps in place.
+
+    Channel-record timestamps (first_seen_at, last_seen_at, …) are left in UTC:
+    they are database bookkeeping rather than schedule data, and silently
+    shifting them would make rows harder to compare against the API.
+    """
+    if tz is None:
+        return
+    for row in rows:
+        for field in _TIME_FIELDS:
+            if field in row:
+                row[field] = convert_iso(row[field], tz)
+        for prog in row.get("programs") or ():
+            for field in ("start", "stop"):
+                if field in prog:
+                    prog[field] = convert_iso(prog[field], tz)
+
+
 def list_categories(base: str) -> list[tuple[str, int]]:
     stats = get_json(f"{base}/api/stats")
     return [(c["name"], c["count"]) for c in stats.get("categories", [])]
@@ -404,6 +455,18 @@ def build_rows(args) -> list[dict]:
                 print(f"  {i}/{len(targets)}", file=sys.stderr)
             time.sleep(args.resolve_delay)
 
+    tz = None
+    if args.epg and not args.utc:
+        from zoneinfo import ZoneInfo
+        name = args.tz or server_timezone(base)
+        try:
+            tz = ZoneInfo(name)
+        except Exception:  # noqa: BLE001
+            print(f"warning: unknown timezone {name!r}; leaving times in UTC", file=sys.stderr)
+        else:
+            print(f"times in {name}"
+                  + ("" if args.tz else " (the server's configured timezone)"), file=sys.stderr)
+
     if args.epg == "now":
         print(f"fetching now/next for {len(rows)} channels "
               f"(one request each)…", file=sys.stderr)
@@ -456,6 +519,7 @@ def build_rows(args) -> list[dict]:
                   + ", ".join(r["name"] for r in still[:6])
                   + (" …" if len(still) > 6 else ""), file=sys.stderr)
 
+    localise_times(rows, tz)
     return rows
 
 
@@ -534,6 +598,11 @@ def main() -> int:
                          "(one request per channel); window = five-hour schedule "
                          "by channel id, batched; full = complete stored schedule "
                          "from /epg.xml in a single request. Bare --epg means now.")
+    ap.add_argument("--tz", metavar="ZONE",
+                    help="IANA timezone for programme times, e.g. America/New_York. "
+                         "Defaults to the server's configured timezone.")
+    ap.add_argument("--utc", action="store_true",
+                    help="leave programme times in UTC as the server emits them")
     ap.add_argument("--no-native-epg", action="store_true",
                     help="in --epg full, skip the native-feed fallback that recovers "
                          "Gracenote-partitioned channels (avoids a large second fetch)")

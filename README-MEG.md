@@ -614,6 +614,8 @@ export_channels.py [--list-categories] [--base URL] [--public-base URL]
 | `--resolve-delay SEC` | Pause between remote lookups. Default `0.4`. |
 | `--epg [MODE]` | Attach programme data: `now`, `window` or `full`. Bare `--epg` means `now`. See [EPG modes](#epg-modes). |
 | `--epg-offset HOURS` | Shift the `window` mode window. Server clamps to ±48. |
+| `--tz ZONE` | IANA timezone for programme times. Defaults to the server's configured timezone. |
+| `--utc` | Leave programme times in UTC, as the server emits them. |
 
 ### Category matching is exact
 
@@ -707,7 +709,31 @@ nothing was scraped for them.
 `window` times are **display strings** in the server's timezone (`"8:00 AM"`)
 next to `left`/`width` percentages, because that route backs the admin guide
 grid. `full` gives real timestamps. Prefer `full` unless you specifically need
-Gracenote channels or a bounded window.
+a bounded window.
+
+#### Timezone
+
+The server is inconsistent here: XMLTV emits UTC (`+0000`),
+`/api/channels/{id}/preview` returns UTC ISO, and `/admin/guide/programs`
+formats in the server's configured timezone. Left alone, the three `--epg`
+modes would disagree with each other and with the admin UI.
+
+So programme times are converted to the server's own timezone by default,
+read from `/api/settings`:
+
+```console
+$ python3 dev/export_channels.py News --no-resolve --epg full
+times in America/Los_Angeles (the server's configured timezone)
+  start: 2026-08-15T05:58:00-07:00      # was …T12:58:00+00:00
+```
+
+`--tz Europe/Rome` picks another zone; `--utc` keeps the server's raw UTC. An
+unknown zone warns and falls back to UTC rather than failing the export.
+
+Only schedule fields are converted — `epg_first`, `epg_last`, the `now_*` and
+`next_*` pairs, and each programme's `start`/`stop`. Channel-record timestamps
+such as `first_seen_at` stay in UTC so rows remain directly comparable with
+`/api/channels`.
 
 CSV output drops the `programs` array — hundreds of programmes JSON-encoded
 into one cell exceeds Python's own 131072-byte field limit and is unreadable in
