@@ -1041,11 +1041,7 @@ def play_vlc(source_name: str, channel_id: str):
     return Response(
         playlist,
         mimetype='audio/x-mpegurl',
-        # `inline`, not `attachment`: this endpoint backs the guide's "Open in
-        # VLC" button, and `attachment` forces every browser to save the file
-        # instead of handing it to a player, which is the one thing the button
-        # exists to do. With `inline` the browser can offer its media handler.
-        headers={'Content-Disposition': f'inline; filename="{channel_id}.m3u"'},
+        headers={'Content-Disposition': f'attachment; filename="{channel_id}.m3u"'},
     )
 
 

@@ -922,33 +922,40 @@ serve the same channel, and `--via` picks which.
 
 The guide's channel preview has an **Open in VLC** button
 (`app/templates/admin/guide.html:1183`) pointing at
-`/play/{source}/{id}.m3u`. Upstream serves that endpoint with
+`/play/{source}/{id}.m3u`, which is served with
 
 ```
 Content-Disposition: attachment; filename="OM017937.m3u"
 ```
 
-and `attachment` forces *every* browser to save the file rather than hand it
-to a player — the one thing the button exists to do. No MIME or handler
-setting overrides it; the file lands in `~/Downloads` and nothing launches.
+so the browser saves it to `~/Downloads` instead of launching anything. There
+is no server-side header that fixes this for both browsers, and it is worth
+recording why, because `inline` looks like the obvious answer and is not:
 
-`dev/vlc-inline.patch` changes that single header to `inline`, so the browser
-can offer its media handler instead. Everything else on this machine was
-already correct: `.m3u` resolves to `audio/x-mpegurl`, which maps to
-`vlc.desktop`, and snap Firefox has the `desktop` and `home` interfaces
-connected so it can reach host VLC through `xdg-desktop-portal`.
+| Header | Firefox | Chrome |
+| --- | --- | --- |
+| `attachment` | saves to Downloads | saves to Downloads |
+| `inline` | offers *Open with* → works | renders it in Chrome's own `<video>` player, which cannot play raw HLS — a black, dead page with no way out |
 
-One browser step is still needed, once. In Firefox the first click offers
-*Open with* — choose VLC and tick *Do this automatically for files like this
-from now on*. Chrome behaves the same way. After that, clicking a programme in
-the guide launches VLC with nothing written to `~/Downloads`.
+Handing a file to an external application is a capability browsers removed
+deliberately; no MIME type restores it. So the fix is a **one-time browser
+setting**, and upstream's `attachment` is left alone:
 
-Applying it needs a rebuild, because `app/` is copied into the image rather
-than bind-mounted:
+- **Chrome** — click the button once, then on the download choose
+  *Always open files of this type*.
+- **Firefox** — click once, then right-click the entry in the Downloads panel
+  and choose *Always Open Similar Files*.
 
-```bash
-sudo docker compose up -d --build
-```
+After that every click downloads a ~90-byte `.m3u` and immediately launches
+VLC. Nothing else on this machine needed changing: `.m3u` already resolves to
+`audio/x-mpegurl`, which maps to `vlc.desktop`, and snap Firefox has the
+`desktop` and `home` interfaces connected so it reaches host VLC through
+`xdg-desktop-portal`.
+
+The cost is one small file per click accumulating in `~/Downloads`. Avoiding
+that entirely needs a custom `vlc://` scheme handler — a `.desktop` file
+registering `x-scheme-handler/vlc` plus a two-line patch to `guide.html` — 
+which trades the clutter for a template divergence upstream would never take.
 
 ### One window per channel
 
