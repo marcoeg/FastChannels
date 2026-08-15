@@ -6,6 +6,7 @@ part of the upstream project.
 | | |
 | --- | --- |
 | **Tools** | `dev/news_origins.py` — where local news channels broadcast from<br>`dev/export_channels.py` — export a category with both playback endpoints |
+| **DVR** | Tvheadend, fed from FastChannels — see [Recording](#recording-tvheadend-as-the-dvr) |
 | **Requires** | Python 3.9+, standard library only. No pip install. Tested on 3.12.3. |
 | **Server** | A running FastChannels instance (default `http://127.0.0.1:5523`) |
 | **Reference** | `docs/openapi.yaml` and `docs/API.md` document the HTTP API both scripts read |
@@ -793,6 +794,115 @@ lists the valid names) or the server is unreachable.
 
 ---
 
+## Recording: Tvheadend as the DVR
+
+**FastChannels does not record anything.** No recording, timer, series-pass or
+storage model exists in it, and there is nowhere to put a recording — `/data`
+holds the database, its backups, browser sign-in profiles and image/XML caches.
+The schema is `Channel` / `Program` / `Source` / `Feed`: guide metadata, not
+media. It is a scraper and publisher; something else has to do the recording.
+
+Two options, and this install uses the second.
+
+| | Channels DVR | Tvheadend |
+| --- | --- | --- |
+| Licence | Closed-source, Fancy Bits LLC | **GPLv3** |
+| Cost | $8/month or $80/year, 30-day trial | **Free** |
+| Integration | First-class — FastChannels has push-to-DVR endpoints | M3U + XMLTV, set up by hand |
+| Gracenote lookups | Provides them | Not available |
+
+Channels DVR is easy to mistake for open source — it self-hosts, installs from
+a shell script, ships a Docker image, and its download page quotes no price.
+None of that implies an open licence.
+
+### What is running
+
+```
+Tvheadend 4.3-2758   http://127.0.0.1:9981   (admin / fastchannels)
+  2,014 channels     mirroring the full FastChannels lineup
+  2,014 muxes        one per channel, created from /m3u
+  ~91,000 EPG events refreshed every 6 hours
+```
+
+Verified end to end: channel numbers, names, icons and tags carried across from
+the M3U; EPG matched with no manual mapping; and a channel streaming 17 MB of
+valid MPEG-TS out of Tvheadend, with the corresponding `[play]` entry in the
+FastChannels log.
+
+Everything lives in `dev/tvheadend/` — compose file, an API-driven `setup.py`,
+the `push_epg.py` shim, a systemd unit, and a README with the full rationale.
+
+### Why it works at all
+
+Tvheadend reads exactly the attributes FastChannels emits. Checked against its
+source rather than its documentation:
+
+| FastChannels emits | Tvheadend does | Where |
+| --- | --- | --- |
+| `tvg-id="{source}.{id}"` | stores as `iptv_epgid` — **the key XMLTV matches on** | `iptv_auto.c` |
+| `tvg-chno` | the channel number | `iptv_auto.c:296` |
+| `tvg-logo`, `group-title` | icon and tag | `iptv_auto.c` |
+| a `302` from `/play/…` | follows it (`hc_handle_location = 1`) | `iptv_http.c:595` |
+| HLS, including AES-128 | native reader with `hls_key_url` | `iptv_http.c` |
+
+Because `tvg-id` and the XMLTV `<channel id>` are the same string, EPG matching
+needs no translation layer.
+
+### Three things that were not obvious
+
+**Never let Tvheadend scan.** `scan_create` means "connect to every stream to
+discover services" — 2,014 live `/play` requests, which would hammer every
+provider, trip Roku's source-wide cooldown, and let FastChannels' health check
+auto-disable channels wholesale. `iptv_mux.c:416` gives the alternative: with
+`service_sid` set, one service is created per mux at creation time and channels
+come straight from the playlist. **Zero streams opened** while creating all
+2,014.
+
+**The bouquet is created disabled.** Services existed but the channel count
+stayed at 0 until it was enabled. `setup.py` does this now.
+
+**The first EPG push stores no programmes.** The parse creates and links the
+grabber channels from `<channel>`, but the `<programme>` elements in the *same*
+document are processed against links that did not yet exist. 2,014 channels
+linked and 0 events; re-pushing immediately gave ~92,000. `push_epg.py` sends
+twice on a one-shot run.
+
+### Keeping the guide fresh
+
+A systemd **user** service, `fastchannels-epg.service`, pushes on start and
+every six hours. User units fit because lingering is already enabled for this
+account, so it starts at boot and survives logout with no `sudo` — matching the
+existing `hermes-gateway.service` pattern.
+
+```bash
+systemctl --user status fastchannels-epg.service
+journalctl --user -u fastchannels-epg.service -f
+```
+
+The unit carries **no filesystem sandboxing**, deliberately: connecting to a
+Unix socket needs write access to the socket file under `/home`, and every
+`ProtectSystem`/`ProtectHome` combination tried — including `full` with an
+explicit `ReadWritePaths` carve-out — failed with `[Errno 13] Permission
+denied`. The comment in the unit records this so it is not re-added as an
+apparent oversight.
+
+### Limits
+
+- **DRM channels will not work.** No Widevine CDM in Tvheadend, so anything
+  needing the PrismCast bridge is out — the same limit as any non-browser
+  client.
+- **Skip `/m3u/gracenote`.** Tvheadend ignores `tvc-guide-stationid`, so those
+  entries arrive with no EPG hook. Plain `/m3u` + `/epg.xml` is the pairing —
+  simpler than the two-playlist split Channels DVR needs.
+- **Proxied sources are fine.** Samsung and STIRR have no direct upstream URL,
+  but Tvheadend fetches through `local_url` and FastChannels proxies
+  server-side.
+- **`network_mode: host` is load-bearing.** FastChannels emits literal
+  `http://127.0.0.1:5523/play/…` URLs because Public Base URL is unset; on a
+  bridge network those would point at Tvheadend itself.
+
+---
+
 ## Repository
 
 This working copy lives in a **private** repo, independent of upstream:
@@ -918,5 +1028,9 @@ Absence of that line means the rebuild did not pick up the change.
 
 ## See also
 
-`docs/openapi.yaml` and `docs/API.md` document the FastChannels HTTP API these
-scripts read from — 182 paths, verified against the route handlers.
+- `docs/openapi.yaml` and `docs/API.md` — the FastChannels HTTP API these
+  scripts read from. 184 paths, verified against the route handlers by
+  `dev/check_api_docs.py`.
+- `dev/tvheadend/README.md` — the full Tvheadend rationale, setup and limits,
+  summarised under [Recording](#recording-tvheadend-as-the-dvr) above.
+- `.claude/skills/fastchannels/SKILL.md` — the same API described for an agent.
