@@ -919,14 +919,15 @@ authentication, so nothing here needs a token.
 ./vlc.py --recordings                       # what record.py has captured
 ```
 
-### When a channel spins in VLC — `--relay`
+### When a channel misbehaves in VLC — `--relay`
 
-Some channels carry **server-side ad insertion**: content segments come from
-the content CDN, ad segments from a different host, and the playlist switches
-origin mid-stream. Put a `TYPE=SUBTITLES` rendition on top and VLC's adaptive
-demuxer stalls instead of playing. NHRA on `freelivesports` is the example that
-surfaced it — ffmpeg plays the same URL without complaint, but logs what VLC
-is choking on:
+Server-side ad insertion breaks players in **two different ways**, and they
+need different answers.
+
+**Origin switching — VLC spins and never starts.** Content segments come from
+the content CDN, ad segments from another host, and the playlist changes origin
+mid-stream. NHRA on `freelivesports` does this; ffmpeg plays the same URL
+without complaint but says what VLC is choking on:
 
 ```
 Cannot reuse HTTP connection for different host:
@@ -934,30 +935,48 @@ Cannot reuse HTTP connection for different host:
 Can't support the subtitle(uri: .../subtitles_0_0_0_f.m3u8)
 ```
 
-`--relay` puts ffmpeg in front: it does the HLS work and hands VLC a plain
-MPEG-TS stream on stdin, so there is no manifest to parse, no host switching
-and no renditions to trip over.
+**Encoding changes — video freezes on an advert and only audio comes back.**
+Pluto's stitcher splices ads encoded at a *different resolution*. With
+`-c copy` the MPEG-TS output is fixed at whatever the first segment was, so the
+ad's frames land in a track declaring the wrong geometry. Constructed splice,
+1216x684 content with a 640x360 advert:
 
-```bash
-./vlc.py --channel NHRA --relay
+```
+-c copy   -> ONE video track containing both 1216x684 and 640x360
+transcode -> 1216x684 throughout
 ```
 
-Requires `--channel` — it plays one stream, not a playlist. The cost is that
-VLC receives a stream rather than a playlist, so seeking and the channel name
-in the title bar are gone. Reach for it when a channel spins, not by default.
-
-Diagnosing a suspect channel is worth doing before assuming the channel is
-dead, since the manifest chain is usually healthy:
+ffmpeg tolerates the mixed track; VLC's decoder does not — it freezes on the
+last good frame and never re-initialises. Meanwhile the audio comes from a
+*separate* rendition playlist whose parameters never change, so it plays right
+through the break and returns alone afterwards. `90s Throwback` shows this
+exactly.
 
 ```bash
-# does ffmpeg manage where VLC does not?
+./vlc.py --channel "90s Throwback" --relay      # re-encodes: fixes both
+./vlc.py --channel NHRA --relay-copy            # passthrough: fixes origin switching only
+```
+
+`--relay` re-encodes to a fixed 1280x720 and normalises audio to 48 kHz stereo,
+which is the only thing that keeps the output stable regardless of what the
+input does. Measured at **1.62x realtime** on this machine's 16 cores, so live
+viewing has headroom. `--relay-copy` is the old passthrough — free, and enough
+when the only problem is origin switching.
+
+Both need `--channel`; they play one stream, not a playlist. Either way VLC
+gets a stream rather than a playlist, so seeking and the channel name in the
+title bar are gone. Reach for them when a channel misbehaves, not by default.
+
+Before assuming a channel is dead, check whether ffmpeg manages where VLC does
+not — the manifest chain is usually healthy:
+
+```bash
 ffmpeg -loglevel warning -i "http://127.0.0.1:5523/play/<src>/<id>.m3u8" \
        -t 15 -c copy -f mpegts /tmp/probe.ts
 ```
 
-If that captures cleanly, the stream is fine and the player is the problem —
-use `--relay`. `ffplay` (shipped with ffmpeg) is another option, since it uses
-the same demuxer.
+If that captures cleanly the stream is fine and the player is the problem.
+`ffplay` is another quick check, since it uses the same demuxer.
 
 ### One window per channel
 

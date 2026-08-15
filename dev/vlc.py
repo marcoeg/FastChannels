@@ -69,6 +69,10 @@ RECORDINGS = pathlib.Path.home() / "news" / "recordings"
 
 FASTCHANNELS = "http://127.0.0.1:5523"
 
+# Output geometry for a normalising relay. Anything spliced in at another
+# resolution is scaled and padded to this, so the track stays consistent.
+RELAY_SIZE = "1280:720"
+
 EXTINF_HEAD = re.compile(r"^#EXTINF:(-?[\d.]+)")
 EXTINF_ATTR = re.compile(r'([A-Za-z0-9_.-]+)="([^"]*)"')
 
@@ -235,25 +239,43 @@ def launch(target: str, reuse: bool = False) -> None:
     print("launched VLC" + (" (reusing a running instance if any)" if reuse else ""))
 
 
-def relay(url: str, name: str) -> int:
+def relay(url: str, name: str, copy_only: bool = False) -> int:
     """Play through ffmpeg instead of letting VLC parse the HLS itself.
 
-    Some channels carry server-side ad insertion: content segments come from
-    the content CDN, ad segments from a different host, and the playlist
-    switches origin mid-stream. Add a SUBTITLES rendition on top and VLC's
-    adaptive demuxer spins instead of playing. NHRA on freelivesports does
-    exactly this —
+    Server-side ad insertion breaks players in two distinct ways, and they need
+    different answers.
+
+    **Origin switching.** Content segments come from the content CDN, ad
+    segments from another host, and the playlist changes origin mid-stream. Put
+    a SUBTITLES rendition on top and VLC's adaptive demuxer spins instead of
+    playing. NHRA on freelivesports does this —
 
         Cannot reuse HTTP connection for different host:
             d35p4ep9ync6qx.cloudfront.net != stream.ads.ottera.tv
-        Can't support the subtitle(uri: .../subtitles_0_0_0_f.m3u8)
 
-    — while ffmpeg handles it without complaint. So let ffmpeg do the HLS work
-    and hand VLC a plain MPEG-TS stream on stdin: no manifest parsing, no host
-    switching, no renditions to trip over.
+    — while ffmpeg handles it silently. A passthrough relay (`--relay-copy`) is
+    enough here, and costs nothing.
 
-    The cost is that VLC gets a stream rather than a playlist, so seeking and
-    the channel name in the title bar are gone. Use it when a channel spins,
+    **Encoding changes.** Pluto's stitcher splices ads encoded at a different
+    resolution from the content. With `-c copy` the MPEG-TS output is fixed at
+    whatever the first segment was, so the ad's frames land in a track that
+    declares the wrong geometry. Measured on a constructed splice:
+
+        -c copy   -> one video track containing BOTH 1216x684 and 640x360
+        transcode -> 1216x684 throughout
+
+    ffmpeg tolerates the mixed track; VLC's decoder does not. It freezes on the
+    last good frame and never re-initialises — while the audio, which comes
+    from a *separate* rendition playlist whose parameters never change, keeps
+    playing. That is the "frozen video, audio continues, only audio comes back"
+    symptom, and no amount of copying fixes it.
+
+    So the default re-encodes to a fixed geometry, which is the only thing that
+    makes the output stable regardless of what the input does. Measured at
+    1.62x realtime at 720p on this machine, so live viewing has headroom.
+
+    Either way VLC gets a stream rather than a playlist, so seeking and the
+    channel name in the title bar are gone. Use it when a channel misbehaves,
     not by default.
     """
     ffmpeg = shutil.which("ffmpeg")
@@ -270,11 +292,28 @@ def relay(url: str, name: str) -> int:
     local = urllib.parse.urlunsplit(
         (base.scheme, base.netloc, parts.path, parts.query, parts.fragment))
 
-    print(f"relaying {name} through ffmpeg — close VLC to stop")
+    if copy_only:
+        codec = ["-c", "copy"]
+        how = "passthrough"
+    else:
+        codec = [
+            # Fixed geometry is the whole point: an ad spliced in at a
+            # different resolution gets scaled and padded to match rather than
+            # landing in a track that declares the wrong size.
+            "-vf", (f"scale={RELAY_SIZE}:force_original_aspect_ratio=decrease,"
+                    f"pad={RELAY_SIZE}:(ow-iw)/2:(oh-ih)/2"),
+            "-c:v", "libx264", "-preset", "veryfast", "-tune", "zerolatency",
+            # 48 kHz because some channels carry 44.1 kHz AAC, which is
+            # off-spec for MPEG-TS and silently loses audio in some players.
+            "-c:a", "aac", "-ar", "48000", "-ac", "2",
+        ]
+        how = f"normalising to {RELAY_SIZE}"
+
+    print(f"relaying {name} through ffmpeg ({how}) — close VLC to stop")
     ff = subprocess.Popen(
         [ffmpeg, "-hide_banner", "-loglevel", "error", "-nostdin",
          "-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "30",
-         "-rw_timeout", "30000000", "-i", local, "-c", "copy", "-f", "mpegts", "-"],
+         "-rw_timeout", "30000000", "-i", local, *codec, "-f", "mpegts", "-"],
         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
     player = subprocess.Popen([vlc, "--no-one-instance", "-"], stdin=ff.stdout,
                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
@@ -315,7 +354,11 @@ def main() -> int:
     ap.add_argument("--reuse", action="store_true",
                     help="with --play, hand off to a running VLC instead of a new window")
     ap.add_argument("--relay", action="store_true",
-                    help="pipe one channel through ffmpeg into VLC — use when a channel spins")
+                    help="pipe one channel through ffmpeg into VLC, re-encoded to a fixed "
+                         "size — use when a channel spins or freezes on adverts")
+    ap.add_argument("--relay-copy", action="store_true", dest="relay_copy",
+                    help="relay without re-encoding: fixes origin-switching, but not "
+                         "adverts encoded at a different resolution")
     args = ap.parse_args()
 
     if args.recordings:
@@ -332,13 +375,13 @@ def main() -> int:
     if args.channel:
         body = fc_filter_channel(body, args.channel)
 
-    if args.relay:
+    if args.relay or args.relay_copy:
         if not args.channel:
             sys.exit("--relay needs --channel: it plays one stream, not a playlist")
         lines = body.splitlines()
         url = next((l for l in lines if l.startswith("http")), None)
         name = next((extinf_name(l) for l in lines if l.startswith("#EXTINF")), args.channel)
-        return relay(url, name)
+        return relay(url, name, copy_only=args.relay_copy)
 
     dest = pathlib.Path(args.write).expanduser() if args.write else None
     if dest is None and not args.play:
