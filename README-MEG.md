@@ -918,6 +918,38 @@ serve the same channel, and `--via` picks which.
 ./vlc.py --recordings                       # DVR files on disk
 ```
 
+### Clicking "Open in VLC" in the guide
+
+The guide's channel preview has an **Open in VLC** button
+(`app/templates/admin/guide.html:1183`) pointing at
+`/play/{source}/{id}.m3u`. Upstream serves that endpoint with
+
+```
+Content-Disposition: attachment; filename="OM017937.m3u"
+```
+
+and `attachment` forces *every* browser to save the file rather than hand it
+to a player — the one thing the button exists to do. No MIME or handler
+setting overrides it; the file lands in `~/Downloads` and nothing launches.
+
+`dev/vlc-inline.patch` changes that single header to `inline`, so the browser
+can offer its media handler instead. Everything else on this machine was
+already correct: `.m3u` resolves to `audio/x-mpegurl`, which maps to
+`vlc.desktop`, and snap Firefox has the `desktop` and `home` interfaces
+connected so it can reach host VLC through `xdg-desktop-portal`.
+
+One browser step is still needed, once. In Firefox the first click offers
+*Open with* — choose VLC and tick *Do this automatically for files like this
+from now on*. Chrome behaves the same way. After that, clicking a programme in
+the guide launches VLC with nothing written to `~/Downloads`.
+
+Applying it needs a rebuild, because `app/` is copied into the image rather
+than bind-mounted:
+
+```bash
+sudo docker compose up -d --build
+```
+
 ### One window per channel
 
 VLC has **no "open in a new window" action** — picking an item in its playlist

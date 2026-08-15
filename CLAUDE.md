@@ -119,18 +119,19 @@ git merge upstream/main
 git push
 ```
 
-Two tracked files diverge, each with a saved patch under `dev/`:
+Three tracked files diverge, each with a saved patch under `dev/`:
 
 | File | Change | Patch |
 | --- | --- | --- |
 | `app/worker.py` | `FC_YTDLP_AUTO_UPGRADE` gate — local preference, stays local | `dev/ytdlp-gate.patch` |
 | `app/scrapers/xumo.py` | JSON playlist indirection — submitted as PR #39 | `dev/xumo-indirection.patch` |
+| `app/routes/play.py` | `Content-Disposition: inline` on `/play/{src}/{id}.m3u` so the guide's "Open in VLC" button can reach a player — PR-worthy | `dev/vlc-inline.patch` |
 
 On conflict, take upstream wholesale and re-apply:
 
 ```bash
-git checkout --theirs app/worker.py app/scrapers/xumo.py
-git apply -3 dev/ytdlp-gate.patch dev/xumo-indirection.patch
+git checkout --theirs app/worker.py app/scrapers/xumo.py app/routes/play.py
+git apply -3 dev/ytdlp-gate.patch dev/xumo-indirection.patch dev/vlc-inline.patch
 ```
 
 If PR #39 merges, drop `dev/xumo-indirection.patch` and take upstream's version.
