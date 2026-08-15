@@ -40,6 +40,8 @@ TVH = "http://127.0.0.1:9981"
 FASTCHANNELS = "http://127.0.0.1:5523"
 NETWORK_NAME = "FastChannels"
 NETWORK_CLASS = "iptv_auto_network"
+# Bind-mounted to dev/tvheadend/recordings by docker-compose.yml.
+RECORDINGS_PATH = "/recordings"
 
 
 class Tvheadend:
@@ -280,6 +282,16 @@ def main() -> int:
             if (b.get("source") or "").endswith(net_uuid or "") and not b.get("enabled"):
                 tvh.call("idnode/save", node=json.dumps({"uuid": b["uuid"], "enabled": True}))
                 print(f"enabled bouquet {b.get('name')} ({b.get('services_seen', 0)} services)")
+
+    # Recordings default to /var/lib/tvheadend, which is NOT the bind-mounted
+    # path — only /var/lib/tvheadend/config is. Left alone, recordings would
+    # land in the container's writable layer and disappear on the next rebuild.
+    if not args.dry_run:
+        for c in tvh.call("dvr/config/grid", limit="99").get("entries", []):
+            if c.get("storage") != RECORDINGS_PATH:
+                tvh.call("idnode/save", node=json.dumps(
+                    {"uuid": c["uuid"], "storage": RECORDINGS_PATH}))
+                print(f"recordings -> {RECORDINGS_PATH} (was {c.get('storage')})")
 
     uuid = enable_xmltv(tvh, args.dry_run)
     if uuid:

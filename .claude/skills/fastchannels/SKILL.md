@@ -18,8 +18,8 @@ Reach for this skill whenever a task involves:
 - EPG or guide data — what is on now, guide gaps, stale programming
 - M3U playlists or XMLTV output
 - Channels DVR or Plex integration
-- recording a show — read [It is not a DVR](#it-is-not-a-dvr) first; this
-  server cannot record, but it is what feeds the thing that can
+- recording a show — FastChannels cannot record, but Tvheadend on this machine
+  can; see [It does not record](#it-does-not-record--tvheadend-does)
 - anything naming FastChannels, or the API at `127.0.0.1:5523`
 
 What it lets you do: list and filter channels across every source, get a
@@ -51,44 +51,75 @@ Local configuration deviates from upstream defaults: the port is bound to
 `127.0.0.1` only, `VERSION_CHECK_ENABLED=0`, and `FC_YTDLP_AUTO_UPGRADE=0`
 (weekly unattended `pip install` from GitHub master is disabled).
 
-## It is not a DVR
+## It does not record — Tvheadend does
 
-FastChannels **does not record anything**. There is no recording, timer,
-series-pass or storage model anywhere in it, and nowhere to put a recording —
-`/data` holds only the database, its backups, browser sign-in profiles, and
-image/XML caches. The database stores `Channel`, `Program`, `Source` and `Feed`:
-guide metadata, not media.
+FastChannels has **no recording, timer, series-pass or storage model**, and
+nowhere to put a recording: `/data` holds the database, its backups, browser
+sign-in profiles and image/XML caches. The schema is `Channel` / `Program` /
+`Source` / `Feed` — guide metadata, not media. It is a scraper and publisher.
 
-It is a **scraper and publisher**. It harvests channels and EPG from ~37 free
-streaming services and republishes them in the two formats a DVR understands —
-M3U playlists and XMLTV guide data — plus `/play/...` to resolve a channel to a
-live stream on demand. Think tuner-plus-guide-provider, not recorder.
+**This install has a DVR attached: Tvheadend, fed from FastChannels.** If asked
+to record something, that is where it happens.
 
-**Channels DVR** is a separate commercial product, running elsewhere on the
-network, that does the recording. FastChannels feeds it. If asked to record
-something, say so plainly and offer to register the relevant playlist with the
-DVR instead.
+```
+Tvheadend 4.3   http://127.0.0.1:9981   admin / fastchannels   (digest auth)
+  2,014 channels mirroring the FastChannels lineup
+  ~91,000 EPG events, refreshed six-hourly by fastchannels-epg.service
+  recordings -> dev/tvheadend/recordings
+```
 
-The integration runs both ways:
+Its API is form-encoded like FastChannels' is, but needs digest auth:
 
-| Direction | What |
-| --- | --- |
-| Out → DVR | `PUT /providers/m3u/sources/{name}` registers a playlist as a DVR source; `GET /status` checks connectivity; `GET /dvr/lineups` then `PUT /dvr/lineups/{id}` nudges a guide refresh, hourly |
-| In ← you | `GET /api/dvr/test-connection`, `POST /api/feeds/{id}/push-to-dvr`, `POST /api/feeds/{id}/push-prismcast-to-dvr`, `POST /api/sources/{id}/push-to-dvr`, `POST /api/raw-output/push-to-dvr` |
+```bash
+TVH="curl -s --digest -u admin:fastchannels http://127.0.0.1:9981/api"
 
-Settings that matter: `channels_dvr_url` (where the DVR lives) and
-`dvr_epg_auto_refresh` (the hourly nudge), both via `POST /api/settings`.
+$TVH/channel/grid?limit=5                    # channels
+$TVH/epg/events/grid?limit=5                 # what is on
+$TVH/dvr/entry/grid                          # scheduled + completed recordings
+$TVH/dvr/config/grid                         # storage path, retention
+```
 
-**Gracenote lookups depend on the DVR.** FastChannels holds no Gracenote
-licence, so `/api/gracenote-search` and `/api/channels/{id}/gracenote-suggestions`
-proxy through the configured Channels DVR. With no `channels_dvr_url` set they
-return `400` — that is a missing dependency, not a bug. **This install has no
-DVR configured**, so those two endpoints currently fail.
+To record, find the event then schedule it — **mutating, so confirm first**:
 
-Two things that resemble recording but are not: **PrismCast** captures DRM
-streams through a headless Chrome and re-streams them live — nothing is
-retained; and the nightly `/data/backups` job backs up the SQLite database, not
-media.
+```bash
+# find the event id — `title` is a substring match
+$TVH/epg/events/grid --data-urlencode 'title=News' --data-urlencode 'limit=5'
+#   eventId=74427  ABC 27   ABC 27+ News
+
+# schedule it
+$TVH/dvr/entry/create_by_event \
+  --data-urlencode 'event_id=<id>' --data-urlencode 'config_uuid=<dvr config uuid>'
+```
+
+`dvr/autorec/create` sets a series rule; `dvr/timerec/create` a recurring
+time slot; `dvr/entry/cancel` and `dvr/entry/remove` undo. Channel numbers,
+names, icons and EPG all come from FastChannels, so a channel identified there
+is the same channel in Tvheadend.
+
+**Do not make Tvheadend scan the network.** `scan_create` means "open every
+stream to discover services" — 2,014 live `/play` requests, which trips Roku's
+source-wide cooldown and lets FastChannels auto-disable channels wholesale. The
+network is deliberately configured with `service_sid` instead, so channels come
+from the playlist with no stream opened.
+
+**DRM channels cannot be recorded.** Tvheadend has no Widevine CDM, so anything
+needing the PrismCast bridge is out — the same limit as any non-browser client.
+
+Setup, rationale and limits: `dev/tvheadend/README.md`.
+
+### The other option, not used here
+
+**Channels DVR** is the alternative, and FastChannels has first-class support
+for it — `POST /api/feeds/{id}/push-to-dvr` and friends register playlists
+directly. It is closed-source and paid ($8/month or $80/year, 30-day trial,
+Fancy Bits LLC), which is easy to miss: it self-hosts, installs from a shell
+script and quotes no price on its download page.
+
+It is **not configured on this install**, and that has one consequence beyond
+recording: FastChannels holds no Gracenote licence and proxies station lookups
+through a configured Channels DVR, so `/api/gracenote-search` and
+`/api/channels/{id}/gracenote-suggestions` return `400` here. That is a missing
+dependency, not a bug.
 
 ## Safety classification
 
@@ -128,8 +159,9 @@ plaintext provider credentials — do not write it anywhere shared.
 | `/api/…`, `/api/feeds/…` | Control API — ~130 operations |
 | `/admin/…` | HTML pages — **except** `/admin/guide/programs` and `/admin/channels/chnum-map`, which return JSON |
 
-Full machine-readable reference: `docs/openapi.yaml` in this repo (182 paths,
-verified against the route handlers). `docs/API.md` is the prose companion.
+Full machine-readable reference: `docs/openapi.yaml` in this repo (184 paths,
+verified against the route handlers by `dev/check_api_docs.py`). `docs/API.md`
+is the prose companion.
 
 ## Core recipes
 
