@@ -107,18 +107,38 @@ def main() -> int:
                     help=f"Tvheadend XMLTV socket (default {DEFAULT_SOCKET})")
     ap.add_argument("--loop", type=parse_interval, metavar="INTERVAL",
                     help="keep running, pushing every INTERVAL (e.g. 6h)")
+    ap.add_argument("--once", action="store_true",
+                    help="push a single time, skipping the first-run double push")
     args = ap.parse_args()
 
     url = epg_url(args.base, args.feed)
 
+    # On a lineup Tvheadend has not seen before, one push is not enough. The
+    # first parse creates the grabber channels from the <channel> elements and
+    # links them to real channels — but the <programme> elements in that same
+    # document are processed against links that did not exist when the parse
+    # began, and are dropped. A second push, with the links now in place,
+    # stores them. Observed here as 2,014 channels linked but 0 events, then
+    # 91,796 events after an immediate re-push.
+    #
+    # Cheap to just do it twice: pushing an already-known lineup is idempotent.
+    passes = 1 if (args.once or args.loop) else 2
+
     while True:
+      for attempt in range(passes):
+        if attempt:
+            print("  first-run double push: sending again so programmes attach "
+                  "to the channels the first pass linked", file=sys.stderr)
+            time.sleep(5)
         ok, message = push(url, args.socket)
         stamp = time.strftime("%Y-%m-%d %H:%M:%S")
         print(f"{stamp}  {'ok  ' if ok else 'FAIL'}  {url} -> {args.socket.name}: {message}",
               file=sys.stdout if ok else sys.stderr, flush=True)
-        if not args.loop:
-            return 0 if ok else 1
-        time.sleep(args.loop)
+        if not ok:
+            break
+      if not args.loop:
+          return 0 if ok else 1
+      time.sleep(args.loop)
 
 
 if __name__ == "__main__":

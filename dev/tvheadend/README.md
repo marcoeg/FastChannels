@@ -37,7 +37,11 @@ python3 dev/tvheadend/push_epg.py
 
 Then open http://127.0.0.1:9981 (user `admin`, password `fastchannels` unless
 you passed `--user`/`--password`). Channels appear under
-**Configuration > Channel/EPG > Channels** once the playlist has been fetched.
+**Configuration > Channel/EPG > Channels**.
+
+Verified end to end on this install: **2,014 channels, 91,796 EPG events**, and
+a channel streaming 17 MB of valid MPEG-TS out of Tvheadend, sourced from
+FastChannels.
 
 `--dry-run` works before Tvheadend is running — it checks the playlist and
 prints the network config it would write.
@@ -78,6 +82,24 @@ python3 dev/tvheadend/push_epg.py --loop 6h
 It streams rather than buffering (the full guide is tens of megabytes) and uses
 only the standard library, so `socat` is not needed — which matters, because
 this host does not have it.
+
+## Two behaviours worth knowing
+
+**Nothing is probed.** `scan_create` is off and `service_sid` is on, so
+`iptv_mux.c:416` creates one service per mux at creation time and channels
+appear straight from the playlist — **zero streams opened**. With
+`scan_create` on, Tvheadend would connect to all 2,014 streams to discover
+services: that hammers every provider, trips Roku's source-wide cooldown, and
+lets FastChannels' health check auto-disable channels wholesale. `--scan`
+restores it if you ever want it.
+
+**The first EPG push needs to happen twice.** On a lineup Tvheadend has not
+seen before, the first parse creates the grabber channels from the `<channel>`
+elements and links them — but the `<programme>` elements in the *same*
+document are processed against links that did not exist when the parse began,
+and are dropped. Observed here as 2,014 channels linked and **0 events**, then
+91,796 events after an immediate re-push. `push_epg.py` now sends twice on a
+one-shot run; `--loop` and `--once` send once, since by then the links exist.
 
 ## Known limits
 

@@ -90,6 +90,11 @@ def ensure_superuser(user: str, password: str) -> bool:
     start, so this is a no-op once Tvheadend is running with it.
     """
     CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    # Pre-create the recordings bind-mount target too. Docker creates a missing
+    # bind source as root, which the container — running as your uid — then
+    # cannot write to, and the failure surfaces later as a recording error
+    # rather than a startup one.
+    (HERE / "recordings").mkdir(parents=True, exist_ok=True)
     if SUPERUSER.exists():
         return False
     SUPERUSER.write_text(json.dumps({"username": user, "password": password}, indent=2))
@@ -131,9 +136,18 @@ def network_conf(url: str, args) -> dict:
         "max_streams": args.max_streams,
         "priority": 1,
         "spriority": 1,
-        # FastChannels resolves a fresh URL per play, so a mux that failed once
-        # should be retried rather than parked.
-        "scan_create": True,
+        # Do NOT probe every stream. With scan_create on, Tvheadend opens each
+        # mux to discover its services — 2,000+ live /play requests, which
+        # hammers every provider, trips Roku's source-wide cooldown, and lets
+        # FastChannels' health check auto-disable channels en masse.
+        #
+        # service_sid instead makes iptv_mux.c create one service per mux at
+        # creation time (iptv_mux.c:416) and fire the bouquet trigger, so
+        # channels appear straight from the playlist with no stream opened at
+        # all. Streams are then only touched when something actually watches
+        # or records. --scan restores the probing behaviour.
+        "scan_create": args.scan,
+        "service_sid": 0 if args.scan else 1,
         "tsid_zero": True,
         "ssl_peer_verify": False,
         # 0 = native HTTP/HLS demux. Set 1 (--libav) to route every mux through
@@ -144,17 +158,20 @@ def network_conf(url: str, args) -> dict:
 
 
 def enable_xmltv(tvh: Tvheadend, dry_run: bool) -> str | None:
-    """Turn on the external XMLTV grabber and report its socket path."""
+    """Turn on the external XMLTV grabber and report its socket path.
+
+    Module titles are prefixed by kind — "External: XMLTV" against
+    "Internal: XMLTV: Hungary" and a dozen other tv_grab_* scripts. Matching
+    loosely on "xmltv" picks whichever internal grabber sorts first, which is
+    both wrong and invisible until no EPG appears, so match the prefix exactly.
+    """
     modules = tvh.call("epggrab/module/list").get("entries", [])
-    target = next((m for m in modules if (m.get("title") or "").strip() == "XMLTV"), None)
+    target = next((m for m in modules
+                   if (m.get("title") or "").strip().lower() == "external: xmltv"), None)
     if target is None:
-        # Fall back to any module whose title mentions xmltv but is not a
-        # tv_grab_* internal grabber.
-        target = next((m for m in modules
-                       if "xmltv" in (m.get("title") or "").lower()
-                       and "tv_grab" not in (m.get("title") or "")), None)
-    if target is None:
-        print("  ! no external XMLTV module found", file=sys.stderr)
+        available = ", ".join(sorted(m.get("title", "?") for m in modules
+                                     if "xmltv" in (m.get("title") or "").lower()))
+        print(f"  ! no 'External: XMLTV' module found. Saw: {available}", file=sys.stderr)
         return None
 
     uuid = target["uuid"]
@@ -185,6 +202,12 @@ def main() -> int:
                     help="playlist re-fetch period in minutes (default 60)")
     ap.add_argument("--max-streams", type=int, default=10,
                     help="concurrent streams allowed from this network (default 10)")
+    ap.add_argument("--scan", action="store_true",
+                    help="probe every stream after creating the network. Opens one "
+                         "connection per channel — hammers providers, trips rate "
+                         "limits, and can cause FastChannels to auto-disable "
+                         "channels. Off by default; services are created from the "
+                         "playlist instead.")
     ap.add_argument("--libav", action="store_true",
                     help="demux every mux through ffmpeg instead of the native HLS reader")
     ap.add_argument("--write-superuser-only", action="store_true",
@@ -235,13 +258,28 @@ def main() -> int:
         return 0
 
     if existing:
-        conf["uuid"] = existing["uuid"]
+        net_uuid = existing["uuid"]
+        conf["uuid"] = net_uuid
         tvh.call("idnode/save", node=json.dumps(conf))
-        print(f"updated existing network {existing['uuid']}")
+        print(f"updated existing network {net_uuid}")
     else:
         resp = tvh.call("mpegts/network/create",
                         **{"class": NETWORK_CLASS, "conf": json.dumps(conf)})
-        print(f"created network {resp.get('uuid', '?')}")
+        net_uuid = resp.get("uuid")
+        print(f"created network {net_uuid or '?'}")
+        # Muxes are created asynchronously from the playlist; the bouquet only
+        # appears once they exist.
+        print("  waiting for the playlist to be parsed …")
+        time.sleep(15)
+
+    # The bouquet the network creates is disabled by default, so services are
+    # never mapped to channels until it is switched on — this is the step that
+    # actually produces a lineup.
+    if not args.dry_run:
+        for b in tvh.call("bouquet/grid", limit="999").get("entries", []):
+            if (b.get("source") or "").endswith(net_uuid or "") and not b.get("enabled"):
+                tvh.call("idnode/save", node=json.dumps({"uuid": b["uuid"], "enabled": True}))
+                print(f"enabled bouquet {b.get('name')} ({b.get('services_seen', 0)} services)")
 
     uuid = enable_xmltv(tvh, args.dry_run)
     if uuid:
@@ -250,7 +288,8 @@ def main() -> int:
         print(f"  socket: {sock}")
         print(f"  feed it: python3 {HERE / 'push_epg.py'}")
 
-    print("\nTvheadend will now fetch the playlist and create channels.")
+    n_chn = tvh.call("channel/grid", limit="1").get("total", 0)
+    print(f"\nTvheadend now has {n_chn} channels.")
     print(f"  UI: {args.tvh}  (user {args.user})")
     print("  Channels appear under Configuration > Channel/EPG > Channels.")
     return 0
