@@ -141,6 +141,36 @@ FastChannels does the proxying server-side.
 through ffmpeg instead of the native HLS reader. Slower, but it copes with
 containers the native path chokes on.
 
+## API documentation
+
+Tvheadend has none. Its 134 markdown files cover the web UI, configuration and
+DVB tuning; not one describes the ~185 JSON endpoints the UI is built on.
+`docs/markdown/url.md` documents the streaming URLs and stops there.
+
+`gen_openapi.py` generates one, reading the endpoint table straight from the
+Tvheadend source — the authoritative list, since every endpoint is registered
+there with its access level and handler:
+
+```bash
+python3 dev/tvheadend/gen_openapi.py --verify
+#   wrote openapi.yaml — 185 endpoints
+#   13/13 sampled endpoints answered as documented
+```
+
+Regenerate it after pulling a newer Tvheadend; nothing is hand-maintained.
+
+Half the API is served by generic idnode handlers — 26 `*/grid`, 26 `*/class`,
+plus `idnode/load`/`save`/`delete` — so the spec defines those shapes once
+rather than 185 times. Conventions worth knowing: everything is POST with
+form-encoded parameters whose *values* are JSON documents (`conf=`, `node=`,
+`filter=`), digest auth, and `{"entries": […], "total": N}` list envelopes.
+
+The most useful thing the API offers in place of documentation is
+introspection: `*/class` and `mpegts/network/builders` return every valid
+property with its type, caption and description. That is live rather than
+prose, and it is how `service_sid`, `scan_create` and `refetch_period` were
+found.
+
 ## Files
 
 | File | |
@@ -148,6 +178,9 @@ containers the native path chokes on.
 | `docker-compose.yml` | Tvheadend on the host network, config bind-mounted so the XMLTV socket is reachable |
 | `setup.py` | Creates the IPTV auto network and enables the XMLTV grabber, over the API. Idempotent. |
 | `push_epg.py` | Streams `/epg.xml` into the grabber socket |
+| `gen_openapi.py` | Generates `openapi.yaml` from the Tvheadend source |
+| `openapi.yaml` | 185 endpoints, 14 tags — documentation that does not otherwise exist |
+| `fastchannels-epg.service` | systemd user unit for the six-hourly EPG push |
 | `config/` | Tvheadend's configuration, including `superuser` and `epggrab/xmltv.sock` |
 
 `config/superuser` holds a plaintext password and is mode `600`. It is covered
