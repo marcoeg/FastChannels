@@ -1,6 +1,6 @@
 ---
 name: fastchannels
-description: Live TV channels, EPG and M3U via the FastChannels API.
+description: Live TV, EPG, M3U and DVR via FastChannels + Tvheadend.
 ---
 
 # FastChannels API
@@ -104,6 +104,51 @@ from the playlist with no stream opened.
 
 **DRM channels cannot be recorded.** Tvheadend has no Widevine CDM, so anything
 needing the PrismCast bridge is out — the same limit as any non-browser client.
+
+### Tvheadend's API is documented here, and nowhere else
+
+Tvheadend ships no API documentation — 134 markdown files covering the UI and
+DVB tuning, none describing the 185 JSON endpoints the UI is built on.
+`dev/tvheadend/openapi.yaml` is a generated spec for them, and
+`dev/tvheadend/gen_openapi.py` regenerates it from the Tvheadend source.
+Consult the spec before guessing.
+
+Conventions: every endpoint is POST with **form-encoded parameters whose
+values are JSON documents** — `conf=`, `node=`, `filter=`, not a JSON body.
+Most accept GET with a query string too. Lists come back as
+`{"entries": [...], "total": N}` and take `limit`, `start`, `sort`, `dir` and
+a JSON `filter`.
+
+**It also documents itself.** Half the API is a generic object layer, so
+`*/class` and `mpegts/network/builders` return every valid property with its
+type, caption and description — live, not prose:
+
+```bash
+$TVH/dvr/entry/class                  # every field on a recording
+$TVH/mpegts/network/builders          # every network type and its properties
+```
+
+That is how `service_sid`, `scan_create` and `refetch_period` were found.
+Prefer it to guessing at a property name.
+
+### Recording quality
+
+Verified working: two test recordings, 1080p h264 with AAC, zero errors,
+landing in `dev/tvheadend/recordings`.
+
+One real gotcha. Some FAST channels carry **44.1 kHz AAC**, which is off-spec
+for MPEG-TS — broadcast is 48 kHz. ffmpeg copes; many players silently drop
+the track, so video plays with no sound. Adult Swim does this, Al Jazeera does
+not. Diagnose and fix:
+
+```bash
+ffprobe -v error -select_streams a:0 -show_entries stream=sample_rate \
+        -of csv=p=0 recording.ts                      # 44100 means trouble
+ffmpeg -i in.ts -c:v copy -c:a aac -ar 48000 -disposition:a:0 default out.mp4
+```
+
+That re-encodes audio only, so it is fast. It is a property of the provider's
+stream, not a fault in the recording path.
 
 Setup, rationale and limits: `dev/tvheadend/README.md`.
 
