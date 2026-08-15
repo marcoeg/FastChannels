@@ -286,6 +286,57 @@ def _xmltv_time(value: str | None) -> str | None:
     return dt.isoformat()
 
 
+def _programme_dict(p) -> dict:
+    icon = p.find("icon")
+    rating = p.find("rating")
+    return {
+        "title": p.findtext("title"),
+        "sub_title": p.findtext("sub-title"),
+        "desc": p.findtext("desc"),
+        "category": p.findtext("category"),
+        "episode_num": p.findtext("episode-num"),
+        "rating": rating.findtext("value") if rating is not None else None,
+        "icon": icon.get("src") if icon is not None else None,
+        "start": _xmltv_time(p.get("start")),
+        "stop": _xmltv_time(p.get("stop")),
+    }
+
+
+def fetch_epg_native(base: str, wanted: set[str], feed: str = "default") -> dict[str, list]:
+    """Full schedule for Gracenote-partitioned channels, via the native feed.
+
+    `/epg.xml` filters Gracenote channels out — see xmltv.py, where the
+    generator passes `gracenote=False`. The per-feed *native* variant passes
+    `None` instead, i.e. no filter, so it is the only route that returns a
+    complete schedule for them.
+
+    It cannot be narrowed by category and covers the whole feed, so the
+    document is large (~68 MB for 2,218 channels here). Parsed with iterparse
+    and filtered to `wanted` as it streams, so memory stays flat and only the
+    requested channels are retained.
+    """
+    import xml.etree.ElementTree as ET
+
+    url = f"{base}/feeds/{feed}/native/epg.xml"
+    out: dict[str, list] = {}
+    try:
+        with urllib.request.urlopen(url, timeout=300) as r:
+            for _, elem in ET.iterparse(r, events=("end",)):
+                if elem.tag != "programme":
+                    continue
+                chan = elem.get("channel")
+                if chan in wanted:
+                    out.setdefault(chan, []).append(_programme_dict(elem))
+                elem.clear()
+    except Exception as exc:  # noqa: BLE001
+        print(f"warning: native feed EPG unavailable ({exc}); "
+              f"Gracenote channels will have no programmes", file=sys.stderr)
+        return {}
+    for progs in out.values():
+        progs.sort(key=lambda x: x["start"] or "")
+    return out
+
+
 def fetch_epg_full(base: str, categories: list[str]) -> dict[str, list]:
     """Complete stored schedule, keyed by XMLTV channel id. One request."""
     import xml.etree.ElementTree as ET
@@ -304,19 +355,7 @@ def fetch_epg_full(base: str, categories: list[str]) -> dict[str, list]:
 
     out: dict[str, list] = {}
     for p in root.findall("programme"):
-        icon = p.find("icon")
-        out.setdefault(p.get("channel") or "", []).append({
-            "title": p.findtext("title"),
-            "sub_title": p.findtext("sub-title"),
-            "desc": p.findtext("desc"),
-            "category": p.findtext("category"),
-            "episode_num": p.findtext("episode-num"),
-            "rating": (p.find("rating").findtext("value")
-                       if p.find("rating") is not None else None),
-            "icon": icon.get("src") if icon is not None else None,
-            "start": _xmltv_time(p.get("start")),
-            "stop": _xmltv_time(p.get("stop")),
-        })
+        out.setdefault(p.get("channel") or "", []).append(_programme_dict(p))
     for progs in out.values():
         progs.sort(key=lambda x: x["start"] or "")
     return out
@@ -390,18 +429,32 @@ def build_rows(args) -> list[dict]:
             row["epg_count"] = len(progs)
             row["epg_first"] = progs[0]["start"] if progs else None
             row["epg_last"] = progs[-1]["stop"] if progs else None
+        # /epg.xml omits Gracenote-partitioned channels for the same reason
+        # /m3u does: their guide is meant to come from Gracenote rather than
+        # from this server's XMLTV. The per-feed native variant applies no such
+        # filter, so fall back to it for exactly those channels — a second
+        # request, made only when the export actually contains them.
+        gap = {r["xmltv_id"] for r in rows
+               if not r["epg_count"] and r.get("playlist") == "gracenote" and r.get("xmltv_id")}
+        if gap and not args.no_native_epg:
+            print(f"  {len(gap)} Gracenote-partitioned channel(s) are absent from "
+                  f"/epg.xml by design; fetching the native feed…", file=sys.stderr)
+            extra = fetch_epg_native(base, gap, args.native_feed)
+            for row in rows:
+                progs = extra.get(row.get("xmltv_id") or "")
+                if progs:
+                    row["programs"] = progs
+                    row["epg_count"] = len(progs)
+                    row["epg_first"] = progs[0]["start"]
+                    row["epg_last"] = progs[-1]["stop"]
+
         matched = sum(1 for r in rows if r["epg_count"])
         print(f"  {matched}/{len(rows)} channels have programme data", file=sys.stderr)
-        # /epg.xml omits Gracenote-partitioned channels for the same reason
-        # /m3u does: their guide is meant to come from Gracenote, not from this
-        # server's XMLTV. Their programmes are still in the database, so
-        # --epg window reaches them. Say so rather than leave a silent gap.
-        gn_gap = sum(1 for r in rows
-                     if not r["epg_count"] and r.get("playlist") == "gracenote")
-        if gn_gap:
-            print(f"  {gn_gap} of the {len(rows) - matched} without data are "
-                  f"Gracenote-partitioned and absent from /epg.xml by design — "
-                  f"use --epg window to reach them", file=sys.stderr)
+        still = [r for r in rows if not r["epg_count"]]
+        if still:
+            print(f"  {len(still)} with none: "
+                  + ", ".join(r["name"] for r in still[:6])
+                  + (" …" if len(still) > 6 else ""), file=sys.stderr)
 
     return rows
 
@@ -481,6 +534,11 @@ def main() -> int:
                          "(one request per channel); window = five-hour schedule "
                          "by channel id, batched; full = complete stored schedule "
                          "from /epg.xml in a single request. Bare --epg means now.")
+    ap.add_argument("--no-native-epg", action="store_true",
+                    help="in --epg full, skip the native-feed fallback that recovers "
+                         "Gracenote-partitioned channels (avoids a large second fetch)")
+    ap.add_argument("--native-feed", default="default", metavar="SLUG",
+                    help="feed slug used for the native-feed fallback (default: default)")
     ap.add_argument("--epg-offset", type=int, default=0, metavar="HOURS",
                     help="shift the --epg window, clamped by the server to +/-48 (window mode only)")
     args = ap.parse_args()

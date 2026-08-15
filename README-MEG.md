@@ -674,18 +674,35 @@ interchangeable. `--epg` picks one:
 `full` is the best value — one request, real ISO timestamps, hundreds of
 programmes per channel — and is what you usually want.
 
-**But `full` misses Gracenote-partitioned channels.** `/epg.xml` omits them for
-the same reason `/m3u` does: their guide is meant to come from Gracenote, not
-from this server's XMLTV. On a News export that is 19 of 79 channels. Their
-programmes *are* in the database, so `--epg window` reaches them. The exporter
-says so rather than leaving a silent gap:
+**Gracenote channels need a second fetch, which `full` handles for you.**
+`/epg.xml` omits Gracenote-partitioned channels for the same reason `/m3u`
+does: their guide is meant to come from Gracenote, not from this server's
+XMLTV. On a News export that is 19 of 79.
+
+The per-feed **native** variant applies no such filter — in
+`app/generators/xmltv.py` the generator passes `gracenote=None` for native
+against `gracenote=False` otherwise — so it is the only route returning a
+complete schedule for them. `full` falls back to it automatically, and only
+when the export actually contains such channels:
 
 ```console
 $ python3 dev/export_channels.py News --no-resolve --epg full
-  57/79 channels have programme data
-  19 of the 22 without data are Gracenote-partitioned and absent from
-  /epg.xml by design — use --epg window to reach them
+fetching the full schedule from /epg.xml (one request)…
+  19 Gracenote-partitioned channel(s) are absent from /epg.xml by design;
+  fetching the native feed…
+  76/79 channels have programme data
+  3 with none: CGTN Global Biz, DeFiance Media, Weather Nation
 ```
+
+The native feed cannot be filtered by category and covers the whole feed —
+~68 MB here — so it is streamed with `iterparse` and filtered to the wanted
+channels as it arrives. Memory stays flat and the whole run still takes about
+a second. `--no-native-epg` skips it; `--native-feed SLUG` picks a different
+feed than `default`.
+
+Channels still showing zero after that genuinely have no guide data — the
+three above return `epg_programs: 0` from `/api/channels/{id}/preview`, so
+nothing was scraped for them.
 
 `window` times are **display strings** in the server's timezone (`"8:00 AM"`)
 next to `left`/`width` percentages, because that route backs the admin guide
