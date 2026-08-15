@@ -1131,6 +1131,7 @@ Absence of that line means the rebuild did not pick up the change.
   scripts read from. 184 paths, verified against the route handlers by
   `dev/check_api_docs.py`.
 - `dev/hermes/SKILL.md` — the same API described for the Hermes agent, with
-  `dev/hermes/PROMPT.md` as the onboarding message. Deliberately **not** under
-  `.claude/`, which Claude Code loads automatically — this skill is written for
-  a different agent and should not be picked up here.
+  `dev/hermes/PROMPT.md` as the onboarding message. `dev/hermes/RECORD-SKILL.md`
+  is a second skill covering `record.py`. Deliberately **not** under `.claude/`,
+  which Claude Code loads automatically — these are written for a different
+  agent and should not be picked up here.

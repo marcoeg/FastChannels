@@ -513,10 +513,12 @@ def main() -> int:
         epilog="Usage:" + __doc__.split("Usage:")[1].split("Scheduling model")[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
 
-    def common(p, with_mp4=True):
-        p.add_argument("--channel", required=True, metavar="NAME_OR_NUMBER")
-        p.add_argument("--out", default=str(OUT_DIR), metavar="DIR")
-        if with_mp4:
+    def common(p, writes_files=True):
+        p.add_argument("--channel", required=True, metavar="NAME_OR_NUMBER",
+                       help="channel name (substring match) or channel number")
+        if writes_files:
+            p.add_argument("--out", default=str(OUT_DIR), metavar="DIR",
+                           help=f"output directory (default: {OUT_DIR})")
             p.add_argument("--mp4", action="store_true",
                            help="remux to MP4 after a clean capture")
 
@@ -543,7 +545,7 @@ def main() -> int:
     p.set_defaults(func=cmd_programme)
 
     p = sub.add_parser("epg", help="what is on this channel")
-    common(p, with_mp4=False)
+    common(p, writes_files=False)
     p.add_argument("--limit", type=int, default=20)
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=cmd_epg)
