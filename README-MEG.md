@@ -6,7 +6,7 @@ part of the upstream project.
 | | |
 | --- | --- |
 | **Tools** | `record.py` — record a channel, now or scheduled<br>`vlc.py` — hand a channel to VLC, from either server<br>`dev/news_origins.py` — where local news channels broadcast from<br>`dev/export_channels.py` — export a category with both playback endpoints |
-| **DVR** | Tvheadend, fed from FastChannels — see [Recording](#recording-tvheadend-as-the-dvr) |
+| **DVR** | `record.py` — ffmpeg + systemd timers, see [Recording](#recording--recordpy) |
 | **Requires** | Python 3.9+, standard library only. No pip install. Tested on 3.12.3. |
 | **Server** | A running FastChannels instance (default `http://127.0.0.1:5523`) |
 | **Reference** | `docs/openapi.yaml` and `docs/API.md` document the HTTP API both scripts read |
@@ -812,7 +812,7 @@ straight from FastChannels with ffmpeg, and hands scheduling to systemd.
 `epg`/`list`/`programme` makes it comfortable to drive from an agent.
 Recordings land in `~/news/recordings`.
 
-### Why this replaced Tvheadend
+### Why this replaced Tvheadend (removed 2026-08-15)
 
 The decisive number: **206 channels Tvheadend cannot reach at all.** It ignores
 `tvc-guide-stationid`, so the entire `/m3u/gracenote` playlist is invisible to
@@ -857,6 +857,34 @@ Each run leaves `.meta/<name>.json` (channel, URL, window, exit status, size)
 and `.meta/<name>.log` (ffmpeg stderr) beside the recording. Enough to answer
 "did it record, and if not why" without reintroducing a database.
 
+### A stalled stream cannot hang a recording
+
+`-reconnect` alone is a trap: it makes ffmpeg retry *for ever*. Seen on an
+AES-encrypted Pluto stream — 18s captured, then `Unable to open resource` on a
+segment plus TLS errors, and ffmpeg sat retrying until killed by hand. A
+scheduled recording would have hung indefinitely.
+
+Two bounds, because neither is sufficient alone:
+
+- `-rw_timeout 30000000` — give up on a read that stalls for 30s rather than
+  retrying a segment that will never arrive.
+- A **wall-clock deadline** in the script, `duration + max(60s, duration/4)`.
+  ffmpeg gets SIGTERM first so it finalises the file, then SIGKILL. The slack
+  is generous because HLS back-buffer lets ffmpeg run *ahead* of real time, so
+  wall-clock and stream time are not the same thing.
+
+A cut-short capture is kept, not discarded — the stream failing halfway is
+exactly when you want the first half. Success is judged on bytes written, not
+on ffmpeg's exit status, which is non-zero after a SIGTERM. Partial results say
+so:
+
+```
+Al-Jazeera_Newshour_2026-08-15_1400.ts  (412.7 MB, 1830.0s)  [PARTIAL: stream stalled, terminated at the deadline]
+```
+
+and the sidecar carries `captured_seconds`, `timed_out` and `complete` so the
+outcome is inspectable afterwards.
+
 ### Two nuances
 
 **Guides drift**, so `programme` pads by default: 30s before, 120s after.
@@ -872,201 +900,15 @@ absorbs a typical 30-60s buffer.
 
 - **Series rules.** "Record Newshour every day" needs a daemon and dedup state.
   Excluded by choice; schedule each airing instead.
-- **HTSP.** Kodi and other Tvheadend clients. Unused here.
+- **HTSP.** The protocol Kodi used to talk to Tvheadend. Unused here.
 - **A web UI.** `record.py list`, `ls`, and `vlc.py --recordings` cover it.
-
----
-
-## Recording: Tvheadend as the DVR
-
-> **Being retired.** `record.py` above replaces this. Tvheadend is still
-> running until the replacement has proven itself in real use; this section is
-> kept until it is removed.
-
-**FastChannels does not record anything.** No recording, timer, series-pass or
-storage model exists in it, and there is nowhere to put a recording — `/data`
-holds the database, its backups, browser sign-in profiles and image/XML caches.
-The schema is `Channel` / `Program` / `Source` / `Feed`: guide metadata, not
-media. It is a scraper and publisher; something else has to do the recording.
-
-Two options, and this install uses the second.
-
-| | Channels DVR | Tvheadend |
-| --- | --- | --- |
-| Licence | Closed-source, Fancy Bits LLC | **GPLv3** |
-| Cost | $8/month or $80/year, 30-day trial | **Free** |
-| Integration | First-class — FastChannels has push-to-DVR endpoints | M3U + XMLTV, set up by hand |
-| Gracenote lookups | Provides them | Not available |
-
-Channels DVR is easy to mistake for open source — it self-hosts, installs from
-a shell script, ships a Docker image, and its download page quotes no price.
-None of that implies an open licence.
-
-### What is running
-
-```
-Tvheadend 4.3-2758   http://127.0.0.1:9981   (admin / fastchannels)
-  2,014 channels     mirroring the full FastChannels lineup
-  2,014 muxes        one per channel, created from /m3u
-  ~91,000 EPG events refreshed every 6 hours
-```
-
-Verified end to end: channel numbers, names, icons and tags carried across from
-the M3U; EPG matched with no manual mapping; and a channel streaming 17 MB of
-valid MPEG-TS out of Tvheadend, with the corresponding `[play]` entry in the
-FastChannels log.
-
-Everything lives in `dev/tvheadend/` — compose file, an API-driven `setup.py`,
-the `push_epg.py` shim, a systemd unit, and a README with the full rationale.
-
-### Why it works at all
-
-Tvheadend reads exactly the attributes FastChannels emits. Checked against its
-source rather than its documentation:
-
-| FastChannels emits | Tvheadend does | Where |
-| --- | --- | --- |
-| `tvg-id="{source}.{id}"` | stores as `iptv_epgid` — **the key XMLTV matches on** | `iptv_auto.c` |
-| `tvg-chno` | the channel number | `iptv_auto.c:296` |
-| `tvg-logo`, `group-title` | icon and tag | `iptv_auto.c` |
-| a `302` from `/play/…` | follows it (`hc_handle_location = 1`) | `iptv_http.c:595` |
-| HLS, including AES-128 | native reader with `hls_key_url` | `iptv_http.c` |
-
-Because `tvg-id` and the XMLTV `<channel id>` are the same string, EPG matching
-needs no translation layer.
-
-### Three things that were not obvious
-
-**Never let Tvheadend scan.** `scan_create` means "connect to every stream to
-discover services" — 2,014 live `/play` requests, which would hammer every
-provider, trip Roku's source-wide cooldown, and let FastChannels' health check
-auto-disable channels wholesale. `iptv_mux.c:416` gives the alternative: with
-`service_sid` set, one service is created per mux at creation time and channels
-come straight from the playlist. **Zero streams opened** while creating all
-2,014.
-
-**The bouquet is created disabled.** Services existed but the channel count
-stayed at 0 until it was enabled. `setup.py` does this now.
-
-**The container had no timezone, and TZ alone does not fix it.** The compose
-file set `TZ=America/Los_Angeles` and the variable was present in the
-container, yet it reported UTC — `ghcr.io/tvheadend/tvheadend` ships no tzdata
-at all, so glibc cannot resolve a zone name and falls back silently. The
-symptom is narrow: only *formatted* times are wrong — recording filenames, the
-EPG grid, log stamps — while scheduling stays correct, because Tvheadend
-stores Unix timestamps. A recording made at 12:35 PDT was named `…_1935.ts`.
-Bind-mounting `/usr/share/zoneinfo` and `/etc/localtime` read-only fixes it.
-
-**The OTA EPG grabber silently starves the DVR.** This is `scan_create`'s
-hazard arriving by another route. Tvheadend's over-the-air grabber opens a
-subscription per mux to read EIT tables out of the transport — pointless here,
-since the guide arrives as XMLTV over a socket. Defaults are
-`ota_initial=True` (every startup) plus an `ota_cron` at 02:04 and 14:04, each
-mux held up to 600s. Observed as ten `epggrab` subscriptions in state **Bad**
-pinning both IPTV inputs, during which every recording failed with *"No input
-source available"* and streaming returned no data at all. It clears itself
-before you think to look and returns after each restart, which makes it easy
-to misread as a flaky channel. `setup.py` now disables it.
-
-**The first EPG push stores no programmes.** The parse creates and links the
-grabber channels from `<channel>`, but the `<programme>` elements in the *same*
-document are processed against links that did not yet exist. 2,014 channels
-linked and 0 events; re-pushing immediately gave ~92,000. `push_epg.py` sends
-twice on a one-shot run.
-
-### Keeping the guide fresh
-
-A systemd **user** service, `fastchannels-epg.service`, pushes on start and
-every six hours. User units fit because lingering is already enabled for this
-account, so it starts at boot and survives logout with no `sudo` — matching the
-existing `hermes-gateway.service` pattern.
-
-```bash
-systemctl --user status fastchannels-epg.service
-journalctl --user -u fastchannels-epg.service -f
-```
-
-The unit carries **no filesystem sandboxing**, deliberately: connecting to a
-Unix socket needs write access to the socket file under `/home`, and every
-`ProtectSystem`/`ProtectHome` combination tried — including `full` with an
-explicit `ReadWritePaths` carve-out — failed with `[Errno 13] Permission
-denied`. The comment in the unit records this so it is not re-added as an
-apparent oversight.
-
-### Recording files: container and naming
-
-Recordings land as `.ts`, and that is correct rather than a fallback. The DVR
-uses the `pass` stream profile — **MPEG-TS Pass-thru** — which copies the
-broadcast stream with no transcode, no quality loss and negligible CPU, and
-tolerates a truncated write better than a seekable container would.
-
-**MP4 is not an option here at all.** This Tvheadend is built without libav, so
-there is no `profile-transcode`. The complete muxer list is:
-
-```
-profile-mpegts        MPEG-TS Pass-thru    <-- in use
-profile-mpegts-spawn  MPEG-TS Spawn
-profile-matroska      Matroska (mkv)
-profile-htsp / profile-audio
-```
-
-Matroska is the only alternative container, and it is also a straight remux.
-Worth remembering if the **44.1 kHz AAC** problem resurfaces: that sample rate
-is off-spec for MPEG-TS, which is why some players silently drop the audio
-track on those channels, and Matroska has no such constraint. Verified on the
-two test recordings:
-
-```
-FastChannels DVR test.ts         mpegts   h264 1920x1080   aac 44100 Hz
-News audio test - Al Jazeera.ts  mpegts   h264 1920x1080   aac 48000 Hz
-```
-
-The extension is never hardcoded. `pathname` ends in `$x`, which Tvheadend
-fills from the *active muxer*, so switching the profile changes the extension
-automatically.
-
-Recordings are written to **`~/news/tvheadend/recordings`**, outside the repo.
-The *container* path stays `/recordings`, so the DVR config's storage setting
-and every filename already in the database survive a move of the host
-directory — only the bind mount source changes. Create the directory before
-starting: Docker creates a missing bind source as root, and Tvheadend runs as
-uid 1000.
-
-`pathname` is set to:
-
-```
-$c_$t_%F_%H%M$n.$x     ->  Al-Jazeera_final-check_2026-08-15_1248.ts
-```
-
-No spaces anywhere. Underscores separate the fields; whitespace *inside* a
-channel or programme name becomes `-`, which is not a choice — `dvr_rec.c:292`
-hardcodes `-` and offers no setting. `_` is used only for unsafe characters,
-under `clean-title`. `$n` is a uniquifier that stays empty unless the name
-already exists, and `%H%M` avoids `%R`'s colon. `$q` is available for a
-Plex/Jellyfin `tvshows/…SxxEyy` layout, but depends on episode and genre data
-FAST-channel guides mostly do not carry.
-
-### Limits
-
-- **DRM channels will not work.** No Widevine CDM in Tvheadend, so anything
-  needing the PrismCast bridge is out — the same limit as any non-browser
-  client.
-- **Skip `/m3u/gracenote`.** Tvheadend ignores `tvc-guide-stationid`, so those
-  entries arrive with no EPG hook. Plain `/m3u` + `/epg.xml` is the pairing —
-  simpler than the two-playlist split Channels DVR needs.
-- **Proxied sources are fine.** Samsung and STIRR have no direct upstream URL,
-  but Tvheadend fetches through `local_url` and FastChannels proxies
-  server-side.
-- **`network_mode: host` is load-bearing.** FastChannels emits literal
-  `http://127.0.0.1:5523/play/…` URLs because Public Base URL is unset; on a
-  bridge network those would point at Tvheadend itself.
 
 ---
 
 ## Watching in VLC — `vlc.py`
 
-Symlinked at the repo root; the file lives at `dev/vlc.py`. Two servers can
-serve the same channel, and `--via` picks which.
+Symlinked at the repo root; the file is `dev/vlc.py`. FastChannels has no
+authentication, so nothing here needs a token.
 
 ```bash
 ./vlc.py --list-categories                  # categories with counts
@@ -1074,9 +916,54 @@ serve the same channel, and `--via` picks which.
 ./vlc.py --category News --play             # the whole category
 ./vlc.py --category News --write ~/news.m3u
 ./vlc.py --source pluto --play              # one provider
-./vlc.py --via tvheadend --category "Local News" --play
-./vlc.py --recordings                       # DVR files on disk
+./vlc.py --recordings                       # what record.py has captured
 ```
+
+### One window per channel
+
+VLC has **no "open in a new window" action** — picking an item in its playlist
+replaces whatever that instance is playing. Watching two channels at once means
+two VLC *processes*, so `--play` passes `--no-one-instance` and every
+invocation gets its own viewer:
+
+```bash
+./vlc.py --channel "Al Jazeera" --play
+./vlc.py --channel "Euronews" --play      # second window, first keeps playing
+```
+
+The flag is passed explicitly rather than relying on VLC's `one-instance`
+preference. It defaults to disabled, but a file manager or distro preset can
+flip it, and then a second launch would silently hijack the window already
+playing something. `--reuse` asks for that hand-off deliberately.
+
+### Three edges it handles for you
+
+**Both playlists, always.** `/m3u` and `/m3u/gracenote` are *disjoint*, not a
+superset and subset. `--source pluto` is 176 channels from the first and 169
+from the second: taking only `/m3u` loses nearly half. Both are fetched and
+merged, which is why `--write`/`--play` produce a file rather than handing VLC
+a single URL.
+
+**Categories match exactly.** `/m3u?category=News` returns `News` and *not*
+`Local News` — they are separate categories, and the playlist endpoints do not
+substring match the way `/api/channels` does.
+
+**Channel names in the player.** FastChannels puts full descriptions in the M3U
+as `tvg-description` / `tvc-guide-description`, and those contain commas:
+
+```
+#EXTINF:-1 … tvg-description="…challenging outdoor jobs, WeatherSpy is
+reinventing the way we watch weather." …,WeatherSpy
+```
+
+VLC splits the title on a comma *inside the quoted attributes* instead of on
+the separator comma, so its playlist shows a sentence fragment where the
+channel name should be. Only channels whose description happens to contain no
+comma render correctly, which makes the breakage look random. The script
+rewrites every `#EXTINF` down to the attributes a player actually uses
+(`tvg-id`, `tvg-name`, `tvg-chno`, `tvg-logo`, `group-title`) with commas and
+quotes stripped from the values. Side benefit: the full lineup drops from
+1.2 MB to 588 KB.
 
 ### Clicking "Open in VLC" in the guide
 
@@ -1099,7 +986,7 @@ recording why, because `inline` looks like the obvious answer and is not:
 
 Handing a file to an external application is a capability browsers removed
 deliberately; no MIME type restores it. So the fix is a **one-time browser
-setting**, and upstream's `attachment` is left alone:
+setting**:
 
 - **Chrome** — click the button once, then on the download choose
   *Always open files of this type*.
@@ -1107,121 +994,10 @@ setting**, and upstream's `attachment` is left alone:
   and choose *Always Open Similar Files*.
 
 After that every click downloads a ~90-byte `.m3u` and immediately launches
-VLC. Nothing else on this machine needed changing: `.m3u` already resolves to
+VLC. Nothing else on this machine needs changing: `.m3u` already resolves to
 `audio/x-mpegurl`, which maps to `vlc.desktop`, and snap Firefox has the
 `desktop` and `home` interfaces connected so it reaches host VLC through
 `xdg-desktop-portal`.
-
-The cost is one small file per click accumulating in `~/Downloads`. Avoiding
-that entirely needs a custom `vlc://` scheme handler — a `.desktop` file
-registering `x-scheme-handler/vlc` plus a two-line patch to `guide.html` — 
-which trades the clutter for a template divergence upstream would never take.
-
-### One window per channel
-
-VLC has **no "open in a new window" action** — picking an item in its playlist
-replaces whatever that instance is playing. Watching two channels at once means
-two VLC *processes*, so `--play` passes `--no-one-instance` and every
-invocation gets its own viewer:
-
-```bash
-./vlc.py --channel "Al Jazeera" --play
-./vlc.py --channel "Euronews" --play      # second window, first keeps playing
-```
-
-The flag is passed explicitly rather than relying on VLC's `one-instance`
-preference. It defaults to disabled, but a file manager or distro preset can
-flip it, and then a second launch would silently hijack the window already
-playing something. `--reuse` asks for that hand-off deliberately.
-
-### Which `--via`
-
-**`fastchannels` (default)** is the simpler path. FastChannels has no
-authentication, so nothing needs a token, and it publishes 206
-Gracenote-partitioned channels Tvheadend does not carry — **2,220 against
-2,014**. It works whether or not Tvheadend is running.
-
-**`tvheadend`** is worth it when a stream is flaky: Tvheadend owns the
-subscription and re-muxes everything to MPEG-TS, and it is the only path that
-can also record. It costs an auth token and misses the Gracenote set.
-
-Neither helps with DRM — anything needing the PrismCast/Widevine bridge will
-not play in VLC from either server.
-
-### Why Tvheadend needs a token
-
-Every Tvheadend URL fails in VLC with *"unable to open the MRL"*, and the cause
-is authentication, not VLC. `digest` is set to 1 — **Digest only**:
-
-```
-no auth      -> 401
-basic auth   -> 401     <- what VLC sends
-digest auth  -> 200
-```
-
-VLC leads with Basic and does not usefully fall back. `http://user:pass@host/…`
-does not help either — that is sent as Basic too, so it also 401s.
-
-The fix needs no configuration change and no weakening of the auth scheme:
-Tvheadend's **persistent authentication code**, a per-user token in the
-password table passed as `?auth=CODE`. No password crosses the wire and the
-token is revocable on its own. The script fetches it from the API at run time
-rather than storing it, and `--write` chmods its output to `600` because every
-line embeds it.
-
-**`/playlist/auth/…`, not `/playlist/…`.** The path segment decides how the
-entry URLs *inside* the playlist are authenticated (`webui.c:92-97` — `""` /
-`"/ticket"` / `"/auth"`). Plain `/playlist/…` loads but yields bare entries:
-
-```
-http://127.0.0.1:9981/stream/channelid/756779645?profile=pass
-```
-
-so VLC opens the list and then 401s on every channel. `/playlist/auth/…`
-stamps the code into each one.
-
-### Three FastChannels edges it handles for you
-
-**Channel names in the player.** FastChannels puts full descriptions in the
-M3U as `tvg-description` / `tvc-guide-description`, and those contain commas:
-
-```
-#EXTINF:-1 … tvg-description="…challenging outdoor jobs, WeatherSpy is
-reinventing the way we watch weather." …,WeatherSpy
-```
-
-VLC splits the title on a comma *inside the quoted attributes* instead of on
-the separator comma, so its playlist shows a sentence fragment where the
-channel name should be. Only channels whose description happens to contain no
-comma render correctly, which makes the breakage look random. The script
-rewrites every `#EXTINF` down to the attributes a player actually uses
-(`tvg-id`, `tvg-name`, `tvg-chno`, `tvg-logo`, `group-title`) with commas and
-quotes stripped from the values, so no comma appears before the separator.
-Side benefit: the full lineup drops from 1.2 MB to 588 KB.
-
-Tvheadend does not emit descriptions, so `--via tvheadend` was never affected.
-
-**Both playlists, always.** `/m3u` and `/m3u/gracenote` are *disjoint*, not a
-superset and subset. `--source pluto` is 176 channels from the first and 169
-from the second: taking only `/m3u` loses nearly half. `--via fastchannels`
-fetches both and merges them, which is why `--write`/`--play` produce a file
-rather than handing VLC a single URL.
-
-**Categories match exactly.** `/m3u?category=News` returns `News` and *not*
-`Local News` — they are separate categories, and the playlist endpoints do not
-substring match the way `/api/channels` does.
-
-### Recordings
-
-The Tvheadend auth code cannot play them, by design — `access.c:885` clamps it:
-
-```c
-a->aa_rights &= ACCESS_ADVANCED_STREAMING|ACCESS_STREAMING;
-```
-
-`/dvrfile/…` requires `ACCESS_RECORDER`, which that mask can never carry, so it
-401s regardless of the account's permissions. `--recordings` lists the files in
-`dev/tvheadend/recordings/` instead; VLC opens those directly with no auth.
 
 ---
 
@@ -1353,6 +1129,4 @@ Absence of that line means the rebuild did not pick up the change.
 - `docs/openapi.yaml` and `docs/API.md` — the FastChannels HTTP API these
   scripts read from. 184 paths, verified against the route handlers by
   `dev/check_api_docs.py`.
-- `dev/tvheadend/README.md` — the full Tvheadend rationale, setup and limits,
-  summarised under [Recording](#recording-tvheadend-as-the-dvr) above.
 - `.claude/skills/fastchannels/SKILL.md` — the same API described for an agent.

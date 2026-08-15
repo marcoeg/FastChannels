@@ -249,18 +249,47 @@ def capture(channel: dict, seconds: int, title: str, out_dir: pathlib.Path,
         "ffmpeg", "-hide_banner", "-nostdin", "-loglevel", "warning",
         # A live stream can drop; without these ffmpeg simply stops.
         "-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "30",
+        # …but reconnecting forever is its own failure. Give up on a read that
+        # stalls for 30s rather than retrying a segment that will never arrive.
+        "-rw_timeout", "30000000",
         "-i", channel["url"],
         "-t", str(seconds),
         "-c", "copy", "-f", "mpegts", str(target),
     ]
+
+    # A wall-clock bound on top, because -rw_timeout is not enough on its own.
+    # Observed on an AES-encrypted Pluto stream: ffmpeg captured 18s, hit
+    # "Unable to open resource" on a segment plus TLS errors, and then sat
+    # retrying indefinitely. Unbounded, a scheduled recording would hang for
+    # ever. Slack is generous because HLS back-buffer lets ffmpeg run *ahead*
+    # of real time early on, so wall-clock and stream time are not the same.
+    deadline = seconds + max(60, seconds // 4)
+    timed_out = False
     with log_path.open("w") as log:
         log.write(f"# {' '.join(cmd)}\n\n")
         log.flush()
-        rc = subprocess.call(cmd, stdout=subprocess.DEVNULL, stderr=log)
+        proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=log)
+        try:
+            rc = proc.wait(timeout=deadline)
+        except subprocess.TimeoutExpired:
+            timed_out = True
+            # SIGTERM first: ffmpeg finalises the file, so a partial capture
+            # stays playable instead of being truncated mid-packet.
+            proc.terminate()
+            try:
+                rc = proc.wait(timeout=20)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                rc = proc.wait()
+            log.write(f"\n# wall-clock deadline of {deadline}s exceeded; terminated\n")
 
     size = target.stat().st_size if target.exists() else 0
     final = target
-    if rc == 0 and mp4 and size:
+    # A cut-short capture is still worth keeping — the stream failing halfway
+    # through is exactly when you want the first half. Judge on bytes, not on
+    # ffmpeg's exit status, which is non-zero after a SIGTERM.
+    usable = size > 0
+    if usable and mp4:
         # Remux only after a clean capture: MP4 written directly would be
         # unplayable if the recording were cut short, since the index lands at
         # the end of the file.
@@ -274,6 +303,17 @@ def capture(channel: dict, seconds: int, title: str, out_dir: pathlib.Path,
             final = mp4_path
             size = mp4_path.stat().st_size
 
+    captured = 0.0
+    if usable:
+        probe = subprocess.run(
+            ["ffprobe", "-loglevel", "quiet", "-show_entries", "format=duration",
+             "-of", "csv=p=0", str(final)],
+            capture_output=True, text=True)
+        try:
+            captured = round(float(probe.stdout.strip()), 1)
+        except ValueError:
+            captured = 0.0
+
     (meta_dir / f"{stem}.json").write_text(json.dumps({
         "channel": channel["name"],
         "channel_number": channel["number"],
@@ -282,16 +322,26 @@ def capture(channel: dict, seconds: int, title: str, out_dir: pathlib.Path,
         "title": title,
         "started": started.isoformat(),
         "requested_seconds": seconds,
+        "captured_seconds": captured,
         "exit_status": rc,
-        "file": str(final),
+        "timed_out": timed_out,
+        "complete": bool(usable and not timed_out and captured >= seconds * 0.95),
+        "file": str(final) if usable else None,
         "bytes": size,
         "log": str(log_path),
     }, indent=2) + "\n")
 
-    if rc != 0 or not size:
-        print(f"FAILED rc={rc} — see {log_path}", file=sys.stderr)
+    if not usable:
+        print(f"FAILED rc={rc} — nothing captured, see {log_path}", file=sys.stderr)
         return 1
-    print(f"{final}  ({size / 1e6:.1f} MB)")
+    note = ""
+    if timed_out:
+        note = "  [PARTIAL: stream stalled, terminated at the deadline]"
+    elif captured and captured < seconds * 0.95:
+        note = f"  [PARTIAL: {captured}s of {seconds}s]"
+    print(f"{final}  ({size / 1e6:.1f} MB, {captured}s){note}")
+    if note:
+        print(f"  see {log_path}", file=sys.stderr)
     return 0
 
 

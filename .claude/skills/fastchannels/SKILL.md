@@ -1,6 +1,6 @@
 ---
 name: fastchannels
-description: Live TV, EPG, M3U and DVR via FastChannels + Tvheadend.
+description: Live TV, EPG, M3U playlists and recording via FastChannels.
 ---
 
 # FastChannels API
@@ -82,151 +82,10 @@ finish slightly before the programme ends.
 **No series rules.** Recurring recordings would need a daemon; schedule each
 airing instead.
 
-**Tvheadend is being retired** and should not be used for new work. It reaches
-only 2,014 of the 2,220 channels — it ignores `tvc-guide-stationid`, so the
-whole `/m3u/gracenote` playlist, including *ABC News Live*, *60 Minutes* and
-*48 Hours*, is invisible to it. It is still running for now; the section below
-documents it until it is removed.
-
-## Legacy: Tvheadend as the DVR
-
-Still running, still works, but superseded by `record.py` above. Documented
-here until it is removed; do not build anything new on it.
-
-```
-Tvheadend 4.3   http://127.0.0.1:9981   admin / fastchannels   (digest auth)
-  2,014 channels mirroring the FastChannels lineup
-  ~91,000 EPG events, refreshed six-hourly by fastchannels-epg.service
-  recordings -> ~/news/tvheadend/recordings
-```
-
-Its API is form-encoded like FastChannels' is, but needs digest auth:
-
-```bash
-TVH="curl -s --digest -u admin:fastchannels http://127.0.0.1:9981/api"
-
-$TVH/channel/grid?limit=5                    # channels
-$TVH/epg/events/grid?limit=5                 # what is on
-$TVH/dvr/entry/grid                          # scheduled + completed recordings
-$TVH/dvr/config/grid                         # storage path, retention
-```
-
-To record, find the event then schedule it — **mutating, so confirm first**:
-
-```bash
-# find the event id — `title` is a substring match
-$TVH/epg/events/grid --data-urlencode 'title=News' --data-urlencode 'limit=5'
-#   eventId=74427  ABC 27   ABC 27+ News
-
-# schedule it
-$TVH/dvr/entry/create_by_event \
-  --data-urlencode 'event_id=<id>' --data-urlencode 'config_uuid=<dvr config uuid>'
-```
-
-`dvr/autorec/create` sets a series rule; `dvr/timerec/create` a recurring
-time slot; `dvr/entry/cancel` and `dvr/entry/remove` undo. Channel numbers,
-names, icons and EPG all come from FastChannels, so a channel identified there
-is the same channel in Tvheadend.
-
-**Do not make Tvheadend scan the network.** `scan_create` means "open every
-stream to discover services" — 2,014 live `/play` requests, which trips Roku's
-source-wide cooldown and lets FastChannels auto-disable channels wholesale. The
-network is deliberately configured with `service_sid` instead, so channels come
-from the playlist with no stream opened.
-
-**DRM channels cannot be recorded.** Tvheadend has no Widevine CDM, so anything
-needing the PrismCast bridge is out — the same limit as any non-browser client.
-
-### Handing a stream to a player
-
-`vlc.py` (repo root, symlink to `dev/vlc.py`) does this for either server:
-
-```bash
-./vlc.py --list-categories                       # categories with counts
-./vlc.py --channel "Al Jazeera" --play           # FastChannels direct
-./vlc.py --category News --write ~/news.m3u
-./vlc.py --via tvheadend --category "Local News" --play
-./vlc.py --recordings                            # DVR files on disk
-```
-
-**Default to `--via fastchannels`.** No authentication, and it reaches the 206
-Gracenote channels Tvheadend does not carry — 2,220 against 2,014. Use
-`--via tvheadend` when a stream is flaky and you want Tvheadend to own the
-subscription and re-mux to MPEG-TS, or when checking what the DVR sees.
-
-Never hand out a bare `http://127.0.0.1:9981/playlist/…` or `/stream/…` URL.
-Tvheadend's `digest` is 1 — **Digest only** — and VLC and most simple players
-lead with Basic, which is refused:
-
-```
-no auth -> 401     basic -> 401     digest -> 200
-```
-
-`http://user:pass@host/…` is sent as Basic too, so it fails the same way. The
-way through is the **persistent authentication code**, a per-user token from
-`passwd/entry/grid` passed as `?auth=CODE`. Fetch it at run time; never
-hard-code it into a file that lands in the repo.
-
-### Tvheadend's API is documented here, and nowhere else
-
-Tvheadend ships no API documentation — 134 markdown files covering the UI and
-DVB tuning, none describing the 185 JSON endpoints the UI is built on.
-`dev/tvheadend/openapi.yaml` is a generated spec for them, and
-`dev/tvheadend/gen_openapi.py` regenerates it from the Tvheadend source.
-Consult the spec before guessing.
-
-Conventions: every endpoint is POST with **form-encoded parameters whose
-values are JSON documents** — `conf=`, `node=`, `filter=`, not a JSON body.
-Most accept GET with a query string too. Lists come back as
-`{"entries": [...], "total": N}` and take `limit`, `start`, `sort`, `dir` and
-a JSON `filter`.
-
-**It also documents itself.** Half the API is a generic object layer, so
-`*/class` and `mpegts/network/builders` return every valid property with its
-type, caption and description — live, not prose:
-
-```bash
-$TVH/dvr/entry/class                  # every field on a recording
-$TVH/mpegts/network/builders          # every network type and its properties
-```
-
-That is how `service_sid`, `scan_create` and `refetch_period` were found.
-Prefer it to guessing at a property name.
-
-### Recording quality
-
-Verified working: two test recordings, 1080p h264 with AAC, zero errors,
-landing in `dev/tvheadend/recordings`.
-
-One real gotcha. Some FAST channels carry **44.1 kHz AAC**, which is off-spec
-for MPEG-TS — broadcast is 48 kHz. ffmpeg copes; many players silently drop
-the track, so video plays with no sound. Adult Swim does this, Al Jazeera does
-not. Diagnose and fix:
-
-```bash
-ffprobe -v error -select_streams a:0 -show_entries stream=sample_rate \
-        -of csv=p=0 recording.ts                      # 44100 means trouble
-ffmpeg -i in.ts -c:v copy -c:a aac -ar 48000 -disposition:a:0 default out.mp4
-```
-
-That re-encodes audio only, so it is fast. It is a property of the provider's
-stream, not a fault in the recording path.
-
-Setup, rationale and limits: `dev/tvheadend/README.md`.
-
-### The other option, not used here
-
-**Channels DVR** is the alternative, and FastChannels has first-class support
-for it — `POST /api/feeds/{id}/push-to-dvr` and friends register playlists
-directly. It is closed-source and paid ($8/month or $80/year, 30-day trial,
-Fancy Bits LLC), which is easy to miss: it self-hosts, installs from a shell
-script and quotes no price on its download page.
-
-It is **not configured on this install**, and that has one consequence beyond
-recording: FastChannels holds no Gracenote licence and proxies station lookups
-through a configured Channels DVR, so `/api/gracenote-search` and
-`/api/channels/{id}/gracenote-suggestions` return `400` here. That is a missing
-dependency, not a bug.
+**Tvheadend was removed on 2026-08-15.** If you find a reference to it, or to
+`127.0.0.1:9981`, it is stale. It reached only 2,014 of the 2,220 channels — it
+ignores `tvc-guide-stationid`, so the whole `/m3u/gracenote` playlist,
+including *ABC News Live*, *60 Minutes* and *48 Hours*, was invisible to it.
 
 ## Safety classification
 
@@ -415,17 +274,6 @@ comma inside the quoted attributes rather than the separator — so the playlist
 shows sentence fragments instead of channel names, but only for channels whose
 description has a comma. Strip those attributes before handing an M3U to a
 player; `vlc.py` does this.
-
-**Tvheadend refuses Basic auth.** `digest` is 1, so `--basic` and
-`http://user:pass@host/…` both return 401; only `--digest` works from the shell.
-For players, use the `?auth=CODE` token instead (see `vlc.py`) —
-and use `/playlist/auth/…`, because plain `/playlist/…` returns entry URLs with
-no credential, so the list opens and every channel inside it then 401s.
-
-**The Tvheadend auth code cannot touch recordings.** `access.c:885` clamps it
-to `ACCESS_ADVANCED_STREAMING|ACCESS_STREAMING`, and `/dvrfile/…` requires
-`ACCESS_RECORDER`. Granting the account more permissions does not change this.
-Read recordings from `dev/tvheadend/recordings/` instead.
 
 **Always fetch both playlists.** Channels holding a Gracenote ID are
 partitioned into `/m3u/gracenote` and are **absent** from `/m3u`. Fetching only
