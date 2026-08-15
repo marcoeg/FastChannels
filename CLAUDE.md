@@ -137,11 +137,21 @@ If PR #39 merges, drop `dev/xumo-indirection.patch` and take upstream's version.
 
 ## This install
 
-- **Port is loopback-only** (`127.0.0.1:5523`, set in
+- **Port is published on all interfaces** (`5523:5523`, set in
   `docker-compose.override.yml` with a `!override` tag — Compose appends to
-  list fields by default). The app has **no authentication on any route**, so
-  the port binding is the only access control. Do not publish it without a
-  reverse proxy that authenticates.
+  list fields by default), so the LAN can reach it. This was a deliberate
+  choice, made knowing the consequence: the app has **no authentication on any
+  route**, including destructive ones, and two endpoints are unauthenticated
+  SSRF. Anything that can route to this host has full admin. `ufw` does not
+  help — Docker's iptables rules sit ahead of ufw's INPUT chain, so a
+  published port bypasses it; restricting access would need a `DOCKER-USER`
+  rule or an authenticating reverse proxy.
+- **`public_base_url` is `http://nucbox.local:5523`**, not loopback, so the
+  M3U and XMLTV outputs hand LAN clients URLs they can actually reach. Both
+  halves are needed: opening the port alone leaves every playlist entry
+  pointing at the client itself. Precedence is DB column →
+  `FASTCHANNELS_SERVER_URL` → `PUBLIC_BASE_URL` (`app/models.py:450`), and the
+  DB column is set, so changing the env vars alone would do nothing.
 - `VERSION_CHECK_ENABLED=0` and `FC_YTDLP_AUTO_UPGRADE=0` are set.
 - **`app/` has no bind mount.** Editing source on the host does nothing until
   `docker compose up -d --build`. `COPY . .` is late in the Dockerfile, so only

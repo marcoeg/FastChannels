@@ -30,7 +30,7 @@ outputs with Channels DVR.
 ## This install
 
 ```
-Base URL   http://127.0.0.1:5523      (loopback only — not reachable from the LAN)
+Base URL   http://127.0.0.1:5523      (also on the LAN as http://nucbox.local:5523)
 Version    5.0.4
 Runtime    Docker, container `fastchannels`
 ```
@@ -42,10 +42,15 @@ curl -s http://127.0.0.1:5523/api/system-stats | jq '{uptime_seconds, db}'
 curl -s http://127.0.0.1:5523/api/stats | jq '.categories[:5]'
 ```
 
-**There is no authentication.** Not a single route checks a credential. The
-loopback binding is the only access control, which is why every request below
-works with a bare `curl`. It also means *any* call you make succeeds, including
-destructive ones — see the safety section.
+**There is no authentication.** Not a single route checks a credential, and the
+port is published on the LAN, so there is no access control at all — which is
+why every request below works with a bare `curl`. It also means *any* call you
+make succeeds, including destructive ones. Be correspondingly careful: see the
+safety section.
+
+Use `127.0.0.1:5523` for your own calls. `nucbox.local:5523` is the same
+server, and is what the M3U and XMLTV outputs hand to clients so that other
+devices can reach the streams.
 
 Local configuration deviates from upstream defaults: the port is bound to
 `127.0.0.1` only, `VERSION_CHECK_ENABLED=0`, and `FC_YTDLP_AUTO_UPGRADE=0`

@@ -1,11 +1,17 @@
-# Local hardening overrides. Auto-loaded by `docker compose up` — no -f needed.
+# Local overrides. Auto-loaded by `docker compose up` — no -f needed.
 # Gitignored, so it survives `git pull` without conflicting with upstream.
 #
-# Rationale (see the security review):
-#   - The app has NO authentication on any of its ~200 routes, and two
-#     endpoints (/api/custom-channels/detect, /images/proxy?url=) are
-#     unauthenticated SSRF. Publishing 5523 on all interfaces hands full admin
-#     to anyone on the LAN, so bind it to loopback only.
+#   - 5523 is published on ALL interfaces, deliberately, so LAN devices can
+#     reach the playlists and streams. Understand what that means: the app has
+#     NO authentication on any of its ~200 routes, including destructive ones,
+#     and two endpoints (/api/custom-channels/detect, /images/proxy?url=) are
+#     unauthenticated SSRF. Anything that can route to this host can delete
+#     channels, restore a database, or use the server as an SSRF pivot.
+#     ufw is NOT a mitigation: Docker inserts its iptables rules ahead of ufw's
+#     INPUT chain, so a published port bypasses it entirely. Restricting access
+#     would need a DOCKER-USER rule or a reverse proxy in front.
+#     To go back to local-only, restore "127.0.0.1:5523:5523" below and set
+#     public_base_url back to http://127.0.0.1:5523.
 #   - The version check phones github.com/repos/kineticman/FastChannels every
 #     12h. It carries no telemetry payload, but there's no reason to make the
 #     call if you don't want it.
@@ -13,9 +19,10 @@
 services:
   fastchannels:
     # !override replaces the base file's port list instead of appending to it.
-    # Without the tag, Compose would merge and STILL publish 0.0.0.0:5523.
+    # Still required even though both now publish widely — without the tag the
+    # lists merge, leaving a duplicate mapping.
     ports: !override
-      - "127.0.0.1:5523:5523"
+      - "5523:5523"
     environment:
       VERSION_CHECK_ENABLED: "0"
       # Stops the weekly (Sun 02:00 local) unattended

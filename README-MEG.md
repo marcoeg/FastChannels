@@ -1095,7 +1095,8 @@ needed — and carries three deviations from upstream defaults:
 
 | Setting | Effect |
 | --- | --- |
-| `ports: !override ["127.0.0.1:5523:5523"]` | Loopback only. The `!override` tag is required: Compose *appends* to list fields by default, which would leave the original `0.0.0.0` mapping in place alongside it. |
+| `ports: !override ["5523:5523"]` | Published on all interfaces so LAN devices can reach it — **no authentication on any route**, so anything that can route here has full admin. `ufw` is not a mitigation: Docker's iptables rules precede ufw's INPUT chain. The `!override` tag is still required, or Compose *appends* and leaves a duplicate mapping. |
+| `public_base_url = http://nucbox.local:5523` | Set in the DB, not this file. Makes `/m3u` and `/epg.xml` emit URLs a LAN client can reach; without it every playlist entry points at the client itself. |
 | `VERSION_CHECK_ENABLED: "0"` | Stops the 12-hourly GitHub releases poll. |
 | `FC_YTDLP_AUTO_UPGRADE: "0"` | Stops the weekly unattended `pip install` — **requires the `app/worker.py` gate**, which upstream does not have. |
 

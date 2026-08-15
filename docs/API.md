@@ -41,6 +41,11 @@ and the container's own loopback services.
 reverse proxy that enforces authentication. Do not expose it to a network you do not
 control.
 
+> This particular install has deliberately *not* followed that advice: 5523 is
+> published on all interfaces so LAN devices can play the streams, accepting
+> that every route — including the destructive ones and the two SSRF endpoints
+> above — is reachable from the local network.
+
 ---
 
 ## Quick start

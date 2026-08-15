@@ -150,6 +150,23 @@ def slug(text: str) -> str:
 # FastChannels
 # --------------------------------------------------------------------------
 
+def local_url(url: str) -> str:
+    """Point a playlist URL back at loopback for capture.
+
+    public_base_url is the LAN hostname so that other devices get usable
+    playlists, which means M3U entries now read
+    http://nucbox.local:5523/play/... . The recorder runs on this host, so
+    resolving that over mDNS would put a name lookup in the path of every
+    capture — including unattended overnight ones, which is exactly where you
+    do not want an extra dependency. Loopback always works and is the same
+    server.
+    """
+    parts = urllib.parse.urlsplit(url)
+    base = urllib.parse.urlsplit(FASTCHANNELS)
+    return urllib.parse.urlunsplit(
+        (base.scheme, base.netloc, parts.path, parts.query, parts.fragment))
+
+
 def resolve_channel(wanted: str) -> dict:
     """Find a channel by name (substring) or by number, from both playlists."""
     vlc = _load_vlc()
@@ -169,7 +186,7 @@ def resolve_channel(wanted: str) -> dict:
         else:
             hit = needle in name.lower()
         if hit:
-            hits.append({"name": name, "url": lines[i + 1],
+            hits.append({"name": name, "url": local_url(lines[i + 1]),
                          "tvg_id": attrs.get("tvg-id", ""),
                          "number": attrs.get("tvg-chno", "")})
     if not hits:
