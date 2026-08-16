@@ -812,6 +812,10 @@ straight from FastChannels with ffmpeg, and hands scheduling to systemd.
 `epg`/`list`/`programme` makes it comfortable to drive from an agent.
 Recordings land in `~/news/recordings`.
 
+Two flags exist for problem streams and are covered below: `--normalize`
+(re-encode) and `--no-pin` (record the provider master, which reintroduces the
+advert bug — for reproducing it, nothing else).
+
 ### Why this replaced Tvheadend (removed 2026-08-15)
 
 The decisive number: **206 channels Tvheadend cannot reach at all.** It ignores
@@ -828,11 +832,14 @@ nothing because the image ships no tzdata.
 
 ### How it works
 
-Capture is a plain copy, no re-encode:
+Capture is a plain copy, no re-encode, from the **pinned rendition** rather
+than the provider master (see below — this is what stops adverts destroying a
+recording):
 
 ```
 ffmpeg -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 30 \
-       -i <play-url> -t <seconds> -c copy -f mpegts <out>.ts
+       -rw_timeout 30000000 \
+       -i <rendition-url> -t <seconds> -c copy -f mpegts <out>.ts
 ```
 
 Scheduling is one transient systemd timer per recording, and there is **no
@@ -900,47 +907,33 @@ WARNING: this recording has NO VIDEO at the end.
 
 The sidecar carries `video_at_end`.
 
-### `--normalize`### `--normalize`
+### `--normalize`, and when not to reach for it
 
-`record.py` captures with `-c copy`, so it is exposed in principle to the same
-thing that breaks `vlc.py` on ad-stitched channels: an advert spliced in at a
-different encoding lands in a track declaring the first segment's geometry, and
-VLC then freezes at the change.
+Re-encodes to a fixed 1280x720 with 48 kHz stereo, the same treatment
+`vlc.py --relay` applies. It works on `now`, `at` and `programme`, and
+scheduled recordings carry it through to the systemd timer's command line.
 
-**In practice it held up.** A ten-minute capture of `90s Throwback` (Pluto's
-stitcher) spanning real advert breaks produced a clean file:
+**It is not the fix for adverts** — pinning is. A scale filter cannot process
+frames the demuxer stopped delivering, so normalising a recording that loses
+its video stream produces a normalised recording that still loses its video
+stream. This was tried before pinning was found, and it did not work.
 
-```
-duration      588.8s of 600s requested
-decode errors 0
-resolutions   1216x684 throughout — no change
-```
-
-The capture log carried 46 `Packet corrupt` messages and 5 timestamp
-discontinuities — one with a `-94237930689` offset — but those are the *input*
-HLS, and ffmpeg absorbed them while re-stamping the output.
-
-`--normalize` re-encodes to a fixed 1280x720 with 48 kHz stereo audio, the same
-treatment `vlc.py --relay` applies, for when a channel does splice adverts at
-another resolution:
+What it is genuinely for: a recording that plays badly for some *other* reason
+— an off-spec 44.1 kHz AAC track that a player drops, or mixed geometry in a
+file that did capture completely.
 
 ```bash
-./record.py now --channel "90s Throwback" --duration 1h --normalize
-./record.py at  --channel X --start 20:00 --duration 1h --normalize
+./record.py now --channel X --duration 1h --normalize
 ```
 
-It works on `now`, `at` and `programme`, and scheduled recordings carry it
-through to the systemd timer's command line. Leave it off unless a recording
-actually misbehaves — `-c copy` is lossless and free, and re-encoding is
-neither.
+Leave it off otherwise. `-c copy` is lossless and free; re-encoding is neither.
 
-To check a suspect recording, `resolutions_in()` in `dev/record.py` does a full
-frame scan. It is deliberately **not** run automatically: it costs about 13
-seconds per four minutes of video, roughly three and a half minutes for an
-hour-long recording, to answer a question that came back "no problem" on the
-real test above. Sampling with `-read_intervals` was tried and does not work —
-advert splices restart timestamps, so time-based seeks never reach the second
-encoding.
+`resolutions_in()` in `dev/record.py` is a hand-run diagnostic for inspecting a
+suspect file: it does a full frame scan, costing about 13 seconds per four
+minutes of video — roughly three and a half minutes for an hour — which is why
+it is not run automatically. Sampling with `-read_intervals` was tried and does
+not work: advert splices restart timestamps, so time-based seeks never reach
+the second encoding.
 
 ### A stalled stream cannot hang a recording
 
@@ -1004,45 +997,28 @@ authentication, so nothing here needs a token.
 ./vlc.py --recordings                       # what record.py has captured
 ```
 
-### Adverts, and why a playlist wrapper broke playback
+`--no-pin`, `--relay` and `--relay-copy` exist for problem streams and are
+covered below. Nothing else is needed day to day.
+
+### Adverts: pinned rendition, no playlist wrapper
 
 `./vlc.py --channel "90s Throwback" --play` used to die at the first advert
-break. The same URL pasted straight into VLC plays **through** breaks
-indefinitely. The difference was never the stream — it was the playlist.
+break, then played but stuck at 426x240. Both are fixed, by two independent
+changes.
 
-VLC handles ad-stitched channels natively. At each discontinuity it creates a
-*new pair* of elementary streams and switches to them; VLC's Codec panel after
-a few breaks shows streams `0, 3, 4, 19, 20` — non-contiguous, because it has
-built a fresh audio/video pair per break and is back on the movie at 1216x684.
-ffmpeg's HLS demuxer does not do this, which is why every ffmpeg-based
-workaround failed.
+**A single channel goes to VLC as a bare URL, never wrapped in a playlist.**
+Given a playlist, VLC treats a mid-stream error as "this item failed" and
+advances or stops. Given a direct MRL it re-initialises and carries on — its
+Codec panel after a few breaks shows streams `0, 3, 4, 19, 20`, non-contiguous
+because it built a fresh audio/video pair per break. VLC handles ad-stitched
+channels natively; the wrapper was turning a recoverable discontinuity into the
+end of playback. (`--channel` also now prefers an exact match: "90s Throwback"
+matched "XITE 90s Throwback" too, making it a two-item playlist.)
 
-Two bugs conspired:
-
-**`--channel` did not prefer an exact match.** "90s Throwback" also matched
-"XITE 90s Throwback", so VLC received a **two-item playlist**.
-
-**A single channel was still wrapped in a playlist.** Given a playlist, VLC
-treats a mid-stream error as "this item failed" and advances or stops. Given a
-direct MRL, it re-initialises and carries on. So the wrapper turned a
-recoverable discontinuity into the end of playback.
-
-Now an exact name match wins, ambiguous names list the alternatives on stderr,
-and a single channel is handed to VLC as a bare URL:
-
-```
-/usr/bin/vlc --no-one-instance http://nucbox.local:5523/play/pluto/5f4d....m3u8
-```
-
-`--write` still produces a playlist file, and multi-channel selections still
-produce one — the direct-URL path applies only to `--play` with a single match.
-
-**A single channel is pinned to its highest rendition.** A `/play` URL
-redirects to a provider master listing several renditions. Handing VLC the
-*master* goes wrong twice on ad-stitched channels: it opens the lowest
-rendition and stays there (426x240), and the rendition set changes at an
-advert splice. Handing it **one** rendition removes adaptation entirely —
-nothing to get stuck on, nothing to re-select:
+**That single channel is pinned to its highest rendition.** A `/play` URL
+redirects to a provider master listing several renditions. Given the *master*,
+VLC opens the lowest and stays there. Given **one** rendition there is no
+adaptation at all:
 
 ```
 follow the /play redirect        -> provider master.m3u8 (+ the URL curl ended on)
@@ -1050,11 +1026,9 @@ pick the highest BANDWIDTH       -> e.g. 3321280
 urljoin against the FINAL url    -> absolute rendition URL
 ```
 
-Resolution must be against the URL curl *ended on*, not the `/play` URL: the
-child paths are relative to the provider's master, and its session query string
-must not be inherited.
-
-Measured across providers, all muxed audio+video:
+Resolution must be against the URL curl *ended on*, not the `/play` URL: child
+paths are relative to the provider's master and its session query string must
+not be inherited. Measured across providers, all **muxed audio+video**:
 
 | channel | pinned rendition |
 | --- | --- |
@@ -1062,33 +1036,32 @@ Measured across providers, all muxed audio+video:
 | Al Jazeera (tcl) | 1920x1080 |
 | NHRA (freelivesports) | 1920x1080 |
 
-**A rendition carries its own audio**, despite the master's `AUDIO="audio"`
-group — that group offers *alternative* audio such as the audio-description
-track. An earlier note here claimed variants were video-only and that pinning
-would cost the sound. That was wrong.
+A rendition carries its own audio. The master's `AUDIO="audio"` group offers
+*alternative* audio — the audio-description track — not the only audio.
 
-`--no-pin` hands VLC the master and lets it adapt. `--network-caching=3000`
-gives a 3s buffer, which a pinned high rendition wants, and
-`--no-video-title-show` suppresses the overlay VLC draws over the opening
-seconds — with a pinned rendition that "title" is a long provider URL.
+The resulting launch:
 
-Four VLC launch flags were tried before this and none worked, because they all
-tried to steer VLC's adaptive selection rather than removing it:
-`--adaptive-logic=highest` and `=fixedrate` fetched the top rendition but
-**broke playback at adverts** by pinning a *representation* inside a still-
-adaptive session; `--adaptive-bw` and `=nearoptimal` changed what was fetched
-but not what was decoded.
+```
+vlc --no-one-instance --network-caching=3000 --no-video-title-show <rendition URL>
+```
 
-Worth knowing if the Codec panel looks strange: VLC mis-parses this master.
-The variants carry no `RESOLUTION` attribute and reference `AUDIO="audio"`, so
-VLC files every video rendition under an adaptation set called *"audio
-Original"* — there is no video adaptation set at all, and the panel shows H264
-streams described as audio. That is cosmetic; playback is unaffected.
+`--network-caching=3000` gives the buffer a pinned high rendition wants;
+`--no-video-title-show` suppresses VLC's opening overlay, which with a pinned
+rendition is a long provider URL rather than a channel name. `--no-pin` falls
+back to the master. `--write` and multi-channel selections still produce
+playlist files — the direct-URL path applies only to `--play` with one match.
 
-**Pasting a URL into VLC by hand:** use the **master**, not a variant. Every
-variant carries `AUDIO="audio"`, meaning the variant playlists are video-only —
-pinning the 3.3 Mbps HD variant gets you picture with no sound. The master has
-both and VLC selects the top variant itself.
+**Do not try to steer VLC's adaptive selection instead.** Four flags were tried
+and none worked: `--adaptive-logic=highest` and `=fixedrate` fetched the top
+rendition but **broke playback at adverts**, because they pin a *representation*
+inside a still-adaptive session; `--adaptive-bw` and `=nearoptimal` changed what
+was fetched but not what was decoded. Removing adaptation beats configuring it.
+
+If the Codec panel looks strange, that is VLC mis-parsing the master rather than
+a fault: the variants carry no `RESOLUTION` attribute and reference
+`AUDIO="audio"`, so VLC files every video rendition under an adaptation set
+named *"audio Original"*, and the panel lists H264 streams described as audio.
+Cosmetic; playback is unaffected.
 
 ### When a channel spins — `--relay`
 
