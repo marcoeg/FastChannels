@@ -247,23 +247,15 @@ def launch(target: str, reuse: bool = False) -> None:
     if not vlc:
         sys.exit("vlc not found on PATH")
     mode = ["--one-instance", "--playlist-enqueue"] if reuse else ["--no-one-instance"]
-    # Tell VLC bandwidth is plentiful, but leave its adaptive *logic* alone.
-    #
-    # Left to itself VLC opens the lowest rendition and only then fetches the
-    # top one, and because it mis-parses this kind of master (video variants
-    # filed under an "audio" adaptation set) it carries on decoding the low
-    # one — 426x240, permanently. Measured: default fetches 640930 *and*
-    # 3321280; with this, only 3321280 is ever fetched, so there is no low
-    # rendition to get stuck on.
-    #
-    # Deliberately not --adaptive-logic=highest or =fixedrate. Both also give
-    # the top rendition, and both broke playback at the first advert, because
-    # pinning a representation leaves nothing to fall back to when the
-    # stitcher changes the rendition set mid-stream. This only changes the
-    # assumed bandwidth; the selection logic still re-selects at a break.
-    quality = ["--adaptive-bw=100000"]
+    # No adaptive tuning. Four settings were tried to stop channels opening at
+    # 426x240 — highest, fixedrate, nearoptimal and adaptive-bw. Headless runs
+    # showed them fetching only the top rendition; in real playback none
+    # changed what was displayed, and highest/fixedrate additionally broke
+    # playback at the first advert. VLC mis-parses this master (see below), so
+    # what it fetches and what it decodes are not the same thing, and no launch
+    # flag reached the decoder. Left bare: this is what plays through adverts.
     subprocess.Popen(
-        [vlc, *mode, *quality, target],
+        [vlc, *mode, target],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         start_new_session=True,

@@ -994,24 +994,27 @@ and a single channel is handed to VLC as a bare URL:
 `--write` still produces a playlist file, and multi-channel selections still
 produce one — the direct-URL path applies only to `--play` with a single match.
 
-**`--adaptive-bw=100000` is passed, and nothing else.** Left alone, VLC opens
-the *lowest* rendition first and only then fetches the top one — and because it
-mis-parses this master (below) it carries on decoding the low one, so a channel
-sits at 426x240 permanently. Measured with `vlc -vv`:
+**No adaptive tuning is passed — the launch is bare.** Channels open at
+426x240 and stay there. Four settings were tried and none of them changed what
+was displayed:
 
-| launch | renditions fetched |
-| --- | --- |
-| default | `640930` **and** `3321280` — opens low, decodes low |
-| `--adaptive-bw=100000` | `3321280` only |
-| `--adaptive-logic=nearoptimal` | `3321280` only |
-| `--adaptive-logic=rate` | `640930` only |
-| `--adaptive-logic=highest` | `3321280` only — **but breaks at adverts** |
+| setting | renditions fetched (`vlc -vv`) | effect on playback |
+| --- | --- | --- |
+| default | `640930` then `3321280` | stays 426x240 |
+| `--adaptive-bw=100000` | `3321280` only | stays 426x240 |
+| `--adaptive-logic=nearoptimal` | `3321280` only | untested live |
+| `--adaptive-logic=highest` | `3321280` only | **broke playback at adverts** |
+| `--adaptive-logic=fixedrate` | `3321280` only | pins, same risk |
 
-`--adaptive-bw` only tells VLC bandwidth is plentiful; the selection logic is
-untouched, so it still re-selects at a discontinuity. `highest` and `fixedrate`
-*pin* a representation, which leaves nothing to fall back to when the stitcher
-changes the rendition set mid-break — that was tried and it stopped playback at
-the first advert, exactly the bug the direct-URL fix had just cured.
+The measurement was misleading: what VLC *fetches* and what it *decodes* are
+not the same here, so headless verification did not predict real playback. No
+launch flag reached the decoder, and two of them regressed the advert fix. Left
+bare — this is the invocation that plays through advert breaks, which is worth
+more than resolution.
+
+**If you want full resolution**, the browser player handles this stream
+correctly, including the resolution changes at advert breaks:
+`http://127.0.0.1:5523/watch/<channel id>`.
 
 Worth knowing if the Codec panel looks strange: VLC mis-parses this master.
 The variants carry no `RESOLUTION` attribute and reference `AUDIO="audio"`, so
