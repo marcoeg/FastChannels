@@ -247,13 +247,15 @@ def launch(target: str, reuse: bool = False) -> None:
     if not vlc:
         sys.exit("vlc not found on PATH")
     mode = ["--one-instance", "--playlist-enqueue"] if reuse else ["--no-one-instance"]
-    # VLC's adaptive logic defaults to starting at the lowest variant and
-    # ramping up on measured bandwidth, so a channel opens at 426x240 and takes
-    # a while to climb to 1216x684. There is nothing to measure here — the
-    # stream comes from this machine — so ask for the best variant up front.
-    quality = ["--adaptive-logic=highest"]
+    # Nothing is added to VLC's adaptive handling, deliberately.
+    # --adaptive-logic=highest was tried, to stop channels opening at 426x240
+    # and ramping up. It made VLC fetch the top rendition, and it also broke
+    # playback at the first advert: pinning one representation leaves nothing
+    # to fall back to when the stitcher changes the rendition set mid-stream,
+    # where the default logic simply re-selects. Playing through adverts beats
+    # starting at full resolution, and VLC climbs to it within seconds anyway.
     subprocess.Popen(
-        [vlc, *mode, *quality, target],
+        [vlc, *mode, target],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         start_new_session=True,
