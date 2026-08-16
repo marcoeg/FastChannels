@@ -248,6 +248,37 @@ NORMALIZE_ARGS = [
 ]
 
 
+def video_alive_at_end(path: pathlib.Path, window: int = 10) -> bool | None:
+    """Is there still video in the last few seconds of a recording?
+
+    Ad-stitched channels (Pluto's stitcher and friends) splice adverts at a
+    different encoding. ffmpeg's HLS demuxer loses the mapped video stream at
+    the splice and never re-acquires it, so a 15-minute recording can hold 148
+    seconds of video — while audio and the container run the full length, so
+    the file looks fine by every cheap measure. You find out when you sit down
+    to watch it.
+
+    Checking the tail costs about 0.07s, against roughly three and a half
+    minutes to count every frame of an hour. Returns None when the duration
+    cannot be read.
+    """
+    probe = subprocess.run(
+        ["ffprobe", "-loglevel", "quiet", "-show_entries", "format=duration",
+         "-of", "csv=p=0", str(path)], capture_output=True, text=True)
+    try:
+        duration = float(probe.stdout.strip())
+    except ValueError:
+        return None
+    if duration <= window:
+        return None
+    start = duration - window - 2
+    out = subprocess.run(
+        ["ffprobe", "-loglevel", "quiet", "-read_intervals", f"{start:.1f}%+{window}",
+         "-select_streams", "v:0", "-show_entries", "frame=width",
+         "-of", "csv=p=0", str(path)], capture_output=True, text=True)
+    return any(ln.strip().rstrip(",").isdigit() for ln in out.stdout.splitlines())
+
+
 def resolutions_in(path: pathlib.Path) -> set:
     """Distinct video resolutions in a recording. Not called automatically.
 
@@ -378,6 +409,9 @@ def capture(channel: dict, seconds: int, title: str, out_dir: pathlib.Path,
         except ValueError:
             captured = 0.0
 
+    # Cheap tail check; see video_alive_at_end() for why this is not optional.
+    tail_ok = video_alive_at_end(final) if usable else None
+
     (meta_dir / f"{stem}.json").write_text(json.dumps({
         "channel": channel["name"],
         "channel_number": channel["number"],
@@ -390,6 +424,7 @@ def capture(channel: dict, seconds: int, title: str, out_dir: pathlib.Path,
         "exit_status": rc,
         "timed_out": timed_out,
         "normalized": normalize,
+        "video_at_end": tail_ok,
         "complete": bool(usable and not timed_out and captured >= seconds * 0.95),
         "file": str(final) if usable else None,
         "bytes": size,
@@ -407,6 +442,12 @@ def capture(channel: dict, seconds: int, title: str, out_dir: pathlib.Path,
     print(f"{final}  ({size / 1e6:.1f} MB, {captured}s){note}")
     if note:
         print(f"  see {log_path}", file=sys.stderr)
+    if tail_ok is False:
+        print("  WARNING: this recording has NO VIDEO at the end.", file=sys.stderr)
+        print("  Advert splices on this channel kill ffmpeg's video stream and it never", file=sys.stderr)
+        print("  recovers, so the container runs full length while the picture stopped", file=sys.stderr)
+        print("  early. Audio is intact. Check how much survived with:", file=sys.stderr)
+        print(f"    ffprobe -select_streams v:0 -count_frames -show_entries stream=nb_read_frames -of csv=p=0 '{final}'", file=sys.stderr)
     return 0
 
 
