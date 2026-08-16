@@ -388,7 +388,8 @@ def relay(url: str, name: str, copy_only: bool = False) -> int:
          "-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "30",
          "-rw_timeout", "30000000", "-i", local, *codec, "-f", "mpegts", "-"],
         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-    player = subprocess.Popen([vlc, "--no-one-instance", "-"], stdin=ff.stdout,
+    player = subprocess.Popen([vlc, "--no-one-instance", "--no-video-title-show", "-"],
+                              stdin=ff.stdout,
                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     # Let ffmpeg see VLC's exit: the parent must not hold the read end open.
     ff.stdout.close()
