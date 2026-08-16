@@ -994,20 +994,24 @@ and a single channel is handed to VLC as a bare URL:
 `--write` still produces a playlist file, and multi-channel selections still
 produce one — the direct-URL path applies only to `--play` with a single match.
 
-**Nothing is added to VLC's adaptive handling, deliberately.** Channels open at
-426x240 and climb to 1216x684 over a few seconds, which looks like something
-to fix. `--adaptive-logic=highest` was tried: it did make VLC fetch the top
-rendition, and it also **broke playback at the first advert**. Pinning one
-representation leaves nothing to fall back to when the stitcher changes the
-rendition set mid-stream, where the default logic just re-selects. Playing
-through adverts beats starting at full resolution.
+**`--adaptive-bw=100000` is passed, and nothing else.** Left alone, VLC opens
+the *lowest* rendition first and only then fetches the top one — and because it
+mis-parses this master (below) it carries on decoding the low one, so a channel
+sits at 426x240 permanently. Measured with `vlc -vv`:
 
-The launch line is now exactly what works by hand — bare URL, VLC's own
-defaults, nothing clever:
+| launch | renditions fetched |
+| --- | --- |
+| default | `640930` **and** `3321280` — opens low, decodes low |
+| `--adaptive-bw=100000` | `3321280` only |
+| `--adaptive-logic=nearoptimal` | `3321280` only |
+| `--adaptive-logic=rate` | `640930` only |
+| `--adaptive-logic=highest` | `3321280` only — **but breaks at adverts** |
 
-```
-/usr/bin/vlc --no-one-instance http://nucbox.local:5523/play/pluto/5f4d....m3u8
-```
+`--adaptive-bw` only tells VLC bandwidth is plentiful; the selection logic is
+untouched, so it still re-selects at a discontinuity. `highest` and `fixedrate`
+*pin* a representation, which leaves nothing to fall back to when the stitcher
+changes the rendition set mid-break — that was tried and it stopped playback at
+the first advert, exactly the bug the direct-URL fix had just cured.
 
 Worth knowing if the Codec panel looks strange: VLC mis-parses this master.
 The variants carry no `RESOLUTION` attribute and reference `AUDIO="audio"`, so
