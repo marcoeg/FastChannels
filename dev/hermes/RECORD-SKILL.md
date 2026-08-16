@@ -58,6 +58,8 @@ Blocks until the recording finishes, then prints the file.
 | `--title TITLE` | no | Used in the filename. Defaults to the channel name |
 | `--out DIR` | no | Output directory. Default `~/news/recordings` |
 | `--mp4` | no | Remux to MP4 after a clean capture; the intermediate `.ts` is deleted |
+| `--normalize` | no | Re-encode to a fixed 1280x720. Costs quality and CPU; rarely needed — see failure modes |
+| `--no-pin` | no | Record the provider master instead of one rendition. **Loses video at advert breaks** — for reproducing that bug only |
 
 ```bash
 /home/marco/Development/FastChannels/record.py now \
@@ -85,6 +87,8 @@ use your own cron with `now`.
 | `--title TITLE` | no | Used in the filename **and** in the systemd unit name. Defaults to the channel name |
 | `--out DIR` | no | Output directory. Default `~/news/recordings` |
 | `--mp4` | no | Remux to MP4 after a clean capture |
+| `--normalize` | no | Re-encode to a fixed 1280x720. Costs quality and CPU; rarely needed — see failure modes |
+| `--no-pin` | no | Record the provider master instead of one rendition. **Loses video at advert breaks** — for reproducing that bug only |
 
 ```bash
 /home/marco/Development/FastChannels/record.py at \
@@ -140,7 +144,7 @@ stop from the EPG so you do not have to.
 | `--pad-end SEC` | no | Run late. Default `120` |
 | `--dry-run` | no | Resolve and print, schedule nothing |
 | `--json` | no | Machine-readable output |
-| `--out DIR`, `--mp4`, | no | As above |
+| `--out DIR`, `--mp4`, `--normalize`, `--no-pin` | no | As above |
 
 Always `--dry-run --json` first when acting on someone's behalf — it shows
 which airing was chosen and how many others matched:
@@ -196,9 +200,19 @@ Every run writes a sidecar next to the recording:
 ```
 
 The JSON carries `channel`, `url`, `requested_seconds`, `captured_seconds`,
-`exit_status`, `timed_out`, `complete`, `file` and `bytes`. **`complete` is the
-field to trust** — it is true only when the capture ran to the requested length
-without stalling.
+`exit_status`, `timed_out`, `complete`, `pinned`, `video_at_end`, `normalized`,
+`file` and `bytes`.
+
+**Two fields decide whether a recording is good, and they catch different
+failures:**
+
+- **`complete`** — the capture ran to the requested length without stalling.
+- **`video_at_end`** — there is still *video* in the last ten seconds. A
+  recording can be `complete` and have no picture for most of its length (see
+  below), so check both before telling anyone a recording succeeded.
+
+If `video_at_end` is `false`, say so plainly. The audio is intact and the
+opening stretch is watchable, but the picture stopped early.
 
 A cut-short capture is kept, not discarded, and says so:
 
@@ -214,6 +228,30 @@ was asked for.
 **Exit code 1 with a message on stderr** for: no channel matched, no upcoming
 programme matched, an unparseable `--start` or `--duration`, `ffmpeg` missing,
 FastChannels unreachable, or a capture that produced no bytes at all.
+
+**Adverts used to destroy recordings, and the fix is automatic — do not
+disable it.** Ad-stitched channels (Pluto and similar) splice adverts at a
+different encoding. Handed the provider *master* playlist, ffmpeg sees one
+program per rendition and loses the mapped video stream at the first splice,
+never re-acquiring it. Measured on 15-minute captures of the same channel:
+
+```
+master   900.0s container, 148.0s video  =  16%   (audio full length — looks fine)
+pinned   900.0s container, 890.1s video  =  99%
+```
+
+`record.py` resolves the highest single rendition before capturing, which
+leaves ffmpeg one audio and one video stream and nothing to lose. The sidecar
+records `pinned: true`. **`--no-pin` exists only to reproduce the old failure
+— never pass it for a real recording.**
+
+`video_at_end` remains as a safety net, because pinning is unavailable when a
+channel's `/play` URL does not resolve to an HLS master.
+
+**`--normalize` is rarely what you want.** It re-encodes to a fixed 1280x720
+and costs quality and CPU. It does *not* fix the advert problem — a scale
+filter cannot process frames the demuxer stopped delivering — and pinning
+already handles that. Reach for it only if a specific recording is unplayable.
 
 **DRM channels cannot be recorded.** Roughly 69 of the lineup need a Widevine
 bridge; ffmpeg gets nothing usable. Nothing detects this in advance — you find
