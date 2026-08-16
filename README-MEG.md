@@ -857,6 +857,48 @@ Each run leaves `.meta/<name>.json` (channel, URL, window, exit status, size)
 and `.meta/<name>.log` (ffmpeg stderr) beside the recording. Enough to answer
 "did it record, and if not why" without reintroducing a database.
 
+### Adverts and `--normalize`
+
+`record.py` captures with `-c copy`, so it is exposed in principle to the same
+thing that breaks `vlc.py` on ad-stitched channels: an advert spliced in at a
+different encoding lands in a track declaring the first segment's geometry, and
+VLC then freezes at the change.
+
+**In practice it held up.** A ten-minute capture of `90s Throwback` (Pluto's
+stitcher) spanning real advert breaks produced a clean file:
+
+```
+duration      588.8s of 600s requested
+decode errors 0
+resolutions   1216x684 throughout — no change
+```
+
+The capture log carried 46 `Packet corrupt` messages and 5 timestamp
+discontinuities — one with a `-94237930689` offset — but those are the *input*
+HLS, and ffmpeg absorbed them while re-stamping the output.
+
+`--normalize` re-encodes to a fixed 1280x720 with 48 kHz stereo audio, the same
+treatment `vlc.py --relay` applies, for when a channel does splice adverts at
+another resolution:
+
+```bash
+./record.py now --channel "90s Throwback" --duration 1h --normalize
+./record.py at  --channel X --start 20:00 --duration 1h --normalize
+```
+
+It works on `now`, `at` and `programme`, and scheduled recordings carry it
+through to the systemd timer's command line. Leave it off unless a recording
+actually misbehaves — `-c copy` is lossless and free, and re-encoding is
+neither.
+
+To check a suspect recording, `resolutions_in()` in `dev/record.py` does a full
+frame scan. It is deliberately **not** run automatically: it costs about 13
+seconds per four minutes of video, roughly three and a half minutes for an
+hour-long recording, to answer a question that came back "no problem" on the
+real test above. Sampling with `-read_intervals` was tried and does not work —
+advert splices restart timestamps, so time-based seeks never reach the second
+encoding.
+
 ### A stalled stream cannot hang a recording
 
 `-reconnect` alone is a trap: it makes ffmpeg retry *for ever*. Seen on an

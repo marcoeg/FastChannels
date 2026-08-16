@@ -235,6 +235,52 @@ def epg_for(channel: dict) -> list[dict]:
 # recording
 # --------------------------------------------------------------------------
 
+# Re-encoding settings for --normalize, matching vlc.py's --relay. Fixed
+# geometry is the point: an advert spliced in at another resolution is scaled
+# and padded to match rather than landing in a track declaring the wrong size.
+NORMALIZE_SIZE = "1280:720"
+NORMALIZE_ARGS = [
+    "-vf", (f"scale={NORMALIZE_SIZE}:force_original_aspect_ratio=decrease,"
+            f"pad={NORMALIZE_SIZE}:(ow-iw)/2:(oh-ih)/2"),
+    "-c:v", "libx264", "-preset", "veryfast",
+    # 48 kHz because some channels carry 44.1 kHz AAC, off-spec for MPEG-TS.
+    "-c:a", "aac", "-ar", "48000", "-ac", "2",
+]
+
+
+def resolutions_in(path: pathlib.Path) -> set:
+    """Distinct video resolutions in a recording. Not called automatically.
+
+    Ad-stitched channels splice adverts encoded at a different resolution. With
+    -c copy those frames land in a track declaring the *first* segment's
+    geometry: ffmpeg tolerates the result, VLC freezes on the change and never
+    recovers. A recording is only discovered to be broken when you sit down to
+    watch it, so check at capture time and say so.
+
+    Ad-stitched channels can splice adverts encoded at a different resolution.
+    With -c copy those frames land in a track declaring the *first* segment's
+    geometry: ffmpeg tolerates the result, VLC freezes on the change.
+
+    This is a full frame scan, which costs roughly 13 seconds per four minutes
+    of video — about three and a half minutes for an hour-long recording. Far
+    too slow to run after every capture, and a ten-minute test across real
+    advert breaks on 90s Throwback came back single-resolution anyway, so it is
+    a diagnostic to reach for when a recording misbehaves, not a routine check.
+    Sampling with -read_intervals was tried and does not work: advert splices
+    restart timestamps, so time-based seeks never reach the second encoding.
+    """
+    out = subprocess.run(
+        ["ffprobe", "-loglevel", "quiet", "-select_streams", "v",
+         "-show_entries", "frame=width,height", "-of", "csv=p=0", str(path)],
+        capture_output=True, text=True)
+    found = set()
+    for line in out.stdout.splitlines():
+        parts = line.strip().split(",")
+        if len(parts) >= 2 and parts[0].isdigit() and parts[1].isdigit():
+            found.add((int(parts[0]), int(parts[1])))
+    return found
+
+
 def out_name(channel_name: str, title: str, when: datetime.datetime) -> str:
     """Channel_Title_date_time — the convention already in use for recordings.
 
@@ -249,7 +295,7 @@ def out_name(channel_name: str, title: str, when: datetime.datetime) -> str:
 
 
 def capture(channel: dict, seconds: int, title: str, out_dir: pathlib.Path,
-            mp4: bool) -> int:
+            mp4: bool, normalize: bool = False) -> int:
     """Run ffmpeg and record what happened beside the file."""
     if not shutil.which("ffmpeg"):
         sys.exit("ffmpeg not found on PATH")
@@ -271,7 +317,8 @@ def capture(channel: dict, seconds: int, title: str, out_dir: pathlib.Path,
         "-rw_timeout", "30000000",
         "-i", channel["url"],
         "-t", str(seconds),
-        "-c", "copy", "-f", "mpegts", str(target),
+        *(NORMALIZE_ARGS if normalize else ["-c", "copy"]),
+        "-f", "mpegts", str(target),
     ]
 
     # A wall-clock bound on top, because -rw_timeout is not enough on its own.
@@ -342,6 +389,7 @@ def capture(channel: dict, seconds: int, title: str, out_dir: pathlib.Path,
         "captured_seconds": captured,
         "exit_status": rc,
         "timed_out": timed_out,
+        "normalized": normalize,
         "complete": bool(usable and not timed_out and captured >= seconds * 0.95),
         "file": str(final) if usable else None,
         "bytes": size,
@@ -363,7 +411,8 @@ def capture(channel: dict, seconds: int, title: str, out_dir: pathlib.Path,
 
 
 def schedule(channel_arg: str, start: datetime.datetime, seconds: int,
-             title: str, out_dir: pathlib.Path, mp4: bool) -> int:
+             title: str, out_dir: pathlib.Path, mp4: bool,
+             normalize: bool = False) -> int:
     """Hand the recording to systemd and forget about it."""
     if not shutil.which("systemd-run"):
         sys.exit("systemd-run not found — cannot schedule")
@@ -382,6 +431,8 @@ def schedule(channel_arg: str, start: datetime.datetime, seconds: int,
     ]
     if mp4:
         cmd.append("--mp4")
+    if normalize:
+        cmd.append("--normalize")
     proc = subprocess.run(cmd, capture_output=True, text=True)
     if proc.returncode != 0:
         sys.exit(proc.stderr.strip() or "systemd-run failed")
@@ -463,7 +514,7 @@ def cmd_epg(args) -> int:
 def cmd_now(args) -> int:
     ch = resolve_channel(args.channel)
     return capture(ch, parse_duration(args.duration), args.title or ch["name"],
-                   pathlib.Path(args.out).expanduser(), args.mp4)
+                   pathlib.Path(args.out).expanduser(), args.mp4, args.normalize)
 
 
 def cmd_at(args) -> int:
@@ -471,7 +522,7 @@ def cmd_at(args) -> int:
     ch = resolve_channel(args.channel)
     return schedule(args.channel, start, parse_duration(args.duration),
                     args.title or ch["name"], pathlib.Path(args.out).expanduser(),
-                    args.mp4)
+                    args.mp4, args.normalize)
 
 
 def cmd_programme(args) -> int:
@@ -502,8 +553,9 @@ def cmd_programme(args) -> int:
     if start <= now:
         # Already started; record what is left rather than refusing.
         seconds = int((prog["stop"] - now).total_seconds()) + args.pad_end
-        return capture(ch, seconds, prog["title"], out_dir, args.mp4)
-    return schedule(args.channel, start, seconds, prog["title"], out_dir, args.mp4)
+        return capture(ch, seconds, prog["title"], out_dir, args.mp4, args.normalize)
+    return schedule(args.channel, start, seconds, prog["title"], out_dir, args.mp4,
+                    args.normalize)
 
 
 def main() -> int:
@@ -521,6 +573,9 @@ def main() -> int:
                            help=f"output directory (default: {OUT_DIR})")
             p.add_argument("--mp4", action="store_true",
                            help="remux to MP4 after a clean capture")
+            p.add_argument("--normalize", action="store_true",
+                           help="re-encode to a fixed size — needed for ad-stitched "
+                                "channels, whose adverts otherwise freeze playback")
 
     p = sub.add_parser("now", help="record immediately")
     common(p)
