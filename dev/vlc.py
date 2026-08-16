@@ -247,8 +247,13 @@ def launch(target: str, reuse: bool = False) -> None:
     if not vlc:
         sys.exit("vlc not found on PATH")
     mode = ["--one-instance", "--playlist-enqueue"] if reuse else ["--no-one-instance"]
+    # VLC's adaptive logic defaults to starting at the lowest variant and
+    # ramping up on measured bandwidth, so a channel opens at 426x240 and takes
+    # a while to climb to 1216x684. There is nothing to measure here — the
+    # stream comes from this machine — so ask for the best variant up front.
+    quality = ["--adaptive-logic=highest"]
     subprocess.Popen(
-        [vlc, *mode, target],
+        [vlc, *mode, *quality, target],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         start_new_session=True,

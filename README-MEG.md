@@ -994,6 +994,12 @@ and a single channel is handed to VLC as a bare URL:
 `--write` still produces a playlist file, and multi-channel selections still
 produce one — the direct-URL path applies only to `--play` with a single match.
 
+**`--adaptive-logic=highest` is passed too.** VLC's default adaptive logic
+starts at the lowest variant and ramps up on measured bandwidth, so a channel
+opens at 426x240 and takes a while to reach 1216x684. There is nothing to
+measure when the stream comes from this machine, so the best variant is asked
+for up front.
+
 **Pasting a URL into VLC by hand:** use the **master**, not a variant. Every
 variant carries `AUDIO="audio"`, meaning the variant playlists are video-only —
 pinning the 3.3 Mbps HD variant gets you picture with no sound. The master has
