@@ -57,9 +57,11 @@ import json
 import pathlib
 import re
 import shutil
+import os
 import subprocess
 import sys
 import tempfile
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -72,6 +74,11 @@ FASTCHANNELS = "http://127.0.0.1:5523"
 # Output geometry for a normalising relay. Anything spliced in at another
 # resolution is scaled and padded to this, so the track stays consistent.
 RELAY_SIZE = "1280:720"
+
+# How the supervisor decides the input is gone. An advert break is ~2-3 min, so
+# 20s of no new frames is well clear of ordinary jitter but restarts quickly.
+POLL_SECONDS = 2.0
+STALL_SECONDS = 20.0
 
 EXTINF_HEAD = re.compile(r"^#EXTINF:(-?[\d.]+)")
 EXTINF_ATTR = re.compile(r'([A-Za-z0-9_.-]+)="([^"]*)"')
@@ -256,23 +263,28 @@ def relay(url: str, name: str, copy_only: bool = False) -> int:
     — while ffmpeg handles it silently. A passthrough relay (`--relay-copy`) is
     enough here, and costs nothing.
 
-    **Encoding changes.** Pluto's stitcher splices ads encoded at a different
-    resolution from the content. With `-c copy` the MPEG-TS output is fixed at
-    whatever the first segment was, so the ad's frames land in a track that
-    declares the wrong geometry. Measured on a constructed splice:
+    **The video input dies at an advert.** Pluto's stitcher splices adverts
+    encoded differently from the content, and ffmpeg's HLS demuxer loses the
+    mapped video stream at the transition and never re-acquires it. Measured on
+    a 14-minute capture of "90s Throwback":
 
-        -c copy   -> one video track containing BOTH 1216x684 and 640x360
-        transcode -> 1216x684 throughout
+        frame=15220  time=00:13:59.98      <- 14 min at 30fps should be 25,200
 
-    ffmpeg tolerates the mixed track; VLC's decoder does not. It freezes on the
-    last good frame and never re-initialises — while the audio, which comes
-    from a *separate* rendition playlist whose parameters never change, keeps
-    playing. That is the "frozen video, audio continues, only audio comes back"
-    symptom, and no amount of copying fixes it.
+    Video stopped at ~8:27 and produced 36 further frames in five and a half
+    minutes, while audio and muxing carried on — the file kept growing. That is
+    exactly the reported symptom: picture frozen on the last content frame,
+    adverts audible, and no picture when the programme returns.
 
-    So the default re-encodes to a fixed geometry, which is the only thing that
-    makes the output stable regardless of what the input does. Measured at
-    1.62x realtime at 720p on this machine, so live viewing has headroom.
+    Re-encoding does not fix this. A `scale` filter cannot help when the stream
+    feeding it has gone; the transcode was verified to hold 1280x720 throughout
+    and still froze. Neither can `-c copy`. The input is simply over.
+
+    So the relay **supervises** ffmpeg: it watches frame progress, and when
+    video stalls it kills ffmpeg and starts a new one on the same pipe. VLC
+    never sees EOF, because this process holds the write end open across the
+    restart, and the restarted stream carries identical parameters — fixed
+    geometry and 48 kHz stereo — so the decoder can continue. Restarting
+    re-enters at the live edge, which skips the rest of the advert break.
 
     Either way VLC gets a stream rather than a playlist, so seeking and the
     channel name in the title bar are gone. Use it when a channel misbehaves,
@@ -310,18 +322,67 @@ def relay(url: str, name: str, copy_only: bool = False) -> int:
         how = f"normalising to {RELAY_SIZE}"
 
     print(f"relaying {name} through ffmpeg ({how}) — close VLC to stop")
-    ff = subprocess.Popen(
-        [ffmpeg, "-hide_banner", "-loglevel", "error", "-nostdin",
-         "-reconnect", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "30",
-         "-rw_timeout", "30000000", "-i", local, *codec, "-f", "mpegts", "-"],
-        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-    player = subprocess.Popen([vlc, "--no-one-instance", "-"], stdin=ff.stdout,
+
+    # This process owns the write end for the whole session. Each ffmpeg gets a
+    # duplicate; when one dies VLC sees no EOF, so playback survives a restart.
+    read_fd, write_fd = os.pipe()
+    player = subprocess.Popen([vlc, "--no-one-instance", "-"], stdin=read_fd,
                               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    # Let ffmpeg see VLC's exit: the parent must not hold the read end open.
-    ff.stdout.close()
-    player.wait()
-    ff.terminate()
+    os.close(read_fd)
+
+    def build(progress_path):
+        return [ffmpeg, "-hide_banner", "-loglevel", "error", "-nostdin",
+                "-reconnect", "1", "-reconnect_streamed", "1",
+                "-reconnect_delay_max", "30", "-rw_timeout", "30000000",
+                "-i", local, *codec,
+                "-progress", progress_path, "-nostats",
+                "-f", "mpegts", "pipe:1"]
+
+    attempt = 0
+    try:
+        while player.poll() is None:
+            attempt += 1
+            if attempt > 1:
+                print(f"  video stalled — restarting ffmpeg (#{attempt})", file=sys.stderr)
+            with tempfile.NamedTemporaryFile("w+", suffix=".progress") as prog:
+                ff = subprocess.Popen(build(prog.name), stdout=write_fd,
+                                      stderr=subprocess.DEVNULL)
+                last_frame, idle = -1, 0.0
+                while ff.poll() is None and player.poll() is None:
+                    time.sleep(POLL_SECONDS)
+                    frame = _last_frame(prog.name)
+                    if frame is not None and frame != last_frame:
+                        last_frame, idle = frame, 0.0
+                    else:
+                        idle += POLL_SECONDS
+                    if idle >= STALL_SECONDS:
+                        # Frames have stopped advancing: the input is gone and
+                        # waiting longer will not bring it back.
+                        ff.terminate()
+                        try:
+                            ff.wait(timeout=10)
+                        except subprocess.TimeoutExpired:
+                            ff.kill()
+                        break
+                if player.poll() is not None:
+                    ff.terminate()
+                    break
+    finally:
+        os.close(write_fd)
+        player.wait()
     return 0
+
+
+def _last_frame(path: str) -> int | None:
+    """The newest frame= value ffmpeg has written to its -progress file."""
+    try:
+        with open(path) as fh:
+            for line in reversed(fh.read().splitlines()):
+                if line.startswith("frame="):
+                    return int(line.split("=", 1)[1])
+    except (OSError, ValueError):
+        pass
+    return None
 
 
 def save(body: str, dest: pathlib.Path) -> int:

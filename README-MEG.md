@@ -977,22 +977,30 @@ Cannot reuse HTTP connection for different host:
 Can't support the subtitle(uri: .../subtitles_0_0_0_f.m3u8)
 ```
 
-**Encoding changes — video freezes on an advert and only audio comes back.**
-Pluto's stitcher splices ads encoded at a *different resolution*. With
-`-c copy` the MPEG-TS output is fixed at whatever the first segment was, so the
-ad's frames land in a track declaring the wrong geometry. Constructed splice,
-1216x684 content with a 640x360 advert:
+**The video input dies at an advert — picture freezes, audio plays on.**
+Pluto's stitcher splices adverts encoded differently from the content, and
+ffmpeg's HLS demuxer loses the mapped video stream at the transition and never
+re-acquires it. Measured on a 14-minute capture of `90s Throwback`:
 
 ```
--c copy   -> ONE video track containing both 1216x684 and 640x360
-transcode -> 1216x684 throughout
+frame=15220  time=00:13:59.98      <- 14 min at 30fps should be 25,200 frames
 ```
 
-ffmpeg tolerates the mixed track; VLC's decoder does not — it freezes on the
-last good frame and never re-initialises. Meanwhile the audio comes from a
-*separate* rendition playlist whose parameters never change, so it plays right
-through the break and returns alone afterwards. `90s Throwback` shows this
-exactly.
+Video stopped at ~8:27 and produced 36 more frames in five and a half minutes,
+while audio and muxing carried on and the file kept growing. Picture frozen on
+the last content frame, adverts audible, no picture when the programme returns.
+
+**Re-encoding does not fix this**, which was worth learning the hard way: a
+`scale` filter cannot help when the stream feeding it is gone. The transcode
+held 1280x720 throughout and still froze. Neither does `-c copy`. The input is
+simply over.
+
+So the relay **supervises** ffmpeg — it watches frame progress via
+`-progress`, and when video stops advancing for 20s it kills ffmpeg and starts
+another on the same pipe. VLC never sees EOF, because `vlc.py` holds the write
+end open across the restart, and the restarted stream carries identical
+parameters, so the decoder continues. Restarting re-enters at the live edge,
+which skips the remainder of the advert break.
 
 ```bash
 ./vlc.py --channel "90s Throwback" --relay      # re-encodes: fixes both
