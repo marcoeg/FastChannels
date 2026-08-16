@@ -222,6 +222,52 @@ def fc_filter_channel(playlist: str, wanted: str) -> str:
 
 # --------------------------------------------------------------------------
 
+def best_variant(play_url: str) -> str | None:
+    """The highest-bandwidth rendition of an HLS master, as an absolute URL.
+
+    A FastChannels /play URL redirects to a provider master playlist listing
+    several renditions. Handing VLC the *master* makes it adapt, and on
+    ad-stitched channels that goes wrong twice over: it opens the lowest
+    rendition and stays there (426x240), and the rendition set changes at an
+    advert splice. Handing it one rendition removes adaptation entirely —
+    there is nothing to get stuck on and nothing to re-select.
+
+    The rendition is muxed: despite the master's AUDIO="audio" group, which
+    only offers *alternative* audio such as the audio-description track, the
+    variant itself carries both streams. Verified: aac 48000 + h264 1216x684.
+
+    Resolution has to be against the URL curl actually ended on, not the /play
+    URL, because the child paths are relative to the provider's master and the
+    session query string must not be inherited. Returns None when this is not
+    an HLS master, leaving the caller to use the original URL.
+    """
+    try:
+        with urllib.request.urlopen(play_url, timeout=30) as r:
+            body = r.read().decode("utf-8", "replace")
+            final = r.geturl()
+    except Exception:
+        return None
+    if "#EXT-X-STREAM-INF" not in body:
+        return None  # a media playlist already, or not HLS at all
+
+    best_bw, best_path = -1, None
+    lines = body.splitlines()
+    for i, line in enumerate(lines):
+        if not line.startswith("#EXT-X-STREAM-INF"):
+            continue
+        m = re.search(r"BANDWIDTH=(\d+)", line)
+        if not m:
+            continue
+        for nxt in lines[i + 1:]:
+            if nxt.strip() and not nxt.startswith("#"):
+                if int(m.group(1)) > best_bw:
+                    best_bw, best_path = int(m.group(1)), nxt.strip()
+                break
+    if not best_path:
+        return None
+    return urllib.parse.urljoin(final, best_path)
+
+
 def list_recordings() -> int:
     files = sorted(p for p in RECORDINGS.glob("*") if p.is_file())
     if not files:
@@ -255,7 +301,7 @@ def launch(target: str, reuse: bool = False) -> None:
     # what it fetches and what it decodes are not the same thing, and no launch
     # flag reached the decoder. Left bare: this is what plays through adverts.
     subprocess.Popen(
-        [vlc, *mode, target],
+        [vlc, *mode, "--network-caching=3000", target],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         start_new_session=True,
@@ -375,6 +421,9 @@ def main() -> int:
     ap.add_argument("--write", metavar="PATH", help="save the playlist as a local .m3u")
     ap.add_argument("--play", action="store_true",
                     help="launch VLC on the result, in its own window")
+    ap.add_argument("--no-pin", action="store_true",
+                    help="hand VLC the master playlist and let it adapt, instead of "
+                         "pinning the highest rendition")
     ap.add_argument("--reuse", action="store_true",
                     help="with --play, hand off to a running VLC instead of a new window")
     ap.add_argument("--relay", action="store_true",
@@ -427,7 +476,13 @@ def main() -> int:
     # advances or stops. That is what killed playback at the first advert.
     urls = [ln for ln in body.splitlines() if ln.startswith("http")]
     if args.play and not args.write and len(urls) == 1:
-        launch(urls[0], args.reuse)
+        target = urls[0]
+        if not args.no_pin:
+            variant = best_variant(target.replace("nucbox.local", "127.0.0.1"))
+            if variant:
+                target = variant
+                print("pinned to the highest rendition")
+        launch(target, args.reuse)
         return 0
 
     if dest is None:

@@ -1027,27 +1027,45 @@ and a single channel is handed to VLC as a bare URL:
 `--write` still produces a playlist file, and multi-channel selections still
 produce one — the direct-URL path applies only to `--play` with a single match.
 
-**No adaptive tuning is passed — the launch is bare.** Channels open at
-426x240 and stay there. Four settings were tried and none of them changed what
-was displayed:
+**A single channel is pinned to its highest rendition.** A `/play` URL
+redirects to a provider master listing several renditions. Handing VLC the
+*master* goes wrong twice on ad-stitched channels: it opens the lowest
+rendition and stays there (426x240), and the rendition set changes at an
+advert splice. Handing it **one** rendition removes adaptation entirely —
+nothing to get stuck on, nothing to re-select:
 
-| setting | renditions fetched (`vlc -vv`) | effect on playback |
-| --- | --- | --- |
-| default | `640930` then `3321280` | stays 426x240 |
-| `--adaptive-bw=100000` | `3321280` only | stays 426x240 |
-| `--adaptive-logic=nearoptimal` | `3321280` only | untested live |
-| `--adaptive-logic=highest` | `3321280` only | **broke playback at adverts** |
-| `--adaptive-logic=fixedrate` | `3321280` only | pins, same risk |
+```
+follow the /play redirect        -> provider master.m3u8 (+ the URL curl ended on)
+pick the highest BANDWIDTH       -> e.g. 3321280
+urljoin against the FINAL url    -> absolute rendition URL
+```
 
-The measurement was misleading: what VLC *fetches* and what it *decodes* are
-not the same here, so headless verification did not predict real playback. No
-launch flag reached the decoder, and two of them regressed the advert fix. Left
-bare — this is the invocation that plays through advert breaks, which is worth
-more than resolution.
+Resolution must be against the URL curl *ended on*, not the `/play` URL: the
+child paths are relative to the provider's master, and its session query string
+must not be inherited.
 
-**If you want full resolution**, the browser player handles this stream
-correctly, including the resolution changes at advert breaks:
-`http://127.0.0.1:5523/watch/<channel id>`.
+Measured across providers, all muxed audio+video:
+
+| channel | pinned rendition |
+| --- | --- |
+| 90s Throwback (pluto) | 1216x684 |
+| Al Jazeera (tcl) | 1920x1080 |
+| NHRA (freelivesports) | 1920x1080 |
+
+**A rendition carries its own audio**, despite the master's `AUDIO="audio"`
+group — that group offers *alternative* audio such as the audio-description
+track. An earlier note here claimed variants were video-only and that pinning
+would cost the sound. That was wrong.
+
+`--no-pin` hands VLC the master and lets it adapt. `--network-caching=3000`
+gives a 3s buffer, which a pinned high rendition wants.
+
+Four VLC launch flags were tried before this and none worked, because they all
+tried to steer VLC's adaptive selection rather than removing it:
+`--adaptive-logic=highest` and `=fixedrate` fetched the top rendition but
+**broke playback at adverts** by pinning a *representation* inside a still-
+adaptive session; `--adaptive-bw` and `=nearoptimal` changed what was fetched
+but not what was decoded.
 
 Worth knowing if the Codec panel looks strange: VLC mis-parses this master.
 The variants carry no `RESOLUTION` attribute and reference `AUDIO="audio"`, so
