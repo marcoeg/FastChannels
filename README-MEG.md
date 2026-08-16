@@ -1068,7 +1068,9 @@ track. An earlier note here claimed variants were video-only and that pinning
 would cost the sound. That was wrong.
 
 `--no-pin` hands VLC the master and lets it adapt. `--network-caching=3000`
-gives a 3s buffer, which a pinned high rendition wants.
+gives a 3s buffer, which a pinned high rendition wants, and
+`--no-video-title-show` suppresses the overlay VLC draws over the opening
+seconds — with a pinned rendition that "title" is a long provider URL.
 
 Four VLC launch flags were tried before this and none worked, because they all
 tried to steer VLC's adaptive selection rather than removing it:

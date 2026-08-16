@@ -301,7 +301,10 @@ def launch(target: str, reuse: bool = False) -> None:
     # what it fetches and what it decodes are not the same thing, and no launch
     # flag reached the decoder. Left bare: this is what plays through adverts.
     subprocess.Popen(
-        [vlc, *mode, "--network-caching=3000", target],
+        # --no-video-title-show suppresses the overlay VLC draws over the first
+        # seconds of playback; with a pinned rendition the "title" is a long
+        # provider URL, so it is noise rather than information.
+        [vlc, *mode, "--network-caching=3000", "--no-video-title-show", target],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         start_new_session=True,
