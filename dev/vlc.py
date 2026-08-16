@@ -200,6 +200,23 @@ def fc_filter_channel(playlist: str, wanted: str) -> str:
             out.extend([line, lines[i + 1]])
     if len(out) == 1:
         sys.exit(f"no channel matched {wanted!r}")
+
+    # Prefer an exact name match. "90s Throwback" also matches "XITE 90s
+    # Throwback", and handing VLC two items instead of one changes its
+    # behaviour badly — see launch_single() for why that matters.
+    if not by_number:
+        exact = ["#EXTM3U"]
+        # out is ["#EXTM3U", EXTINF, url, EXTINF, url, …] — EXTINF at odd
+        # indices, its url immediately after.
+        for i in range(1, len(out) - 1, 2):
+            if extinf_name(out[i]).strip().lower() == needle:
+                exact.extend([out[i], out[i + 1]])
+        if len(exact) > 1:
+            out = exact
+    if len(out) > 3:
+        names = ", ".join(extinf_name(out[i]) for i in range(1, len(out), 2))
+        print(f"note: {wanted!r} matched {(len(out) - 1) // 2} channels: {names}",
+              file=sys.stderr)
     return "\n".join(out) + "\n"
 
 
@@ -393,6 +410,17 @@ def main() -> int:
         print(f"  {FASTCHANNELS}/m3u{suffix}")
         print(f"  {FASTCHANNELS}/m3u/gracenote{suffix}")
         print("\nThese are two disjoint playlists; use --write or --play to get them merged.")
+        return 0
+
+    # A single channel goes to VLC as a bare URL, never wrapped in a playlist.
+    # This is not cosmetic. Ad-stitched channels change encoding mid-stream;
+    # given a direct MRL, VLC re-initialises and builds a fresh pair of
+    # elementary streams for each break, carrying on happily. Given a
+    # *playlist*, the same error is treated as "this item failed" and VLC
+    # advances or stops. That is what killed playback at the first advert.
+    urls = [ln for ln in body.splitlines() if ln.startswith("http")]
+    if args.play and not args.write and len(urls) == 1:
+        launch(urls[0], args.reuse)
         return 0
 
     if dest is None:

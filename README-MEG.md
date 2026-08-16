@@ -961,64 +961,61 @@ authentication, so nothing here needs a token.
 ./vlc.py --recordings                       # what record.py has captured
 ```
 
-### When a channel misbehaves in VLC — `--relay`
+### Adverts, and why a playlist wrapper broke playback
 
-Server-side ad insertion breaks players in **two different ways**, and they
-need different answers.
+`./vlc.py --channel "90s Throwback" --play` used to die at the first advert
+break. The same URL pasted straight into VLC plays **through** breaks
+indefinitely. The difference was never the stream — it was the playlist.
 
-**Origin switching — VLC spins and never starts.** Content segments come from
-the content CDN, ad segments from another host, and the playlist changes origin
-mid-stream. NHRA on `freelivesports` does this; ffmpeg plays the same URL
-without complaint but says what VLC is choking on:
+VLC handles ad-stitched channels natively. At each discontinuity it creates a
+*new pair* of elementary streams and switches to them; VLC's Codec panel after
+a few breaks shows streams `0, 3, 4, 19, 20` — non-contiguous, because it has
+built a fresh audio/video pair per break and is back on the movie at 1216x684.
+ffmpeg's HLS demuxer does not do this, which is why every ffmpeg-based
+workaround failed.
+
+Two bugs conspired:
+
+**`--channel` did not prefer an exact match.** "90s Throwback" also matched
+"XITE 90s Throwback", so VLC received a **two-item playlist**.
+
+**A single channel was still wrapped in a playlist.** Given a playlist, VLC
+treats a mid-stream error as "this item failed" and advances or stops. Given a
+direct MRL, it re-initialises and carries on. So the wrapper turned a
+recoverable discontinuity into the end of playback.
+
+Now an exact name match wins, ambiguous names list the alternatives on stderr,
+and a single channel is handed to VLC as a bare URL:
 
 ```
-Cannot reuse HTTP connection for different host:
-    d35p4ep9ync6qx.cloudfront.net != stream.ads.ottera.tv
-Can't support the subtitle(uri: .../subtitles_0_0_0_f.m3u8)
+/usr/bin/vlc --no-one-instance http://nucbox.local:5523/play/pluto/5f4d....m3u8
 ```
 
-**Encoding changes — video freezes on an advert and only audio comes back.**
-Pluto's stitcher splices ads encoded at a *different resolution*. With
-`-c copy` the MPEG-TS output is fixed at whatever the first segment was, so the
-ad's frames land in a track declaring the wrong geometry. Constructed splice,
-1216x684 content with a 640x360 advert:
+`--write` still produces a playlist file, and multi-channel selections still
+produce one — the direct-URL path applies only to `--play` with a single match.
 
-```
--c copy   -> ONE video track containing both 1216x684 and 640x360
-transcode -> 1216x684 throughout
-```
+**Pasting a URL into VLC by hand:** use the **master**, not a variant. Every
+variant carries `AUDIO="audio"`, meaning the variant playlists are video-only —
+pinning the 3.3 Mbps HD variant gets you picture with no sound. The master has
+both and VLC selects the top variant itself.
 
-ffmpeg tolerates the mixed track; VLC's decoder does not — it freezes on the
-last good frame and never re-initialises. Meanwhile the audio comes from a
-*separate* rendition playlist whose parameters never change, so it plays right
-through the break and returns alone afterwards. `90s Throwback` shows this
-exactly.
+### When a channel spins — `--relay`
+
+A different failure, and still real: content segments from the content CDN, ad
+segments from another host, the playlist changing origin mid-stream, plus a
+SUBTITLES rendition. NHRA on `freelivesports` does this and VLC spins without
+starting. ffmpeg handles it silently, so relaying through ffmpeg helps:
 
 ```bash
-./vlc.py --channel "90s Throwback" --relay      # re-encodes: fixes both
-./vlc.py --channel NHRA --relay-copy            # passthrough: fixes origin switching only
+./vlc.py --channel NHRA --relay          # re-encodes to a fixed size
+./vlc.py --channel NHRA --relay-copy     # passthrough, free
 ```
 
-`--relay` re-encodes to a fixed 1280x720 and normalises audio to 48 kHz stereo,
-which is the only thing that keeps the output stable regardless of what the
-input does. Measured at **1.62x realtime** on this machine's 16 cores, so live
-viewing has headroom. `--relay-copy` is the old passthrough — free, and enough
-when the only problem is origin switching.
-
-Both need `--channel`; they play one stream, not a playlist. Either way VLC
-gets a stream rather than a playlist, so seeking and the channel name in the
-title bar are gone. Reach for them when a channel misbehaves, not by default.
-
-Before assuming a channel is dead, check whether ffmpeg manages where VLC does
-not — the manifest chain is usually healthy:
-
-```bash
-ffmpeg -loglevel warning -i "http://127.0.0.1:5523/play/<src>/<id>.m3u8" \
-       -t 15 -c copy -f mpegts /tmp/probe.ts
-```
-
-If that captures cleanly the stream is fine and the player is the problem.
-`ffplay` is another quick check, since it uses the same demuxer.
+**`--relay` cannot fix adverts.** An ffmpeg supervisor that restarted on stall
+was tried and reverted: restarting re-enters the playlist at the live edge,
+which during a break is still inside the break, so it replayed the same advert
+seven times running. Let VLC handle adverts; use `--relay` only for the
+spinning case.
 
 ### One window per channel
 
