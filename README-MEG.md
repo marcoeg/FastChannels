@@ -857,40 +857,50 @@ Each run leaves `.meta/<name>.json` (channel, URL, window, exit status, size)
 and `.meta/<name>.log` (ffmpeg stderr) beside the recording. Enough to answer
 "did it record, and if not why" without reintroducing a database.
 
-### Adverts break recordings, and now you are told
+### Adverts and recording — fixed by pinning
 
-**This is the one unsolved problem here.** On ad-stitched channels ffmpeg's HLS
-demuxer loses the video stream at an advert splice and never re-acquires it. A
-15-minute recording of `90s Throwback` produced a 900-second file holding
-**148 seconds of video**. Audio and the container run the full length, so the
-file passes every cheap check — you find out when you sit down to watch it.
+Recording an ad-stitched channel used to lose video silently. Handed the
+provider **master**, ffmpeg sees one program per rendition — five of them on
+`90s Throwback`, eleven streams — and at an advert splice it loses the mapped
+video stream and never re-acquires it. Audio and the container run the full
+length, so the file passes every cheap check.
 
-Things that do **not** fix it, all tested:
+Handed **one rendition** it sees two streams, one audio and one video, so there
+is no mapping to lose. Measured on 15-minute captures of the same channel:
 
-| attempt | result |
-| --- | --- |
-| `-c copy` (default) | video stops at the first break |
-| `--normalize` (re-encode) | same — a scale filter cannot process frames the demuxer stopped delivering |
-| ffmpeg supervisor + restart | restarting re-enters at the live edge, replaying the same advert |
-| **yt-dlp** | falls back to ffmpeg for live HLS even with `--hls-prefer-native` and a single `-f` format, so it inherits the identical failure |
+```
+master   900.0s container, 148.0s video  =  16%   video lost at the first break
+pinned   900.0s container, 890.1s video  =  99%   complete, 26,702 frames, one resolution
+```
 
-VLC and the browser both handle these streams, because they re-initialise their
-decoder at a discontinuity. ffmpeg does not, and every recorder here is built on
-ffmpeg.
+`record.py` now resolves the highest rendition before capturing, the same way
+`vlc.py` does, and records `pinned` in the sidecar. Resolution happens at
+**record** time, never at schedule time — these URLs carry a session token and
+expire. `--no-pin` records the master, which is only useful for reproducing the
+old failure.
 
-So `record.py` now **detects** it. After each capture it checks whether video
-still exists in the last ten seconds — 0.07s on a damaged file, under a second
-on a good one, against roughly three and a half minutes to count every frame of
-an hour:
+Things that did **not** fix it, all tested first: `--normalize` (a scale filter
+cannot process frames the demuxer stopped delivering), an ffmpeg supervisor
+that restarted on stall (restarting re-enters at the live edge, replaying the
+advert), and yt-dlp (falls back to ffmpeg for live HLS even with
+`--hls-prefer-native` and a single `-f`, inheriting the identical failure).
+
+The tail check below stays as a safety net, since pinning is not available when
+a `/play` URL does not resolve to an HLS master.
+
+### Damage detection
+
+After each capture `record.py` checks whether video still exists in the last
+ten seconds — 0.07s on a damaged file, against roughly three and a half minutes
+to count every frame of an hour:
 
 ```
 WARNING: this recording has NO VIDEO at the end.
 ```
 
-The sidecar carries `video_at_end`. A damaged recording is still worth keeping —
-the first stretch is intact and the audio is complete throughout.
+The sidecar carries `video_at_end`.
 
-### `--normalize`
+### `--normalize`### `--normalize`
 
 `record.py` captures with `-c copy`, so it is exposed in principle to the same
 thing that breaks `vlc.py` on ad-stitched channels: an advert spliced in at a

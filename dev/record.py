@@ -167,7 +167,7 @@ def local_url(url: str) -> str:
         (base.scheme, base.netloc, parts.path, parts.query, parts.fragment))
 
 
-def resolve_channel(wanted: str) -> dict:
+def resolve_channel(wanted: str, pin: bool = True) -> dict:
     """Find a channel by name (substring) or by number, from both playlists."""
     vlc = _load_vlc()
     body = vlc.fc_playlist(None, None, None)
@@ -193,12 +193,39 @@ def resolve_channel(wanted: str) -> dict:
         sys.exit(f"no channel matched {wanted!r}")
     exact = [h for h in hits if h["name"].lower() == needle]
     if exact:
-        return exact[0]
+        return pin_variant(exact[0], vlc) if pin else exact[0]
     if len(hits) > 1:
         names = ", ".join(h["name"] for h in hits[:8])
         print(f"note: {wanted!r} matched {len(hits)} channels, using the first. "
               f"({names})", file=sys.stderr)
-    return hits[0]
+    return pin_variant(hits[0], vlc) if pin else hits[0]
+
+
+def pin_variant(channel: dict, vlc) -> dict:
+    """Record one rendition rather than the provider's master playlist.
+
+    This is what makes recording ad-stitched channels work at all. Handed the
+    master, ffmpeg sees one program per rendition -- five of them here, eleven
+    streams -- and at an advert splice it loses the mapped video stream and
+    never re-acquires it. Measured on a 15-minute capture of 90s Throwback:
+
+        master   900.0s container, 148.0s video  =  16%   video lost
+        pinned   900.0s container, 890.1s video  =  99%   complete
+
+    Handed one rendition it sees two streams, one audio and one video, so
+    there is no mapping to lose. The rendition is muxed despite the master's
+    AUDIO="audio" group, which only offers alternative audio.
+
+    Resolved at record time, never at schedule time: these URLs carry a
+    session token and expire.
+    """
+    try:
+        variant = vlc.best_variant(channel["url"])
+    except Exception:
+        variant = None
+    if variant:
+        return {**channel, "url": variant, "pinned": True}
+    return {**channel, "pinned": False}
 
 
 def epg_for(channel: dict) -> list[dict]:
@@ -416,6 +443,7 @@ def capture(channel: dict, seconds: int, title: str, out_dir: pathlib.Path,
         "channel": channel["name"],
         "channel_number": channel["number"],
         "tvg_id": channel["tvg_id"],
+        "pinned": channel.get("pinned"),
         "url": channel["url"],
         "title": title,
         "started": started.isoformat(),
@@ -537,7 +565,7 @@ def cancel(unit: str) -> int:
 # --------------------------------------------------------------------------
 
 def cmd_epg(args) -> int:
-    ch = resolve_channel(args.channel)
+    ch = resolve_channel(args.channel, pin=not getattr(args, "no_pin", False))
     progs = epg_for(ch)
     now = datetime.datetime.now().astimezone()
     upcoming = [p for p in progs if p["stop"] > now][:args.limit]
@@ -553,21 +581,21 @@ def cmd_epg(args) -> int:
 
 
 def cmd_now(args) -> int:
-    ch = resolve_channel(args.channel)
+    ch = resolve_channel(args.channel, pin=not getattr(args, "no_pin", False))
     return capture(ch, parse_duration(args.duration), args.title or ch["name"],
                    pathlib.Path(args.out).expanduser(), args.mp4, args.normalize)
 
 
 def cmd_at(args) -> int:
     start = parse_when(args.start)
-    ch = resolve_channel(args.channel)
+    ch = resolve_channel(args.channel, pin=not getattr(args, "no_pin", False))
     return schedule(args.channel, start, parse_duration(args.duration),
                     args.title or ch["name"], pathlib.Path(args.out).expanduser(),
                     args.mp4, args.normalize)
 
 
 def cmd_programme(args) -> int:
-    ch = resolve_channel(args.channel)
+    ch = resolve_channel(args.channel, pin=not getattr(args, "no_pin", False))
     now = datetime.datetime.now().astimezone()
     needle = args.match.strip().lower()
     hits = [p for p in epg_for(ch) if needle in p["title"].lower() and p["stop"] > now]
@@ -614,6 +642,9 @@ def main() -> int:
                            help=f"output directory (default: {OUT_DIR})")
             p.add_argument("--mp4", action="store_true",
                            help="remux to MP4 after a clean capture")
+            p.add_argument("--no-pin", action="store_true",
+                           help="record the provider master instead of one rendition; "
+                                "loses video at advert breaks on stitched channels")
             p.add_argument("--normalize", action="store_true",
                            help="re-encode to a fixed size — needed for ad-stitched "
                                 "channels, whose adverts otherwise freeze playback")
