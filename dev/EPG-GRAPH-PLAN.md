@@ -1,7 +1,8 @@
 # A separate Graphiti graph for the EPG — refined plan
 
-**Status: audited against the deployed code and rewritten 2026-08-16. Nothing
-has been built.**
+**Status: audited against the deployed code and rewritten 2026-08-16; revised
+2026-08-18 — the EPG now gets its own MCP server from day one, and the
+FalkorDB layout facts are corrected. Nothing has been built.**
 
 Hermes runs Graphiti + FalkorDB. The idea stands: a **separate graph holding
 the next day of guide data, refreshed hourly**, so EPG search goes through the
@@ -16,8 +17,12 @@ audit and are baked in:
 
 1. **Writes go through a new direct-write path added by the local patch**, not
    through stock `add_triplet` behaviour.
-2. **Isolation is logical (`group_id`) through step 3, and physical (own
-   FalkorDB database) only if step-3 measurements demand it.**
+2. **The EPG runs behind its own patched MCP server on `127.0.0.1:8001`,
+   writing into the existing FalkorDB, where `group_id="epg"` is
+   automatically its own physical graph. The chat stack — the MCP server on
+   8000 and the `hermes` graph — is never rebuilt, restarted, or touched.**
+   (Revised 2026-08-18 from "logical now, physical later" at the user's
+   direction, after the FalkorDB per-group finding below.)
 
 ---
 
@@ -68,6 +73,12 @@ embeddings) becomes actually true.
 
 One piece of good news the draft missed: the read side already does everything
 we need, including `invalid_at` filtering (see "Querying").
+
+A follow-up check (2026-08-18) corrected the audit itself on one point: on
+FalkorDB, `group_id` is not a mere property filter — **every group is its own
+physical graph** (see the deployment table and "Isolation"). The live memory
+sits in the FalkorDB graph named `hermes`; `hermes_graphiti`, which the audit
+called the memory database, is empty — a bootstrap artifact.
 
 ---
 
@@ -157,7 +168,9 @@ Stock `add_triplet` already accepts `group_id` per call
 timestamps — it builds the `EntityEdge` with only `created_at` (`:958-965`) —
 and then hands the edge to core's resolution machinery with all the failure
 modes above. The patch, in the local `mcp_server/src/` (which the Docker image
-`COPY`s, so a rebuild picks it up):
+`COPY`s), ships **only in the EPG instance's image** — built under a distinct
+tag and run as the `127.0.0.1:8001` server; the chat MCP server on 8000 is
+never rebuilt or restarted:
 
 - `add_triplet` gains `valid_at`, `invalid_at` (ISO-8601, naive treated as
   UTC — matching how `search_memory_facts` documents its bounds) and
@@ -183,6 +196,13 @@ modes above. The patch, in the local `mcp_server/src/` (which the Docker image
 - Saved as `dev/graphiti-valid-at.patch`, same convention as
   `dev/ytdlp-gate.patch`.
 
+**One footgun outranks all others: the ingester must talk only to
+`127.0.0.1:8001`.** Pointed at 8000 it would write through the chat server's
+*unpatched* `add_triplet` — gpt-5.5 calls and LLM-mediated edges, straight
+into the memory server. The URL is a hard-coded constant, and the ingester
+verifies at startup that the server's default group is `epg` (via
+`get_status`), refusing to run if it cannot tell.
+
 Even patched, one write is ~4 DB statements plus 1–2 embedding HTTP calls, so
 the peak hour (~2,300 airings) should land in roughly ten minutes sequential —
 **measured at step 3, not assumed.**
@@ -191,39 +211,68 @@ the peak hour (~2,300 airings) should land in roughly ten minutes sequential —
 
 | | |
 | --- | --- |
-| Memory graph | `group_id=hermes` — compose overrides the config default `main` |
-| FalkorDB database | `hermes_graphiti`. `GRAPH.LIST` also shows a **stray second graph named `hermes`** — identify it (step 0) before any "clean" claim |
-| MCP endpoint | streamable HTTP on `127.0.0.1:8000`; `GET /health` → 200 is the liveness probe (`GET /mcp` → 406 is normal) |
+| Memory graph | the FalkorDB graph **`hermes`** (= group `hermes`; compose overrides the config default `main`). 486 nodes measured 2026-08-18: 91 Episodic chat turns plus typed entities — the agent's tools, skills, and chat knowledge |
+| Graph layout | **per-`group_id` graphs.** graphiti-core on FalkorDB redirects every group-scoped read and write to the graph named after the group — *"FalkorDB: one group_id still needs the graph named after that id"* (`graphiti_core/decorators.py:58`, mechanism `:60-99`, clone `falkordb_driver.py:331-344`). `FALKORDB_DATABASE=hermes_graphiti` names only the default for group-less bootstrap ops, and that graph is **empty** — an artifact, optional cleanup |
+| MCP endpoint | streamable HTTP on `127.0.0.1:8000` (chat; the EPG server adds `127.0.0.1:8001` — see "The EPG stack"); `GET /health` → 200 is the liveness probe (`GET /mcp` → 406 is normal) |
 | FalkorDB port | 6379 **not** published to the host — all access goes over MCP |
 | `SEMAPHORE_LIMIT=2` | caps only fan-out *inside* one core operation (a fresh semaphore per gather, `helpers.py:123-133`); `add_triplet` runs synchronously in the HTTP request, unqueued (only `add_memory` queues). It is **not** a write throttle — the first draft mischaracterized it. Throughput is set by per-write latency |
 | Models | `MODEL_NAME=gpt-5.5`, and the "small model" slot is pinned to the same (`factories.py:148`); embedder `text-embedding-3-small`, 1536-dim |
 | MCP client on host | absent (`import mcp` fails); `python3.12-venv` and `uv` are both available — `uv venv && uv pip install mcp` |
 | FalkorDB memory today | 18 MB used, no `maxmemory` |
 
-### Isolation — logical now, physical later
+### Isolation — a dedicated EPG server on a shared FalkorDB
 
-`group_id` is a property filter, not a database. EPG edges share
-`hermes_graphiti`'s graph key, fulltext/vector indexes, and per-graph write
-locks with Hermes' production memory. At step-2/3 scale that is negligible; a
-full 24 h window projects to roughly **0.5–1 GB** (34k edges × ~7 KB of
-embedded fact, plus node-name embeddings and index overhead) on a database
-currently at 18 MB.
+Isolation at the graph layer is automatic. On FalkorDB, graphiti-core routes
+every group-scoped read and write to the graph named after the `group_id`
+(citations in the table above). Writing with `group_id="epg"` therefore
+creates and uses a FalkorDB graph named `epg` with its own graph key, its own
+fulltext/vector indexes, and its own per-graph write lock. The chat graph
+`hermes` is never scanned, locked, or grown by EPG operations, and the graph
+name `epg` is unclaimed (`GRAPH.LIST`: only `hermes` and the empty
+`hermes_graphiti`).
 
-**Step-4 gate:** during step 3, measure (a) FalkorDB memory growth
-extrapolated to the full lineup and (b) p95 latency of a fixed set of hermes
-memory searches before vs during ingestion. If the projection exceeds ~2 GB or
-hermes p95 degrades ≥2×, deploy a second graphiti-mcp container from the same
-patched image with `FALKORDB_DATABASE=epg_graphiti` (own port) — real
-index/lock isolation, at the price of a second MCP connection for Hermes.
-Otherwise stay logical.
+What stays shared is the **redis process**: RAM (no `maxmemory` set — 18 MB
+held today, while a 24 h EPG window projects to roughly **0.5–1 GB** of
+edges, embeddings and index overhead), AOF persistence absorbing ~34k daily
+add+delete cycles, and crash blast radius. That is the accepted trade-off of
+this topology; the escape hatch is the step-4 gate below.
 
-Deletion isolation is real: `clear_graph(group_ids="epg")` deletes only the
-epg partition (`DETACH DELETE` by `group_id`). Two footguns, both fatal to
-hermes memory: **omitting `group_ids` falls back to the default group (=
-hermes), and an empty string coerces to `None` and does the same**
-(`utils/type_config.py:62-64`). Every script hard-codes the literal `"epg"`,
-never an interpolated variable. `delete_entity_edge` is uuid-only and
-**cross-group with no guard** — uuids come only from our own ledger.
+**Step-4 gate:** during step 3, measure (a) redis memory growth extrapolated
+to the full lineup and (b) p95 latency of a fixed set of hermes memory
+searches before vs during ingestion — the graphs are separate, so any
+degradation means redis-process contention. If the projection exceeds ~2 GB
+or hermes p95 drifts ≥2×, move the EPG to its **own FalkorDB container**
+before enabling the timer — cheap, because EPG data is regenerable: a compose
+change plus a full re-ingest.
+
+Deletion isolation: `clear_graph(group_ids="epg")` on the EPG server deletes
+only the `epg` graph. The empty-string/omitted-`group_ids` footgun
+(`utils/type_config.py:62-64` coerces `''` to `None` → the server default)
+softens there — the EPG server's default group *is* `epg`, so the worst case
+is clearing the EPG itself — but scripts still hard-code the literal `"epg"`,
+never an interpolated variable. Likewise `delete_entity_edge` (uuid-only, no
+group guard) can only reach the `epg` graph when called on the EPG server,
+whose group-less operations run against its `FALKORDB_DATABASE=epg` default.
+What makes all of this safe is topological, and bears repeating: **EPG
+tooling talks only to the EPG server.**
+
+### The EPG stack
+
+`compose.epg.yml`, next to `compose.hermes.yml` in
+`/home/marco/opt/graphiti/mcp_server/docker/` (untracked like it — on the
+step-0 backup list). One service, no database of its own:
+
+| | |
+| --- | --- |
+| Image | the **patched** build under a distinct tag (e.g. `knowledge-graph-mcp:epg`), built with the existing `Dockerfile.hermes`, `GRAPHITI_CORE_VERSION=0.29.3` |
+| Network | joins the existing `hermes-graphiti_default` (external), reaching `redis://falkordb:6379` with the existing password |
+| Env | `GRAPHITI_GROUP_ID=epg`; `FALKORDB_DATABASE=epg` so even group-less ops touch only the `epg` graph; same embedder config (`text-embedding-3-small`); `MODEL_NAME` is irrelevant to direct writes but set for completeness |
+| Port | `127.0.0.1:8001:8000` — 8001 verified free 2026-08-18 |
+| Project | its own compose project name, so no compose command for this stack can ever recreate the hermes containers |
+
+The hermes container keeps running its current image — **the patch never
+reaches the chat stack**, which is not rebuilt, restarted, or reconfigured at
+any step of this plan.
 
 ### `dev/epg_graph.py` — the ingester
 
@@ -239,7 +288,8 @@ never an interpolated variable. `delete_entity_edge` is uuid-only and
   Steps 2–3 use the filtered fetches instead.
 - Window: airings **starting** in the next 24 h, filtered client-side (the
   artifact retains ~1.1 days of past airings).
-- Writes sequential, `direct=true`, node uuids cached and passed back.
+- Writes sequential, `direct=true`, node uuids cached and passed back — all
+  against the EPG server at `127.0.0.1:8001`, never 8000.
 - `--limit N` to bound a run, `--dry-run` to print without sending, `--prune`
   as below.
 - Hourly systemd user timer (the same systemd-user pattern as `record.py`'s
@@ -312,8 +362,10 @@ Canonical patterns for the skill:
   bracketing the window.
 - Timestamps in UTC or with an explicit offset — naive strings parse as UTC
   while the fact text speaks PDT.
-- `group_ids=["epg"]` is mandatory; omitted, the search silently targets
-  hermes memory.
+- EPG questions go to the **EPG server** — a second MCP connection in Hermes
+  at `127.0.0.1:8001`. `group_ids=["epg"]` is still passed for hygiene,
+  though on that server an omitted group defaults to `epg` (harmless). The
+  chat server holds no EPG data; asking it returns nothing.
 - `max_facts`: default 10, no upper cap — use 25–50 for windows.
 - Never filter or reason on `expired_at`.
 - **Lookup vs listing:** this is ranked top-k hybrid retrieval (BM25 + cosine,
@@ -351,7 +403,8 @@ the graph *empties itself* via `invalid_at` while looking healthy.
 
 ### Step 0 — safety prep (before anything touches production)
 
-- Archive the FalkorDB volume:
+- Archive the FalkorDB volume — mandatory, because the shared database gains
+  a new writer:
   `docker run --rm -v hermes-graphiti_falkordb_data:/d -v "$PWD":/b alpine tar czf /b/falkordb-$(date +%F).tgz /d`
 - Pin the `falkordb` image (currently `:latest`) to a digest, so a compose
   `up` can never pull a new database engine as a side effect.
@@ -360,27 +413,33 @@ the graph *empties itself* via `invalid_at` while looking healthy.
   untracked or gitignored in a detached-HEAD checkout: `git checkout` cannot
   restore any of them, `git clean -fd` would destroy the two docker files, and
   a `git clean -x` would take the `.env` too. Back all three up (the `.env`
-  outside any repo).
-- Identify the stray `hermes` graph in `GRAPH.LIST` (likely a stale early
-  deployment) and note the finding.
+  outside any repo), and add `compose.epg.yml` to the same list once it
+  exists.
+- Graph inventory is settled (2026-08-18): `GRAPH.LIST` shows `hermes` — the
+  live memory, 486 nodes — and `hermes_graphiti`, an empty bootstrap artifact
+  (leave it; optional cleanup). The name `epg` is unclaimed, and port 8001 is
+  free.
 
-### Step 1 — patch and rebuild
+### Step 1 — patch, build the EPG image, start the EPG server
 
 `valid_at`/`invalid_at` + the `direct` flag on `add_triplet`, saved as
-`dev/graphiti-valid-at.patch`. Rebuild with **corrected commands** — the first
-draft's, lacking `--project-directory`, resolve to compose project `docker`
-and would try to start a duplicate stack with port collisions and a fresh
-empty volume (verified via `docker compose config`):
+`dev/graphiti-valid-at.patch`. Build the patched image under its own tag with
+the existing `Dockerfile.hermes`, then bring up **only the EPG stack** from
+`compose.epg.yml` under its own compose project. The hermes stack is not a
+compose target of this plan at all — and should it ever need a manual
+`docker compose` touch, remember its file resolves to the wrong project
+(`docker`) without `--project-directory .` (verified via
+`docker compose config`).
 
-```bash
-cd /home/marco/opt/graphiti/mcp_server
-docker compose -f docker/compose.hermes.yml --project-directory . build graphiti-mcp
-docker compose -f docker/compose.hermes.yml --project-directory . up -d graphiti-mcp
-```
+Verify `GET /health` on `127.0.0.1:8001` → 200. **Zero hermes downtime** —
+the chat server is neither rebuilt nor restarted. Revert = stop and remove
+the EPG container; `git checkout` of the one tracked src file undoes the
+patch.
 
-Naming the service means the falkordb container is never recreated. Brief
-hermes-memory downtime; graph data lives in the volume and is untouched.
-Revert = `git checkout` of the one tracked src file + rebuild.
+After the first ingested triplet, confirm the fulltext/vector indexes exist
+in the `epg` graph — per-group graphs mean per-graph indexes, and the
+`hermes` graph acquired its own at first use; verify the same happens for
+`epg` (the step-2 query criteria would also catch their absence).
 
 ### Step 2 — Al Jazeera, 38 airings
 
@@ -398,8 +457,10 @@ fact embeddings plus TRT World's handful, and **zero LLM calls**.
 3. A NOW query (`valid_at_before=now` + `invalid_at_after=now`) issued
    mid-airing returns the in-progress programme.
 4. The same bracket shifted 24 h returns zero.
-5. `group_ids=["hermes"]` search returns no EPG fact; Hermes' existing
-   memories answer as before.
+5. Isolation: the `hermes` graph's node count (486 at baseline) is unchanged
+   after the ingest and again after the rollback; the chat MCP container's
+   uptime and restart count are untouched; a search on the chat server
+   returns no EPG fact, and Hermes' existing memories answer as before.
 6. The MCP container log shows **zero LLM calls** during the ingest run.
 7. The TRT World case yields two distinct nodes (`Channel: TRT World` vs
    `TRT World`).
@@ -421,8 +482,10 @@ scored against `/epg.xml` ground truth.
 9. 50 random (channel, timestamp) probes answered correctly ≥ 47/50.
 10. A peak-hour-sized batch (~2,300 writes) completes well inside the hour —
     target ≤ 30 min sustained.
-11. p95 of a fixed set of hermes memory searches during ingestion is < 2× the
-    before-baseline.
+11. p95 of a fixed set of hermes memory searches during ingestion stays
+    within 2× baseline — expected *unchanged*, since the graphs are separate;
+    any drift means redis-process contention and trips the step-4 FalkorDB
+    migration.
 12. A simulated schedule change (drop one future airing from the diff input)
     removes the ghost edge on the next run.
 
@@ -430,14 +493,16 @@ Also measured here: FalkorDB memory growth, extrapolated for the step-4 gate.
 
 ### Step 4 — full lineup, hourly
 
-Gated on: the step-3 criteria; the isolation decision (memory projection
-< ~2 GB **and** criterion 11 passed, else deploy the physical split first);
-the freshness probe and the `OnFailure` path each demonstrated once; the
-weekly reset scheduled.
+Gated on: the step-3 criteria; the FalkorDB decision (memory projection
+< ~2 GB **and** criterion 11 clean, else move the EPG to its own FalkorDB
+container first — a compose change plus re-ingest, cheap because EPG data is
+regenerable); the freshness probe and the `OnFailure` path each demonstrated
+once; the weekly reset scheduled.
 
 **Every failed criterion has the same immediate rollback:
-`clear_graph(group_ids="epg")`. All of them mean stop — except criterion 11,
-whose remedy is the physical split followed by a re-run of step 3.**
+`clear_graph(group_ids="epg")` on the EPG server. All of them mean stop —
+except criterion 11, whose remedy is the own-FalkorDB migration followed by a
+re-run of step 3.**
 
 ---
 
