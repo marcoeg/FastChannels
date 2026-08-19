@@ -272,7 +272,9 @@ step-0 backup list). One service, no database of its own:
 
 The hermes container keeps running its current image — **the patch never
 reaches the chat stack**, which is not rebuilt, restarted, or reconfigured at
-any step of this plan.
+any step of this plan. On the Hermes side, the entire integration is one
+`mcp_servers.epg_graph` block in `~/.hermes/config.yaml` plus the skill at
+`~/.hermes/skills/epg-graph/` — see "Querying".
 
 ### `dev/epg_graph.py` — the ingester
 
@@ -362,10 +364,37 @@ Canonical patterns for the skill:
   bracketing the window.
 - Timestamps in UTC or with an explicit offset — naive strings parse as UTC
   while the fact text speaks PDT.
-- EPG questions go to the **EPG server** — a second MCP connection in Hermes
-  at `127.0.0.1:8001`. `group_ids=["epg"]` is still passed for hygiene,
-  though on that server an omitted group defaults to `epg` (harmless). The
-  chat server holds no EPG data; asking it returns nothing.
+- EPG questions go to the **EPG server**, wired into Hermes with a config
+  block — **not a plugin, and no patch to the graphiti plugin**. Hermes'
+  generic MCP client reads `mcp_servers:` from `~/.hermes/config.yaml` (an
+  open config dict; changes live-reload in running sessions):
+
+  ```yaml
+  mcp_servers:
+    epg_graph:
+      url: http://127.0.0.1:8001/mcp
+      timeout: 180
+      tools:
+        include: [search_memory_facts, search_nodes, get_episodes, get_status]
+  ```
+
+  Tools surface as `mcp__epg_graph__search_memory_facts` etc., automatically
+  visible to CLI, Telegram, and Hermes-cron sessions, with no collision with
+  the memory plugin's `graphiti_memory`/`recall`. The `include` list keeps
+  the write and destructive tools (`add_memory`, `add_triplet`,
+  `clear_graph`, `delete_entity_edge`) off Hermes' surface — ingestion and
+  pruning belong to `dev/epg_graph.py`, not the LLM. **Never name the
+  server `graphiti`** — the memory plugin falls back to reading
+  `mcp_servers.graphiti` and would start interacting with it. For the
+  record: a second graphiti-plugin instance is structurally impossible
+  (Hermes memory providers are singletons with hard-coded tool names), and
+  forking the third-party plugin is unnecessary.
+- Because raw MCP tools lack the plugin's conveniences, the skill must carry
+  them: pass `group_ids: ["epg"]` explicitly on every call (there is no
+  default-group injection; on this server an omitted group defaults to
+  `epg`, harmless), and there is no automatic prefetch for this graph. The
+  chat server holds no EPG data; asking `graphiti_memory` about TV listings
+  returns nothing.
 - `max_facts`: default 10, no upper cap — use 25–50 for windows.
 - Never filter or reason on `expired_at`.
 - **Lookup vs listing:** this is ranked top-k hybrid retrieval (BM25 + cosine,
@@ -403,18 +432,29 @@ the graph *empties itself* via `invalid_at` while looking healthy.
 
 ### Step 0 — safety prep (before anything touches production)
 
-- Archive the FalkorDB volume — mandatory, because the shared database gains
-  a new writer:
-  `docker run --rm -v hermes-graphiti_falkordb_data:/d -v "$PWD":/b alpine tar czf /b/falkordb-$(date +%F).tgz /d`
+- **The revert bundle exists (created 2026-08-18):**
+  `~/backups/hermes-2026-08-18/`, 2.9 GB, per-item restore commands in its
+  `RESTORE.md`. Contents — Hermes side: `config.yaml`, `.env`, `plugins/`,
+  `skills/`, `cron/jobs.json`, the gateway systemd unit, git state plus the
+  6,235-line local-changes patch. Memory/server side: the FalkorDB volume
+  archive; a memory fingerprint (graph `hermes` 486 nodes /
+  `hermes_graphiti` 0 / newest Episodic recorded); the running MCP image
+  both as dated tag `standalone-backup-2026-08-18` and a saved tarball
+  (guards against an accidental rebuild of the hermes tag);
+  `compose.hermes.yml`, `Dockerfile.hermes`, both `.env`s, the effective
+  config yaml, full `docker inspect` of both containers (the docker files
+  are untracked/gitignored in a detached-HEAD checkout — git cannot restore
+  them, which is why they are in the bundle); both checkouts' git state.
+- Blast surface the bundle guards: the whole EPG plan touches exactly one
+  Hermes file (`~/.hermes/config.yaml`, one added block) plus one new skill
+  directory, and creates only new server-side objects (the EPG container,
+  its image tag, the graph `epg`). EPG additions are removable without the
+  bundle; it covers the failure modes where something touched what it
+  should not have.
 - Pin the `falkordb` image (currently `:latest`) to a digest, so a compose
   `up` can never pull a new database engine as a side effect.
-- The entire deployment definition — `Dockerfile.hermes`,
-  `compose.hermes.yml`, and the secrets-bearing `mcp_server/.env` — is
-  untracked or gitignored in a detached-HEAD checkout: `git checkout` cannot
-  restore any of them, `git clean -fd` would destroy the two docker files, and
-  a `git clean -x` would take the `.env` too. Back all three up (the `.env`
-  outside any repo), and add `compose.epg.yml` to the same list once it
-  exists.
+- Add `compose.epg.yml` to the bundle once it exists (untracked like the
+  hermes docker files).
 - Graph inventory is settled (2026-08-18): `GRAPH.LIST` shows `hermes` — the
   live memory, 486 nodes — and `hermes_graphiti`, an empty bootstrap artifact
   (leave it; optional cleanup). The name `epg` is unclaimed, and port 8001 is
@@ -467,15 +507,27 @@ fact embeddings plus TRT World's handful, and **zero LLM calls**.
 8. Rollback: `clear_graph(group_ids="epg")` removes everything ingested;
    hermes still answers.
 
-Draft `EPG-GRAPH-SKILL.md` now. What step 2 deliberately does not prove:
+Draft `EPG-GRAPH-SKILL.md` now and install it at
+`~/.hermes/skills/epg-graph/SKILL.md` (the same convention as the two
+FastChannels skills already there). Add the `mcp_servers.epg_graph` block to
+`~/.hermes/config.yaml` at this point — 8001 answers `/health` after step 1,
+and the config live-reloads. Also verified here, unnumbered: Hermes lists
+the `mcp__epg_graph__*` tools, answers a test query through the skill, and
+`graphiti_memory`/`recall` behave unchanged.
+
+What step 2 deliberately does not prove:
 search quality at volume, and whether semantic search over boilerplate is
 useful at all — Al Jazeera is the worst case (158 airings, 18 descriptions).
 
-### Step 3 — the News category
+### Step 3 — the Sports category
 
-Filtered fetch (2.3 MB, ~4,700 programmes over the guide). The search-quality
-evaluation is executed **by Hermes through the skill** — natural questions,
-scored against `/epg.xml` ground truth.
+Filtered fetch (`?category=Sports`: 6.1 MB, 12,375 programmes across 221
+channels, measured 2026-08-18) — about 2.6× the News payload, a better scale
+rehearsal for step 4, and sports programmes carry distinctive titles and
+descriptions, so search quality is judged on content the graph can actually
+distinguish (news boilerplate, the worst case, was already covered by
+step 2). The search-quality evaluation is executed **by Hermes through the
+skill** — natural questions, scored against `/epg.xml` ground truth.
 
 **Pass iff all of:**
 
