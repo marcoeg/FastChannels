@@ -1,5 +1,5 @@
 diff --git a/mcp_server/src/graphiti_mcp_server.py b/mcp_server/src/graphiti_mcp_server.py
-index a281443..80dc8ad 100644
+index a281443..0cb3065 100644
 --- a/mcp_server/src/graphiti_mcp_server.py
 +++ b/mcp_server/src/graphiti_mcp_server.py
 @@ -15,8 +15,10 @@ from uuid import uuid4
@@ -13,17 +13,37 @@ index a281443..80dc8ad 100644
  from graphiti_core.search.search_filters import SearchFilters
  from graphiti_core.utils.maintenance.graph_data_operations import clear_data
  from mcp.server.fastmcp import FastMCP
-@@ -912,6 +914,9 @@ async def add_triplet(
+@@ -44,6 +46,7 @@ from services.factories import (
+     LLMClientFactory,
+ )
+ from services.queue_service import QueueService
++from utils import falkor_fast_search  # noqa: F401  # hoists vecf32() out of similarity scans
+ from utils.formatting import format_fact_result, to_edge_result, to_node_result
+ from utils.type_config import (
+     build_edge_type_map,
+@@ -254,6 +257,7 @@ class GraphitiService:
+                         cross_encoder=cross_encoder_client,
+                         max_coroutines=self.semaphore_limit,
+                     )
++                    falkor_fast_search.install(self.client.driver)
+                 else:
+                     # For Neo4j (default), use the original approach
+                     self.client = Graphiti(
+@@ -912,6 +916,13 @@ async def add_triplet(
      group_id: str | None = None,
      source_node_uuid: str | None = None,
      target_node_uuid: str | None = None,
 +    valid_at: str | None = None,
 +    invalid_at: str | None = None,
 +    direct: bool = False,
++    source_node_summary: str | None = None,
++    target_node_summary: str | None = None,
++    source_node_attributes: dict[str, Any] | None = None,
++    target_node_attributes: dict[str, Any] | None = None,
  ) -> TripletResponse | ErrorResponse:
      """Directly add a single fact triplet (source entity -> fact -> target entity).
  
-@@ -929,6 +934,16 @@ async def add_triplet(
+@@ -929,6 +940,24 @@ async def add_triplet(
              generated when omitted.
          target_node_uuid: Optional UUID to reuse an existing target entity. A new UUID is
              generated when omitted.
@@ -37,10 +57,18 @@ index a281443..80dc8ad 100644
 +            supplied UUID must already exist and are reused as-is; new nodes and
 +            the edge are persisted verbatim with the supplied timestamps. When
 +            false (the default), behaviour is unchanged.
++        source_node_summary: Optional summary stored on the source node when it
++            is newly created on the direct path (summaries are fulltext-indexed,
++            so search_nodes can match them). Ignored for reused nodes and on the
++            non-direct path.
++        target_node_summary: As source_node_summary, for the target node.
++        source_node_attributes: Optional attribute dict stored on a newly
++            created source node (direct path only; unindexed display metadata).
++        target_node_attributes: As source_node_attributes, for the target node.
      """
      global graphiti_service
  
-@@ -943,6 +958,70 @@ async def add_triplet(
+@@ -943,6 +972,72 @@ async def add_triplet(
              return ErrorResponse(error='No group_id provided and no default group_id is configured')
          now = datetime.now(timezone.utc)
  
@@ -63,9 +91,9 @@ index a281443..80dc8ad 100644
 +
 +            nodes_to_save: list[EntityNode] = []
 +            resolved: list[EntityNode] = []
-+            for node_uuid, node_name in (
-+                (source_node_uuid, source_node_name),
-+                (target_node_uuid, target_node_name),
++            for node_uuid, node_name, node_summary, node_attributes in (
++                (source_node_uuid, source_node_name, source_node_summary, source_node_attributes),
++                (target_node_uuid, target_node_name, target_node_summary, target_node_attributes),
 +            ):
 +                if node_uuid:
 +                    try:
@@ -82,6 +110,8 @@ index a281443..80dc8ad 100644
 +                        name=node_name,
 +                        group_id=effective_group_id,
 +                        created_at=now,
++                        summary=node_summary or '',
++                        attributes=node_attributes or {},
 +                    )
 +                    nodes_to_save.append(new_node)
 +                    resolved.append(new_node)
@@ -111,7 +141,7 @@ index a281443..80dc8ad 100644
          source_node = EntityNode(
              uuid=source_node_uuid or str(uuid4()),
              name=source_node_name,
-@@ -962,6 +1041,8 @@ async def add_triplet(
+@@ -962,6 +1057,8 @@ async def add_triplet(
              source_node_uuid=source_node.uuid,
              target_node_uuid=target_node.uuid,
              created_at=now,
@@ -120,7 +150,7 @@ index a281443..80dc8ad 100644
          )
  
          result = await client.add_triplet(source_node, edge, target_node)
-@@ -1078,7 +1159,8 @@ async def get_status() -> StatusResponse:
+@@ -1078,7 +1175,8 @@ async def get_status() -> StatusResponse:
          provider_name = graphiti_service.config.database.provider
          return StatusResponse(
              status='ok',
@@ -130,3 +160,235 @@ index a281443..80dc8ad 100644
          )
      except Exception as e:
          error_msg = str(e)
+diff --git a/mcp_server/src/utils/falkor_fast_search.py b/mcp_server/src/utils/falkor_fast_search.py
+new file mode 100644
+index 0000000..81cceda
+--- /dev/null
++++ b/mcp_server/src/utils/falkor_fast_search.py
+@@ -0,0 +1,226 @@
++"""Hoist vecf32($search_vector) out of the per-row loop in FalkorDB searches.
++
++graphiti-core 0.29.3 scores similarity with
++    vec.cosineDistance(e.fact_embedding, vecf32($search_vector))
++which re-converts the 1536-float query parameter to a vector ON EVERY ROW.
++Measured on a 6,771-edge graph: >15,000 ms per search; with the conversion
++hoisted into a leading `WITH vecf32($search_vector) AS qv`, the identical
++scan takes ~12 ms — a >1000x difference. This module monkey-patches the two
++similarity methods on FalkorSearchOperations with hoisted-cypher versions,
++changing nothing else. Import it for its side effect. Candidate for an
++upstream PR to getzep/graphiti.
++"""
++
++import logging
++
++from graphiti_core.driver.driver import GraphProvider
++from graphiti_core.driver.falkordb.operations.search_ops import (
++    FalkorSearchOperations,
++    _build_falkor_fulltext_query,
++)
++from graphiti_core.graph_queries import get_relationships_query
++from graphiti_core.driver.query_executor import QueryExecutor
++from graphiti_core.driver.record_parsers import (
++    entity_edge_from_record,
++    entity_node_from_record,
++)
++from graphiti_core.edges import EntityEdge
++from graphiti_core.models.edges.edge_db_queries import get_entity_edge_return_query
++from graphiti_core.models.nodes.node_db_queries import get_entity_node_return_query
++from graphiti_core.nodes import EntityNode
++from graphiti_core.search.search_filters import (
++    SearchFilters,
++    edge_search_filter_query_constructor,
++    node_search_filter_query_constructor,
++)
++
++logger = logging.getLogger(__name__)
++
++
++async def _fast_node_similarity_search(
++    self,
++    executor: QueryExecutor,
++    search_vector: list[float],
++    search_filter: SearchFilters,
++    group_ids: list[str] | None = None,
++    limit: int = 10,
++    min_score: float = 0.6,
++) -> list[EntityNode]:
++    filter_queries, filter_params = node_search_filter_query_constructor(
++        search_filter, GraphProvider.FALKORDB
++    )
++
++    if group_ids is not None:
++        filter_queries.append('n.group_id IN $group_ids')
++        filter_params['group_ids'] = group_ids
++
++    filter_query = ''
++    if filter_queries:
++        filter_query = ' WHERE ' + (' AND '.join(filter_queries))
++
++    cypher = (
++        'WITH vecf32($search_vector) AS qv MATCH (n:Entity)'
++        + filter_query
++        + """
++        WITH n, (2 - vec.cosineDistance(n.name_embedding, qv))/2 AS score
++        WHERE score > $min_score
++        RETURN
++        """
++        + get_entity_node_return_query(GraphProvider.FALKORDB)
++        + """
++        ORDER BY score DESC
++        LIMIT $limit
++        """
++    )
++
++    records, _, _ = await executor.execute_query(
++        cypher,
++        search_vector=search_vector,
++        limit=limit,
++        min_score=min_score,
++        **filter_params,
++    )
++
++    return [entity_node_from_record(r) for r in records]
++
++
++async def _fast_edge_similarity_search(
++    self,
++    executor: QueryExecutor,
++    search_vector: list[float],
++    source_node_uuid: str | None,
++    target_node_uuid: str | None,
++    search_filter: SearchFilters,
++    group_ids: list[str] | None = None,
++    limit: int = 10,
++    min_score: float = 0.6,
++) -> list[EntityEdge]:
++    filter_queries, filter_params = edge_search_filter_query_constructor(
++        search_filter, GraphProvider.FALKORDB
++    )
++
++    if group_ids is not None:
++        filter_queries.append('e.group_id IN $group_ids')
++        filter_params['group_ids'] = group_ids
++
++        if source_node_uuid is not None:
++            filter_params['source_uuid'] = source_node_uuid
++            filter_queries.append('n.uuid = $source_uuid')
++
++        if target_node_uuid is not None:
++            filter_params['target_uuid'] = target_node_uuid
++            filter_queries.append('m.uuid = $target_uuid')
++
++    filter_query = ''
++    if filter_queries:
++        filter_query = ' WHERE ' + (' AND '.join(filter_queries))
++
++    cypher = (
++        'WITH vecf32($search_vector) AS qv MATCH (n:Entity)-[e:RELATES_TO]->(m:Entity)'
++        + filter_query
++        + """
++        WITH DISTINCT e, n, m, (2 - vec.cosineDistance(e.fact_embedding, qv))/2 AS score
++        WHERE score > $min_score
++        RETURN
++        """
++        + get_entity_edge_return_query(GraphProvider.FALKORDB)
++        + """
++        ORDER BY score DESC
++        LIMIT $limit
++        """
++    )
++
++    records, _, _ = await executor.execute_query(
++        cypher,
++        search_vector=search_vector,
++        limit=limit,
++        min_score=min_score,
++        **filter_params,
++    )
++
++    return [entity_edge_from_record(r) for r in records]
++
++
++async def _fast_edge_fulltext_search(
++    self,
++    executor: QueryExecutor,
++    query: str,
++    search_filter: SearchFilters,
++    group_ids: list[str] | None = None,
++    limit: int = 10,
++) -> list[EntityEdge]:
++    """Fulltext leg without the O(matches x edges) re-match.
++
++    The stock implementation joins every yielded relationship back with
++    MATCH (n)-[e:RELATES_TO {uuid: rel.uuid}]->(m), a full edge scan per
++    match — measured: query timeout (>15 s) on a 6,771-edge graph for a
++    common term vs 3.4 ms using startNode()/endNode() on the yielded edge.
++    """
++    fuzzy_query = _build_falkor_fulltext_query(query, group_ids)
++    if fuzzy_query == '':
++        return []
++
++    filter_queries, filter_params = edge_search_filter_query_constructor(
++        search_filter, GraphProvider.FALKORDB
++    )
++
++    if group_ids is not None:
++        filter_queries.append('e.group_id IN $group_ids')
++        filter_params['group_ids'] = group_ids
++
++    filter_query = ''
++    if filter_queries:
++        filter_query = ' WHERE ' + (' AND '.join(filter_queries))
++
++    cypher = (
++        get_relationships_query(
++            'edge_name_and_fact', limit=limit, provider=GraphProvider.FALKORDB
++        )
++        + """
++        YIELD relationship AS e, score
++        WITH e, score, startNode(e) AS n, endNode(e) AS m
++        """
++        + filter_query
++        + """
++        WITH e, score, n, m
++        RETURN
++        """
++        + get_entity_edge_return_query(GraphProvider.FALKORDB)
++        + """
++        ORDER BY score DESC
++        LIMIT $limit
++        """
++    )
++
++    records, _, _ = await executor.execute_query(
++        cypher,
++        query=fuzzy_query,
++        limit=limit,
++        **filter_params,
++    )
++
++    return [entity_edge_from_record(r) for r in records]
++
++
++FalkorSearchOperations.node_similarity_search = _fast_node_similarity_search
++FalkorSearchOperations.edge_similarity_search = _fast_edge_similarity_search
++FalkorSearchOperations.edge_fulltext_search = _fast_edge_fulltext_search
++
++# Class-level install: graphiti-core 0.29.3 never assigns
++# driver.search_interface, so search_utils falls back to inline queries
++# carrying the per-row vecf32 conversion — and FalkorDriver.clone() builds a
++# FRESH driver for every group-scoped operation (falkordb_driver.py:342), so
++# an instance-level assignment on the root driver would be bypassed by every
++# per-group clone. A class attribute reaches root and clones alike;
++# FalkorSearchOperations implements the whole SearchInterface dispatch
++# surface with the same (driver, ...) argument shape.
++from graphiti_core.driver.falkordb_driver import FalkorDriver  # noqa: E402
++
++FalkorDriver.search_interface = FalkorSearchOperations()
++
++
++def install(driver) -> None:
++    """Kept for explicitness at the call site; the class attribute above
++    already covers every FalkorDriver instance, including clones."""
++    if getattr(driver, 'provider', None) == GraphProvider.FALKORDB:
++        logger.info('falkor_fast_search: fast search interface active (class-level)')

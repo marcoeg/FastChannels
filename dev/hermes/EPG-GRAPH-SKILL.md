@@ -16,9 +16,12 @@ Tools     mcp__epg_graph__search_memory_facts   (primary)
           mcp__epg_graph__search_nodes
           mcp__epg_graph__get_status
 Group     every call MUST pass group_ids: ["epg"]
-Fact      "Al Jazeera airs Newshour, Wed 19 Aug 17:00-18:00 PDT. <description>"
+Fact      "Al Jazeera (News) airs Newshour, Wed 19 Aug 17:00-18:00 PDT. <description>"
           valid_at = start (UTC)   invalid_at = stop (UTC)
+          the (…) after the channel holds its categories/genres — so genre
+          words like "basketball" match in searches
 Channels  channel nodes are named "Channel: <name>" (e.g. "Channel: Al Jazeera")
+          and carry a category summary — search_nodes can find "news channels"
 ```
 
 ## When to use this
@@ -75,9 +78,10 @@ search_memory_facts(query="<title>", group_ids=["epg"],
    — the word "airs" appears in every fact, so an empty result means the
    graph has less than six hours of future coverage: say it is stale and fall
    back to the `fastchannels` skill.
-3. **Coverage is currently a pilot**: Al Jazeera and TRT World, next ~48
-   hours, refreshed manually. Only future airings are ingested, so a
-   programme already in progress when ingestion ran may be missing.
+3. **Coverage is currently**: the Sports category (~220 channels) plus Al
+   Jazeera and TRT World, next ~48 hours, refreshed manually. Only future
+   airings are ingested, so a programme already in progress when ingestion
+   ran may be missing.
 4. The graph answers **when things air**, not what a news episode is about —
    guide descriptions are often boilerplate (Al Jazeera's "News Live" airs
    dozens of times with one shared description).

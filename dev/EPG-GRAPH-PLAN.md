@@ -142,7 +142,7 @@ time.
 
 ```
 (Channel: Al Jazeera) -[AIRS]-> (Newshour)
-   fact:       "Al Jazeera airs Newshour, Mon 17 Aug 14:00-15:00 PDT.
+   fact:       "Al Jazeera (News) airs Newshour, Mon 17 Aug 14:00-15:00 PDT.
                 Latest news and in-depth analysis from around the world."
    valid_at:   2026-08-17T21:00:00Z     start, UTC on the wire
    invalid_at: 2026-08-17T22:00:00Z     stop, UTC on the wire
@@ -160,6 +160,30 @@ time.
 - One edge per airing with its own validity window — **guaranteed by the
   direct-write path below, not by the schema itself.**
 - 153 of the 2,014 guide channels carry no programmes and never gain a node.
+- **Categories are channel metadata, and ride in two places** (settled
+  2026-08-19). Measured: in the Sports category, 198 of 209 channels carry
+  one identical category-set on every programme — the XMLTV `<category>`
+  tags are the channel's category stamped per programme (plus an occasional
+  per-programme extra from some sources); `/api/channels` holds the single
+  authoritative `category` string, the XMLTV tags are richer (sub-genres
+  like Basketball). (a) **In the fact, attached to the channel** — `"Al
+  Jazeera (News) airs …"` — because the fact string is the only surface
+  that is fulltext-indexed, embedded, *and* time-boundable, which is what
+  makes "any basketball on tonight?" a plain time-bounded search. The tags
+  are cleaned through a **brand denylist** derived from source display
+  names (Plex, STIRR, TCL TV+, Whale TV+, Xumo Play, Samsung TV Plus,
+  FreeLiveSports, LG Channels, …). (b) **On the channel node at creation**:
+  `summary` = "TV channel. Category: News." — Entity summaries are
+  fulltext-indexed (verified in the live `epg` graph), so
+  `search_nodes("news channels")` works — with the raw list in
+  `attributes` as display metadata.
+- **Rejected**: category as a bare node attribute (attributes are
+  unindexed — invisible to every search path), and Category *nodes*
+  (`Channel -[IN_CATEGORY]-> Category` edges are timeless; the time filters
+  exclude `valid_at`-less edges by construction and the tool surface has no
+  traversal, so they answer nothing Hermes can currently ask). Channel-level
+  category nodes (~2 edges/channel) stay a cheap later addition if a
+  traversal surface ever exists.
 
 ### The write path — the patch
 
@@ -237,6 +261,16 @@ edges, embeddings and index overhead), AOF persistence absorbing ~34k daily
 add+delete cycles, and crash blast radius. That is the accepted trade-off of
 this topology; the escape hatch is the step-4 gate below.
 
+The trade-off materialized once already (2026-08-19, during step 3): a
+FalkorDB write on the `epg` graph **deadlocked inside the database** —
+`GRAPH.INFO` showed the query still "running" 90 minutes later with its
+client long gone; epg writes hung while epg reads and every `hermes`
+operation stayed normal (the per-graph locks held). FalkorDB has no
+query-kill, so recovery was a FalkorDB container restart: ~30 s of
+chat-memory downtime, zero data loss (AOF replay — the `hermes` graph had
+even grown during the incident). Worth reporting upstream to FalkorDB; a
+recurrence is a strong argument for taking the step-4 physical split.
+
 **Step-4 gate:** during step 3, measure (a) redis memory growth extrapolated
 to the full lineup and (b) p95 latency of a fixed set of hermes memory
 searches before vs during ingestion — the graphs are separate, so any
@@ -295,6 +329,17 @@ any step of this plan. On the Hermes side, the entire integration is one
   only affects the very first run.
 - Writes sequential, `direct=true`, node uuids cached and passed back — all
   against the EPG server at `127.0.0.1:8001`, never 8000.
+- Categories: the programme's XMLTV tags minus the brand denylist go into
+  the fact (channel-side phrasing), and at a channel node's first creation
+  into its `summary`/`attributes` — see the Schema section.
+- Every MCP call runs under a hard per-call watchdog, with one
+  reconnect-and-retry on transport failure and a run abort after three
+  consecutive transport failures. Added 2026-08-19 after an ingest stalled
+  87 minutes on a single `call_tool` await whose connection died silently —
+  transport-level timeouts alone did not fire.
+- Ledger keys are `channel_id|title|start`; programme titles can themselves
+  contain `|` (seen live), so parsing takes `channel_id` from the left and
+  the timestamp from the right, never `split("|", 2)`.
 - `--limit N` to bound a run, `--dry-run` to print without sending, `--prune`
   as below.
 - Hourly systemd user timer (the same systemd-user pattern as `record.py`'s
@@ -335,7 +380,9 @@ airings; a changed stop time or description would never be re-sent at all.
 Each run therefore diffs the freshly fetched window against state for all
 **future** airings: keys present in state but absent from the guide, or whose
 `stop`/`desc_hash` changed, are deleted via `delete_entity_edge(uuid)` and
-evicted from state *before* new airings are written. Past airings are never
+evicted from state *before* new airings are written. (`desc_hash` covers the
+description **and** the cleaned category list, so a category change re-sends
+the airing.) Past airings are never
 reconciled, only pruned.
 
 ### Pruning and retention — two tiers
@@ -551,6 +598,48 @@ distinguish (news boilerplate, the worst case, was already covered by
 step 2). The search-quality evaluation is executed **by Hermes through the
 skill** — natural questions, scored against `/epg.xml` ground truth.
 
+Step 3 also lands the category schema (see Schema): the brand denylist,
+channel-side genres in the fact, channel-node summaries, and `desc_hash`
+covering categories — followed by a pilot re-ingest (`--clear` + re-run),
+since the fact format changes. The EPG skill's fact-shape example is updated
+at the same time.
+
+**Executed 2026-08-19, all four gates passed.** Final state: 6,771 ledger
+airings (221 Sports channels + the pilot pair, 48 h window), graph/ledger
+parity exact. Gates: (9) 50/50 random probes returned their exact edge
+through title queries with instant time bounds; (10) sustained 2.5–3.5
+writes/s — a peak-hour batch lands in ~15 min, and the true hourly
+incremental pass (prune 21 + ghost 1 + changed 1 + write 71 over all 221
+channels) took **34.9 s**; (11) hermes memory-search p95 during ingestion was
+698–719 ms vs a 734 ms baseline — unchanged; (12) an injected ghost and a
+tampered airing were both repaired in one run. Memory: 23 → 107 MB at ~6.8k
+edges; full-lineup projection ~0.3–0.5 GB — inside the 2 GB gate, so the
+shared FalkorDB stands.
+
+Step 3 surfaced and fixed **two graphiti-core FalkorDB search defects**, both
+now in `dev/graphiti-valid-at.patch` (`src/utils/falkor_fast_search.py`) and
+both upstream-PR candidates: (a) similarity search re-converts
+`vecf32($search_vector)` on every row — hoisting it into a leading `WITH`
+took the identical 6,771-edge scan from >15 s (query timeout) to 12 ms;
+(b) fulltext search re-joins every yielded relationship via
+`MATCH ()-[e {uuid: rel.uuid}]->()`, an O(matches × edges) scan — using
+`startNode()`/`endNode()` on the yielded edge took a common-term query from
+timeout to 3.4 ms. Neither shows at chat-memory scale (~200 edges); both are
+walls at EPG scale. Deployment note: FalkorDB now runs
+`TIMEOUT_DEFAULT=15000` / `TIMEOUT_MAX=60000` (set at runtime via
+`GRAPH.CONFIG SET`; TIMEOUT_MAX also kills wedged writes, which the legacy
+TIMEOUT never did). **Persistence is not optional:** this host restarts its
+containers daily around 10:30Z (observed on the 15th, 18th and 19th — some
+scheduled maintenance), which wipes runtime GRAPH.CONFIG and restores the
+legacy `TIMEOUT=1000`, killing every search over one second. That is exactly
+how the Hermes freshness probe (and every one-sided `valid_at_after` query,
+which runs 2–4 s at this scale) broke on 2026-08-19 hours after the gates
+had passed. Until the operator adds
+`FALKORDB_ARGS: "TIMEOUT_DEFAULT 15000 TIMEOUT_MAX 60000"` to the falkordb
+service env in `compose.hermes.yml` (the assistant's attempt at that edit
+was permission-blocked), the settings must be re-applied after each daily
+restart.
+
 **Pass iff all of:**
 
 9. 50 random (channel, timestamp) probes answered correctly ≥ 47/50.
@@ -597,11 +686,13 @@ the unpatched path costs 1–2 gpt-5.5 calls and ~9 embedding calls per write.
   `requires_drm_bridge` is true for zero rows) are disabled and inactive, so
   they never appear in `/epg.xml` or `/m3u` — the ingester cannot pick them up
   and needs no exclusion logic.
-- **GENRE edge: deferred.** 100% of programmes carry `<category>`, but the
-  values mix genres with storefront brands — "Plex" alone tags 46% of
-  programmes, alongside TCL TV+, STIRR, Whale TV+, Xumo Play; 235 distinct
-  values. Meaningful only after value cleanup; nothing in this design blocks
-  adding it later.
+- **Categories: resolved 2026-08-19 — channel-side, in the fact and the
+  channel node's summary** (design in the Schema section). The `<category>`
+  tags are channel metadata stamped onto every programme, mixing genres
+  with storefront brands ("Plex" alone tags 46% of programmes; 235 distinct
+  values) — brands are stripped via the source-name denylist. Category
+  *nodes* stay off the table until a traversal surface exists: timeless
+  edges are excluded from every time-bounded search by construction.
 - **Window beyond 24 h: open.** The guide runs ~5 days; cost scales linearly
   in edges, pruning, and reconciliation surface. Decide after step 3's
   throughput and memory numbers.
