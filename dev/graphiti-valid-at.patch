@@ -1,0 +1,132 @@
+diff --git a/mcp_server/src/graphiti_mcp_server.py b/mcp_server/src/graphiti_mcp_server.py
+index a281443..80dc8ad 100644
+--- a/mcp_server/src/graphiti_mcp_server.py
++++ b/mcp_server/src/graphiti_mcp_server.py
+@@ -15,8 +15,10 @@ from uuid import uuid4
+ 
+ from dotenv import load_dotenv
+ from graphiti_core import Graphiti
++from graphiti_core.driver.driver import GraphProvider
+ from graphiti_core.edges import EntityEdge
+ from graphiti_core.nodes import EntityNode, EpisodeType, SagaNode
++from graphiti_core.utils.bulk_utils import add_nodes_and_edges_bulk
+ from graphiti_core.search.search_filters import SearchFilters
+ from graphiti_core.utils.maintenance.graph_data_operations import clear_data
+ from mcp.server.fastmcp import FastMCP
+@@ -912,6 +914,9 @@ async def add_triplet(
+     group_id: str | None = None,
+     source_node_uuid: str | None = None,
+     target_node_uuid: str | None = None,
++    valid_at: str | None = None,
++    invalid_at: str | None = None,
++    direct: bool = False,
+ ) -> TripletResponse | ErrorResponse:
+     """Directly add a single fact triplet (source entity -> fact -> target entity).
+ 
+@@ -929,6 +934,16 @@ async def add_triplet(
+             generated when omitted.
+         target_node_uuid: Optional UUID to reuse an existing target entity. A new UUID is
+             generated when omitted.
++        valid_at: Optional ISO-8601 datetime at which the fact became true. Naive
++            values are treated as UTC. Stored on the edge, so the
++            valid_at_after/valid_at_before search filters can select it.
++        invalid_at: Optional ISO-8601 datetime at which the fact stops being true.
++            Naive values are treated as UTC.
++        direct: When true, skip edge resolution entirely — no LLM calls and no
++            dedupe/invalidation against existing edges. Nodes referenced by a
++            supplied UUID must already exist and are reused as-is; new nodes and
++            the edge are persisted verbatim with the supplied timestamps. When
++            false (the default), behaviour is unchanged.
+     """
+     global graphiti_service
+ 
+@@ -943,6 +958,70 @@ async def add_triplet(
+             return ErrorResponse(error='No group_id provided and no default group_id is configured')
+         now = datetime.now(timezone.utc)
+ 
++        try:
++            valid_at_dt = parse_reference_time(valid_at)
++            invalid_at_dt = parse_reference_time(invalid_at)
++        except ValueError as e:
++            return ErrorResponse(error=f'Invalid valid_at/invalid_at: {e}')
++
++        if direct:
++            # Direct write path: persist verbatim via the bulk writer, skipping
++            # resolve_extracted_edge (edge dedupe/invalidation and its LLM calls)
++            # and node resolution. The bulk writer generates any missing
++            # embeddings itself.
++            driver = client.driver
++            if driver.provider == GraphProvider.FALKORDB:
++                # On FalkorDB each group lives in the graph named after it; the
++                # default driver may be bound to a different graph.
++                driver = driver.clone(database=effective_group_id)
++
++            nodes_to_save: list[EntityNode] = []
++            resolved: list[EntityNode] = []
++            for node_uuid, node_name in (
++                (source_node_uuid, source_node_name),
++                (target_node_uuid, target_node_name),
++            ):
++                if node_uuid:
++                    try:
++                        existing = await EntityNode.get_by_uuid(driver, node_uuid)
++                    except Exception as e:
++                        return ErrorResponse(
++                            error=f'Failed to load node {node_uuid} in group '
++                            f'{effective_group_id}: {e}; omit the uuid to create a new node'
++                        )
++                    resolved.append(existing)
++                else:
++                    new_node = EntityNode(
++                        uuid=str(uuid4()),
++                        name=node_name,
++                        group_id=effective_group_id,
++                        created_at=now,
++                    )
++                    nodes_to_save.append(new_node)
++                    resolved.append(new_node)
++            source_node, target_node = resolved
++
++            edge = EntityEdge(
++                name=edge_name,
++                fact=fact,
++                group_id=effective_group_id,
++                source_node_uuid=source_node.uuid,
++                target_node_uuid=target_node.uuid,
++                created_at=now,
++                valid_at=valid_at_dt,
++                invalid_at=invalid_at_dt,
++            )
++
++            await add_nodes_and_edges_bulk(
++                driver, [], [], nodes_to_save, [edge], client.embedder
++            )
++
++            return TripletResponse(
++                message=f"Triplet '{source_node_name} -[{edge_name}]-> {target_node_name}' written directly",
++                nodes=[to_node_result(node) for node in resolved],
++                edges=[to_edge_result(edge)],
++            )
++
+         source_node = EntityNode(
+             uuid=source_node_uuid or str(uuid4()),
+             name=source_node_name,
+@@ -962,6 +1041,8 @@ async def add_triplet(
+             source_node_uuid=source_node.uuid,
+             target_node_uuid=target_node.uuid,
+             created_at=now,
++            valid_at=valid_at_dt,
++            invalid_at=invalid_at_dt,
+         )
+ 
+         result = await client.add_triplet(source_node, edge, target_node)
+@@ -1078,7 +1159,8 @@ async def get_status() -> StatusResponse:
+         provider_name = graphiti_service.config.database.provider
+         return StatusResponse(
+             status='ok',
+-            message=f'Graphiti MCP server is running and connected to {provider_name} database',
++            message=f'Graphiti MCP server is running and connected to {provider_name} database '
++            f'(default group: {config.graphiti.group_id})',
+         )
+     except Exception as e:
+         error_msg = str(e)

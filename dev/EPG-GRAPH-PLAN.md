@@ -289,7 +289,10 @@ any step of this plan. On the Hermes side, the entire integration is one
   (no smaller option exists — see "The gap"); over loopback that is fine.
   Steps 2–3 use the filtered fetches instead.
 - Window: airings **starting** in the next 24 h, filtered client-side (the
-  artifact retains ~1.1 days of past airings).
+  artifact retains ~1.1 days of past airings). A consequence observed in the
+  pilot: an airing already in progress at ingest time is never captured — in
+  steady hourly operation every airing is written before it starts, so this
+  only affects the very first run.
 - Writes sequential, `direct=true`, node uuids cached and passed back — all
   against the EPG server at `127.0.0.1:8001`, never 8000.
 - `--limit N` to bound a run, `--dry-run` to print without sending, `--prune`
@@ -451,10 +454,10 @@ the graph *empties itself* via `invalid_at` while looking healthy.
   its image tag, the graph `epg`). EPG additions are removable without the
   bundle; it covers the failure modes where something touched what it
   should not have.
-- Pin the `falkordb` image (currently `:latest`) to a digest, so a compose
-  `up` can never pull a new database engine as a side effect.
-- Add `compose.epg.yml` to the bundle once it exists (untracked like the
-  hermes docker files).
+- Done 2026-08-19: the `falkordb` image is pinned by digest
+  (`sha256:ad09d505…`) in `compose.hermes.yml`, so a compose `up` can never
+  pull a new database engine as a side effect.
+- Done 2026-08-19: `compose.epg.yml` exists and is copied into the bundle.
 - Graph inventory is settled (2026-08-18): `GRAPH.LIST` shows `hermes` — the
   live memory, 486 nodes — and `hermes_graphiti`, an empty bootstrap artifact
   (leave it; optional cleanup). The name `epg` is unclaimed, and port 8001 is
@@ -480,6 +483,11 @@ After the first ingested triplet, confirm the fulltext/vector indexes exist
 in the `epg` graph — per-group graphs mean per-graph indexes, and the
 `hermes` graph acquired its own at first use; verify the same happens for
 `epg` (the step-2 query criteria would also catch their absence).
+
+**Executed 2026-08-19.** Image `zepai/knowledge-graph-mcp:epg` built from the
+patched checkout; server healthy on 8001; hermes containers' uptime
+preserved throughout. The `epg` graph received its full index set on first
+write (RANGE on `valid_at`/`invalid_at`, FULLTEXT on `fact`).
 
 ### Step 2 — Al Jazeera, 38 airings
 
