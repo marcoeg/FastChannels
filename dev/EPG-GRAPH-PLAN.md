@@ -523,6 +523,20 @@ and the config live-reloads. Also verified here, unnumbered: Hermes lists
 the `mcp__epg_graph__*` tools, answers a test query through the skill, and
 `graphiti_memory`/`recall` behave unchanged.
 
+**Executed 2026-08-19, all eight criteria passed.** Run over a 48 h window
+instead of 24 — the guide had a coverage hole for Al Jazeera's next day
+(8 airings in 24 h at run time vs the plan's 38). 94 airings ingested
+(Al Jazeera 46, TRT World 48) at ~4 writes/s: edge counts matched the ledger
+exactly (News Live 17, Newshour 12, TRT World 48 — no collapse), 94/94
+retrievable through ±1 min `valid_at` brackets, the NOW query returned TRT
+World's 05:00 UTC airing while it was live, shifted brackets returned zero,
+the `hermes` graph sat at exactly 486 nodes before, during, and after —
+including after the `clear_graph` rollback drill — zero LLM calls appeared
+in the server log, and the same-name case produced two distinct nodes with
+zero self-loops. Re-ingested after the drill: 95 airings in the fresh
+window. Hermes lists the `mcp__epg_graph__*` tools; the interactive
+skill-driven query check remains with the operator.
+
 What step 2 deliberately does not prove:
 search quality at volume, and whether semantic search over boilerplate is
 useful at all — Al Jazeera is the worst case (158 airings, 18 descriptions).

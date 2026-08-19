@@ -1,6 +1,6 @@
 ---
 name: epg-graph
-description: Search the TV guide knowledge graph — when programmes air on FastChannels channels.
+description: TV listings — what is on now, tonight, or when a programme airs. Fast temporal search over the EPG knowledge graph (mcp__epg_graph__* tools); check here before parsing guide XML.
 ---
 
 # TV guide search — the EPG knowledge graph

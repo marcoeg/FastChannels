@@ -21,6 +21,13 @@ Reach for this skill whenever a task involves:
 - Channels DVR or Plex integration
 - anything naming FastChannels, or the API at `127.0.0.1:5523`
 
+**Targeted schedule questions have a faster path.** For "when is X on",
+"what's on that channel tonight / right now" on channels the EPG knowledge
+graph covers, prefer the `epg-graph` skill (`mcp__epg_graph__*` tools) —
+indexed temporal search instead of parsing guide XML. This skill stays the
+source of truth for exhaustive listings, uncovered channels, and everything
+else below.
+
 What it lets you do: list and filter channels across every source, get a
 channel's playback URL, read the full schedule for a channel, diagnose why a
 channel will not play, build and manage feeds (saved filters with their own

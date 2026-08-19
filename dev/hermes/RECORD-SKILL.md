@@ -26,7 +26,9 @@ working directory.
 - listing what has already been recorded, or what is scheduled
 
 For "what is on", "what channels exist", or "give me a stream URL", use the
-`fastchannels` skill instead — that is the API, and this tool sits on top of it.
+`fastchannels` skill instead — that is the API, and this tool sits on top of
+it. For quick "when does X air" lookups on channels the EPG knowledge graph
+covers, the `epg-graph` skill is faster still.
 
 ## Scheduling: use your own cron, and call `now`
 
