@@ -1,5 +1,5 @@
 diff --git a/mcp_server/src/graphiti_mcp_server.py b/mcp_server/src/graphiti_mcp_server.py
-index a281443..0cb3065 100644
+index a281443..4c56604 100644
 --- a/mcp_server/src/graphiti_mcp_server.py
 +++ b/mcp_server/src/graphiti_mcp_server.py
 @@ -15,8 +15,10 @@ from uuid import uuid4
@@ -150,7 +150,117 @@ index a281443..0cb3065 100644
          )
  
          result = await client.add_triplet(source_node, edge, target_node)
-@@ -1078,7 +1175,8 @@ async def get_status() -> StatusResponse:
+@@ -977,6 +1074,109 @@ async def add_triplet(
+         return ErrorResponse(error=f'Error adding triplet: {error_msg}')
+ 
+ 
++@mcp.tool()
++async def list_memory_facts(
++    valid_at_after: str,
++    valid_at_before: str,
++    group_id: str | None = None,
++    edge_name: str | None = None,
++    source_node_name: str | None = None,
++    max_facts: int = 250,
++    offset: int = 0,
++) -> FactSearchResponse | ErrorResponse:
++    """Deterministically list fact edges whose valid_at falls within a window.
++
++    Unlike search_memory_facts (ranked hybrid retrieval, which returns the top
++    matches for a query text), this ENUMERATES every fact whose valid_at lies
++    in [valid_at_after, valid_at_before), ordered by valid_at. Built for
++    schedule-style listings ("everything between 8pm and 11pm") where
++    completeness matters and there is no query text to rank against.
++
++    Args:
++        valid_at_after: ISO-8601 window start (inclusive). Naive values are UTC.
++        valid_at_before: ISO-8601 window end (exclusive). Naive values are UTC.
++        group_id: Optional group ID. Falls back to the default group when omitted.
++        edge_name: Optional exact relation name filter (e.g. "AIRS").
++        source_node_name: Optional exact source-node name filter
++            (e.g. "Channel: Al Jazeera").
++        max_facts: Page size, 1-1000 (default 250).
++        offset: Pagination offset; increase by max_facts until fewer rows return.
++    """
++    global graphiti_service
++
++    if graphiti_service is None:
++        return ErrorResponse(error='Graphiti service not initialized')
++
++    try:
++        client = await graphiti_service.get_client()
++
++        effective_group_id = group_id or config.graphiti.group_id
++        if not effective_group_id:
++            return ErrorResponse(error='No group_id provided and no default group_id is configured')
++        if not 0 < max_facts <= 1000:
++            return ErrorResponse(error='max_facts must be between 1 and 1000')
++
++        try:
++            after = parse_reference_time(valid_at_after)
++            before = parse_reference_time(valid_at_before)
++        except ValueError as e:
++            return ErrorResponse(error=f'Invalid valid_at bounds: {e}')
++        if after is None or before is None or after >= before:
++            return ErrorResponse(error='valid_at_after must be earlier than valid_at_before')
++
++        driver = client.driver
++        if driver.provider == GraphProvider.FALKORDB:
++            # On FalkorDB each group lives in the graph named after it.
++            driver = driver.clone(database=effective_group_id)
++
++        filters = ['e.group_id = $gid', 'e.valid_at >= $after', 'e.valid_at < $before']
++        params: dict[str, Any] = {
++            'gid': effective_group_id,
++            'after': after,
++            'before': before,
++            'limit': max_facts,
++            'offset': offset,
++        }
++        if edge_name:
++            filters.append('e.name = $edge_name')
++            params['edge_name'] = edge_name
++        if source_node_name:
++            filters.append('n.name = $source_node_name')
++            params['source_node_name'] = source_node_name
++
++        cypher = (
++            'MATCH (n:Entity)-[e:RELATES_TO]->(m:Entity) WHERE '
++            + ' AND '.join(filters)
++            + """
++            RETURN e.uuid AS uuid, e.name AS name, e.fact AS fact,
++                   e.valid_at AS valid_at, e.invalid_at AS invalid_at,
++                   n.name AS source_node, m.name AS target_node
++            ORDER BY e.valid_at SKIP $offset LIMIT $limit
++            """
++        )
++
++        records, _, _ = await driver.execute_query(cypher, **params)
++        facts = [
++            {
++                'uuid': r['uuid'],
++                'name': r['name'],
++                'fact': r['fact'],
++                'valid_at': str(r['valid_at']) if r['valid_at'] is not None else None,
++                'invalid_at': str(r['invalid_at']) if r['invalid_at'] is not None else None,
++                'source_node': r['source_node'],
++                'target_node': r['target_node'],
++            }
++            for r in records
++        ]
++        return FactSearchResponse(
++            message=f'{len(facts)} facts in window (offset {offset})', facts=facts
++        )
++    except Exception as e:
++        error_msg = str(e)
++        logger.error(f'Error listing facts: {error_msg}')
++        return ErrorResponse(error=f'Error listing facts: {error_msg}')
++
++
+ @mcp.tool()
+ async def get_episode_entities(
+     episode_uuids: list[str],
+@@ -1078,7 +1278,8 @@ async def get_status() -> StatusResponse:
          provider_name = graphiti_service.config.database.provider
          return StatusResponse(
              status='ok',

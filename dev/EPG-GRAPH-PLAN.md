@@ -294,7 +294,22 @@ tooling talks only to the EPG server.**
 
 `compose.epg.yml`, next to `compose.hermes.yml` in
 `/home/marco/opt/graphiti/mcp_server/docker/` (untracked like it — on the
-step-0 backup list). One service, no database of its own:
+step-0 backup list).
+
+**Revised 2026-08-27: the stack now carries its own FalkorDB** (service
+`falkordb-epg`, volume `falkordb_epg_data`, same pinned engine digest, no
+AOF — EPG data is regenerable — `maxmemory 2gb`, timeouts baked into env,
+nothing published to the host) and no longer joins the hermes network at
+all. The physical split was taken after the shared database deadlocked
+**three times** under EPG write bursts (2026-08-19, twice 2026-08-27): a
+wedged query holds the graph lock, is unreapable by TIMEOUT_MAX (timeouts
+only interrupt at cooperative points), and each recovery restarted the
+database holding Hermes' memory. With the split, a wedge costs an EPG-stack
+restart and an hourly self-heal; the chat stack is untouchable from here.
+The abandoned `epg` graph was deleted from the hermes FalkorDB (back to
+~39 MB). Worth reporting upstream to FalkorDB with the GRAPH.INFO evidence.
+
+Original single-service description (superseded):
 
 | | |
 | --- | --- |

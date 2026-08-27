@@ -151,7 +151,11 @@ def fetch_guide(params: dict) -> tuple[dict, list[dict]]:
 
 
 def select_channels(selectors: argparse.Namespace) -> tuple[dict, list[dict]]:
-    """Resolve --channel/--category selections into one channel map + airings."""
+    """Resolve --all/--channel/--category selections into one channel map + airings."""
+    if getattr(selectors, "all", False):
+        id_to_name, airings = fetch_guide({})
+        print(f"full lineup: {len(id_to_name)} channels, {len(airings)} airings in guide")
+        return id_to_name, airings
     id_to_name: dict[str, str] = {}
     airings: list[dict] = []
     for name in selectors.channel:
@@ -320,7 +324,13 @@ async def run(selectors: argparse.Namespace) -> None:
         # (seen live: "gamescom 2025 | opening night"), so parse from both ends
         channel_id, rest = key.split("|", 1)
         start_iso = rest.rsplit("|", 1)[1]
-        if channel_id not in id_to_name or datetime.fromisoformat(start_iso) <= now:
+        if datetime.fromisoformat(start_iso) <= now:
+            continue
+        if channel_id not in id_to_name:
+            if getattr(selectors, "all", False):
+                # Full-lineup run: the channel vanished from the guide
+                # entirely (disabled/removed) — its future airings are ghosts.
+                ghost_keys.append(key)
             continue
         a = guide.get(key)
         if a is None:
@@ -457,7 +467,8 @@ async def run(selectors: argparse.Namespace) -> None:
 
     save_state(state)
     counters["wall_s"] = round(time.monotonic() - t0, 1)
-    log_run({"ts": now.isoformat(), "selectors": vars(selectors)["channel"]
+    log_run({"ts": now.isoformat(), "selectors": (["all"] if getattr(selectors, "all", False) else [])
+             + vars(selectors)["channel"]
              + [f"category:{c}" for c in selectors.category], **counters})
     print(f"added {counters['added']}, pruned {counters['pruned']}, "
           f"ghosts {counters['ghosts']}, changed {counters['changed']}, "
@@ -517,6 +528,8 @@ async def show_status() -> None:
 
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    p.add_argument("--all", action="store_true",
+                   help="ingest the full lineup (one unfiltered /epg.xml fetch)")
     p.add_argument("--channel", action="append", default=[],
                    help="exact channel display name; repeatable")
     p.add_argument("--category", action="append", default=[],
@@ -538,11 +551,11 @@ def main() -> None:
     elif args.prune:
         with StateLock():
             asyncio.run(prune_only(args.dry_run))
-    elif args.channel or args.category:
+    elif args.all or args.channel or args.category:
         with StateLock():
             asyncio.run(run(args))
     else:
-        p.error("nothing to do: pass --channel/--category, --prune, --status, or --clear")
+        p.error("nothing to do: pass --all, --channel/--category, --prune, --status, or --clear")
 
 
 if __name__ == "__main__":

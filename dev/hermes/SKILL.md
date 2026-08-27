@@ -21,12 +21,16 @@ Reach for this skill whenever a task involves:
 - Channels DVR or Plex integration
 - anything naming FastChannels, or the API at `127.0.0.1:5523`
 
-**Targeted schedule questions have a faster path.** For "when is X on",
-"what's on that channel tonight / right now" on channels the EPG knowledge
-graph covers, prefer the `epg-graph` skill (`mcp__epg_graph__*` tools) —
-indexed temporal search instead of parsing guide XML. This skill stays the
-source of truth for exhaustive listings, uncovered channels, and everything
-else below.
+**Schedule questions have a faster path.** The EPG knowledge graph (the
+`epg-graph` skill, `mcp__epg_graph__*` tools on its own MCP server at
+`127.0.0.1:8001`) covers the full XMLTV lineup for the next ~24 hours,
+refreshed hourly: `search_memory_facts` for "when is X on / is anything
+about Y airing", `list_memory_facts` for complete window or per-channel
+listings. Prefer it over parsing guide XML for those questions. This skill
+remains the source of truth for stream URLs, lineup and source management,
+anything beyond the graph's 24 h window, and the **Gracenote-partition
+channels** (they have no XMLTV guide, so they never appear in the graph —
+see "Always fetch both playlists" below).
 
 What it lets you do: list and filter channels across every source, get a
 channel's playback URL, read the full schedule for a channel, diagnose why a
@@ -66,8 +70,9 @@ Use `127.0.0.1:5523` for your own calls. `nucbox.local:5523` is the same
 server, and is what the M3U and XMLTV outputs hand to clients so that other
 devices can reach the streams.
 
-Local configuration deviates from upstream defaults: the port is bound to
-`127.0.0.1` only, `VERSION_CHECK_ENABLED=0`, and `FC_YTDLP_AUTO_UPGRADE=0`
+Local configuration deviates from upstream defaults: the port is published on
+all interfaces so LAN clients can reach it (a deliberate choice — hence the
+caution above), `VERSION_CHECK_ENABLED=0`, and `FC_YTDLP_AUTO_UPGRADE=0`
 (weekly unattended `pip install` from GitHub master is disabled).
 
 ## The API is documented — read the spec first
@@ -176,7 +181,7 @@ Three routes, none of them obvious. Pick by what you need:
 ```bash
 # FULL SCHEDULE — everything stored, real timestamps. Best default.
 # Filters by name/source/category/language, NOT by channel id.
-curl -s "$BASE/epg.xml?search=Al%20Jazeera"          # 157 programmes, XMLTV
+curl -s "$BASE/epg.xml?search=Al%20Jazeera"          # full stored schedule, XMLTV
 
 # BY CHANNEL ID — the only route that takes ids. Fixed 5-hour window.
 curl -s "$BASE/admin/guide/programs?channel_ids=1314,2577"
