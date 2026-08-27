@@ -82,7 +82,10 @@ list_memory_facts(valid_at_after=<window start UTC>,
 Page by raising `offset` in steps of `max_facts` until fewer rows return. For
 genre listings ("all basketball tonight"), list the window and filter by the
 `(…)` genres in each fact yourself, or combine with a `search_memory_facts`
-pass for topical matches in descriptions.
+pass for topical matches in descriptions. The tool selects by START time —
+for "overlapping a window" questions (films still running at 8 PM), set
+`valid_at_after` to ~4 hours BEFORE the window start and keep rows whose
+`invalid_at` is after it.
 
 ## Limits — read before answering anyone
 

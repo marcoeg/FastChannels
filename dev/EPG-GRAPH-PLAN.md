@@ -682,6 +682,29 @@ once; the weekly reset scheduled.
 except criterion 11, whose remedy is the own-FalkorDB migration followed by a
 re-run of step 3.**
 
+**Executed 2026-08-27.** The day's shape: the first two full-lineup ingests
+each deadlocked the *shared* FalkorDB mid-burst (wedges #2 and #3, with
+TIMEOUT_MAX active and unable to reap them), triggering the physical split
+per plan; the very first ingest into the *dedicated* DB then wedged at 8,297
+of 8,474 writes (#4) — proving the deadlock is a FalkorDB engine bug under
+sustained write bursts, not shared-instance contention, and worth an
+upstream report. With the split, that recovery cost one EPG-container
+restart (an RDB snapshot first — this DB runs without AOF — preserved all
+8,297 writes) and the finishing run completed clean: **9,909 airings, 3,591
+nodes, exact graph/ledger parity, uniform valid_at typing, 127 MB** — with
+real reconciliation en route (129 ghosts, 68 changed as the guide shifted).
+Freshness probe, ranked search, and `list_memory_facts` all verified on the
+full corpus. `epg-graph.timer` (hourly :20) and `epg-graph-reset.timer`
+(Sun 12:00 UTC) are enabled; the OnFailure notify path was drilled earlier.
+The FalkorDB Browser for the EPG database is at `127.0.0.1:3001`.
+
+Known operational caveat: multi-thousand-write bursts can wedge the EPG
+FalkorDB (observed at 1.2k, 2.0k, 3.1k and 8.3k writes; hourly increments
+of ~400–900 are well below every observed trigger). The weekly reset is
+such a burst; if a run aborts on "3 consecutive transport failures", the
+remedy is `docker restart epg-graphiti-falkordb-epg-1` and re-running
+`dev/epg_graph.py --all --hours 24` — the chat stack is never involved.
+
 ---
 
 ## Cost (patched, direct path)
