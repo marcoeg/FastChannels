@@ -102,10 +102,16 @@ for "overlapping a window" questions (films still running at 8 PM), set
    — the word "airs" appears in every fact, so an empty result means the
    graph has less than six hours of future coverage: say it is stale and fall
    back to the `fastchannels` skill.
-3. **Coverage**: the full FastChannels lineup (~870 guide channels), next
-   24 hours, refreshed hourly by a systemd timer (minute :20). Only future
-   airings are ingested, so a programme already in progress when its first
-   ingest ran may be missing.
+3. **Coverage**: the full XMLTV lineup (~820 guide channels), next 24 hours,
+   refreshed hourly by a systemd timer (minute :20). Only future airings are
+   ingested, so a programme already in progress when its first ingest ran
+   may be missing. **The ~250 Gracenote-partition channels are NOT here and
+   not in `/epg.xml` either** — their programmes are only reachable through
+   `/admin/guide/programs?channel_ids=<id>` (5-hour windows, `offset` shifts
+   ±48 h). Therefore NEVER answer "X is not on any channel" from graph +
+   XMLTV alone — scope it: "not on any XMLTV-guided channel; the
+   Gracenote-partition channels can't be title-searched". If the user
+   suspects a specific channel, look up its id and check it directly.
 4. The graph answers **when things air**, not what a news episode is about —
    guide descriptions are often boilerplate (Al Jazeera's "News Live" airs
    dozens of times with one shared description).
