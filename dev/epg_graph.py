@@ -277,15 +277,35 @@ class EpgClient:
         raise ConnectionError(f"{name} failed after reconnect+retry: {last!r}")
 
 
+class TransportDown(Exception):
+    """Consecutive transport failures: the EPG DB is almost certainly wedged."""
+
+
 async def delete_edges(client: EpgClient, state: dict, keys: list[str],
                        what: str) -> int:
     deleted = 0
+    consecutive = 0
     for key in keys:
         rec = state["airings"][key]
         try:
             await client.call("delete_entity_edge", {"uuid": rec["edge_uuid"]})
             deleted += 1
+            consecutive = 0
+        except ConnectionError as e:
+            # Watchdog + retry exhausted: transport-level failure. KEEP the
+            # ledger entry (evicting would orphan the edge in the graph) and
+            # bail out fast instead of grinding ~3 minutes per key into the
+            # systemd kill — observed 2026-08-28 when a wedged DB turned every
+            # hourly run into a 55-minute death march.
+            consecutive += 1
+            print(f"  {what}: transport failure on {rec['edge_uuid']} ({key})"
+                  " — keeping ledger entry", file=sys.stderr, flush=True)
+            if consecutive >= 3:
+                raise TransportDown(
+                    f"{what}: 3 consecutive transport failures") from e
+            continue
         except Exception as e:
+            # Server-side error (edge already gone, bad uuid): safe to evict.
             print(f"  {what}: edge {rec['edge_uuid']} ({key}): {e} — evicting anyway",
                   file=sys.stderr, flush=True)
         del state["airings"][key]
@@ -365,6 +385,7 @@ async def run(selectors: argparse.Namespace) -> None:
 
     client = EpgClient()
     consecutive_transport = 0
+    aborted = None
     try:
         await client.connect()
 
@@ -462,6 +483,10 @@ async def run(selectors: argparse.Namespace) -> None:
             if written % 200 == 0:
                 print(f"  … {written}/{len(new)} written", flush=True)
         counters["added"] = written
+    except (TransportDown, ConnectionError) as e:
+        aborted = str(e)
+        counters["failed"] += 1
+        print(f"aborting run: {e}", file=sys.stderr, flush=True)
     finally:
         await client.close()
 
@@ -472,7 +497,8 @@ async def run(selectors: argparse.Namespace) -> None:
              + [f"category:{c}" for c in selectors.category], **counters})
     print(f"added {counters['added']}, pruned {counters['pruned']}, "
           f"ghosts {counters['ghosts']}, changed {counters['changed']}, "
-          f"failed {counters['failed']} in {counters['wall_s']}s")
+          f"failed {counters['failed']} in {counters['wall_s']}s"
+          + (f"  [ABORTED: {aborted}]" if aborted else ""))
     if counters["failed"]:
         sys.exit(1)
 

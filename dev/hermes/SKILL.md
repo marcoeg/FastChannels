@@ -174,6 +174,28 @@ curl -s "$BASE/api/channels/1314/preview?detect=0" | jq '{play_url, preview_url,
 curl -s "$BASE/m3u?category=News&category=Local%20News" | grep -A1 '^#EXTINF'
 ```
 
+### Channel identity — ALWAYS report both IDs
+
+Every channel has TWO identifiers, and confusing them causes real errors:
+
+- **Database id** (e.g. `4197`) — what `/api/channels/{id}` and
+  `/admin/guide/programs?channel_ids=` speak. Stable.
+- **Channel number** (e.g. `9495`, the `tvg-chno`) — what the lineup UI shows
+  and DVR clients tune by. Usually auto-assigned at output generation, so
+  `channel_number` in the API is typically `null` and `preview` does not
+  carry it — the effective number exists ONLY in the M3U outputs:
+
+```bash
+curl -s "$BASE/m3u" "$BASE/m3u/gracenote" | grep 'tvg-name="Universal Crime"' \
+  | grep -o 'tvg-chno="[0-9]*"'
+```
+
+**Whenever you tell the user about a channel, give both**: "Universal Crime —
+id 4197, channel 9495". If a user quotes a number that matches nothing in the
+API, it is almost certainly a channel number — resolve it through the M3U.
+Feeds renumber (their own `chnum_start`), so a channel's number can differ
+per feed; the database id never does.
+
 ### Get EPG for a channel
 
 Three routes, none of them obvious. Pick by what you need:

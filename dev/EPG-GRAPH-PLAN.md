@@ -698,12 +698,26 @@ full corpus. `epg-graph.timer` (hourly :20) and `epg-graph-reset.timer`
 (Sun 12:00 UTC) are enabled; the OnFailure notify path was drilled earlier.
 The FalkorDB Browser for the EPG database is at `127.0.0.1:3001`.
 
-Known operational caveat: multi-thousand-write bursts can wedge the EPG
-FalkorDB (observed at 1.2k, 2.0k, 3.1k and 8.3k writes; hourly increments
-of ~400–900 are well below every observed trigger). The weekly reset is
-such a burst; if a run aborts on "3 consecutive transport failures", the
-remedy is `docker restart epg-graphiti-falkordb-epg-1` and re-running
-`dev/epg_graph.py --all --hours 24` — the chat stack is never involved.
+Known operational caveat, revised 2026-08-28 after wedge #5: the EPG
+FalkorDB can wedge under **ordinary hourly load too**, not just bursts
+(#5 struck during a routine increment; earlier at 1.2k/2.0k/3.1k/8.3k-write
+bursts). The system now absorbs this autonomously, three layers deep:
+
+1. The ingester fails FAST when the DB is wedged — three consecutive
+   transport failures abort the run in any phase (the delete path
+   originally lacked this and kept "evicting anyway": eight consecutive
+   hourly runs each ground ~3 min/key into the 55-minute systemd kill,
+   and evictions during transport failures orphaned edges — both fixed:
+   ledger entries are KEPT on transport failure, evicted only on
+   server-side errors).
+2. `OnFailure=` fires both the notify line and
+   **`epg-graph-recover.service`**, which restarts the two EPG containers
+   (`sg docker`; live-drilled). The chat stack is never touched.
+3. The next hourly run self-heals: backlog prune, reconcile, ingest.
+
+Manual intervention is now only needed if the run-log shows repeated
+`run-failed`/`stack-restarted` pairs — meaning restarts stopped curing the
+wedge.
 
 ---
 
