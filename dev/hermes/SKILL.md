@@ -26,11 +26,12 @@ Reach for this skill whenever a task involves:
 `127.0.0.1:8001`) covers the full XMLTV lineup for the next ~24 hours,
 refreshed hourly: `search_memory_facts` for "when is X on / is anything
 about Y airing", `list_memory_facts` for complete window or per-channel
-listings. Prefer it over parsing guide XML for those questions. This skill
-remains the source of truth for stream URLs, lineup and source management,
-anything beyond the graph's 24 h window, and the **Gracenote-partition
-channels** (they have no XMLTV guide, so they never appear in the graph —
-see "Always fetch both playlists" below).
+listings. Prefer it over parsing guide XML for those questions. Since
+2026-08-28 the graph ingests the default feed's NATIVE guide
+(`/feeds/default/native/epg.xml`), which includes the Gracenote-partition
+channels — the graph covers the complete viewer lineup. This skill remains
+the source of truth for stream URLs, lineup and source management, and
+anything beyond the graph's 24 h window.
 
 What it lets you do: list and filter channels across every source, get a
 channel's playback URL, read the full schedule for a channel, diagnose why a

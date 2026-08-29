@@ -327,7 +327,12 @@ any step of this plan. On the Hermes side, the entire integration is one
 
 ### `dev/epg_graph.py` — the ingester
 
-- One unfiltered `GET /epg.xml` per run, parsed with
+- One `GET` per full run — since 2026-08-28 of
+  `/feeds/default/native/epg.xml`, the default feed's native guide, which
+  carries the COMPLETE lineup including the ~258 Gracenote-partition
+  channels that the global `/epg.xml` excludes (this closed the "no title
+  search for Gracenote channels" gap and makes the graph match what LAN
+  viewers consume 1:1). Parsed with
   `ElementTree.iterparse` + `el.clear()`. **Never per-channel `epg_for()`** —
   that function (`dev/record.py:231`) issues one live-generated request per
   channel, which at lineup scale is ~2,014 requests/hour against the

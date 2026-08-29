@@ -113,13 +113,14 @@ class StateLock:
 
 # ------------------------------------------------------------------ EPG side
 
-def fetch_guide(params: dict) -> tuple[dict, list[dict]]:
-    """Fetch a filtered guide; return (channel_id -> display name, airings).
+def fetch_guide(params: dict, url: str | None = None) -> tuple[dict, list[dict]]:
+    """Fetch a guide XMLTV; return (channel_id -> display name, airings).
 
     Airings carry the FULL guide horizon (~5 days) — windowing happens later;
     reconciliation wants everything the guide knows about the future.
     """
-    url = f"{FC_BASE}/epg.xml?{urllib.parse.urlencode(params, doseq=True)}"
+    if url is None:
+        url = f"{FC_BASE}/epg.xml?{urllib.parse.urlencode(params, doseq=True)}"
     id_to_name: dict[str, str] = {}
     airings: list[dict] = []
     with urllib.request.urlopen(url, timeout=300) as r:
@@ -153,7 +154,12 @@ def fetch_guide(params: dict) -> tuple[dict, list[dict]]:
 def select_channels(selectors: argparse.Namespace) -> tuple[dict, list[dict]]:
     """Resolve --all/--channel/--category selections into one channel map + airings."""
     if getattr(selectors, "all", False):
-        id_to_name, airings = fetch_guide({})
+        # The feed's NATIVE epg carries the FULL lineup INCLUDING the
+        # Gracenote-partition channels, which the global /epg.xml excludes
+        # (discovered 2026-08-28; this closed the "no title search for
+        # gracenote channels" gap). It is also exactly what LAN viewers
+        # consume, so graph and viewer lineups match 1:1.
+        id_to_name, airings = fetch_guide({}, url=f"{FC_BASE}/feeds/default/native/epg.xml")
         print(f"full lineup: {len(id_to_name)} channels, {len(airings)} airings in guide")
         return id_to_name, airings
     id_to_name: dict[str, str] = {}
