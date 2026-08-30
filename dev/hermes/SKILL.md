@@ -1,6 +1,6 @@
 ---
 name: fastchannels
-description: Live TV, EPG guide data and stream URLs via FastChannels.
+description: FastChannels server API — lineup, stream URLs, guide XML.
 ---
 
 # FastChannels API
@@ -31,7 +31,9 @@ listings. Prefer it over parsing guide XML for those questions. Since
 (`/feeds/default/native/epg.xml`), which includes the Gracenote-partition
 channels — the graph covers the complete viewer lineup. This skill remains
 the source of truth for stream URLs, lineup and source management, and
-anything beyond the graph's 24 h window.
+anything beyond the graph's 24 h window. **Controlling the physical TV
+viewer** (tune, volume, guide, "what's on the screen") is the
+`tv-shell-remote` skill — not `/play` URLs.
 
 What it lets you do: list and filter channels across every source, get a
 channel's playback URL, read the full schedule for a channel, diagnose why a

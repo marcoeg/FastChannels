@@ -1,6 +1,6 @@
 ---
 name: epg-graph
-description: TV listings — what is on now, tonight, or when a programme airs. Fast temporal search over the EPG knowledge graph (mcp__epg_graph__* tools); check here before parsing guide XML.
+description: TV schedule — when/what shows air; NOT the TV itself.
 ---
 
 # TV guide search — the EPG knowledge graph
@@ -31,9 +31,12 @@ Channels  channel nodes are named "Channel: <name>" (e.g. "Channel: Al Jazeera")
 - "what is on <channel> at <time> / right now"
 - "is anything about <topic> airing"
 
-Not this skill: *recording* is `fastchannels-record`; *stream URLs and
-channel lineup* are `fastchannels`; anything about past conversations or the
-system is your normal memory.
+Not this skill: **the physical TV** — "what channel is the TV on", "what's
+playing on the TV", "put it on" are the viewer's live state, answered ONLY by
+`tv-shell-remote` (`mcp__tv_shell__get_state`), never by listings: the graph
+knows the schedule, not the tuner. *Recording* is `fastchannels-record`;
+*stream URLs and channel lineup* are `fastchannels`; anything about past
+conversations or the system is your normal memory.
 
 ## Query patterns
 
@@ -117,3 +120,8 @@ for "overlapping a window" questions (films still running at 8 PM), set
    dozens of times with one shared description).
 5. You cannot write to this graph, and never pass any group other than
    `"epg"`.
+6. **To ACT on a finding — put a channel on the TV** — use the
+   `tv-shell-remote` skill (`mcp__tv_shell__*` tools). The graph's channel
+   ids (the prefix in ledger keys, e.g. `pluto.65493…`) are exactly
+   `tune_channel`'s `channel_id`; still confirm with that skill's
+   `find_channel` first, per its conventions.

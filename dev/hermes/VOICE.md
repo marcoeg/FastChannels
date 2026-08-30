@@ -98,6 +98,14 @@ The bridge additionally strips residual markdown per-delta and speaks a
 filler ("One moment, let me check.") when a tool starts before any text —
 EPG/tool turns take 5–15 s.
 
+## Driving the TV by voice
+
+Voice sessions run on the `api_server` platform, which inherits all enabled
+MCP servers — including `tv_shell` (the TVShell viewer remote). So "put on
+the news", "tune to CNN", "mute the TV", "what's on the screen?" work by
+voice end-to-end: LiveKit → Hermes → `mcp__tv_shell__*` → the kiosk.
+See `dev/hermes/TVSHELL.md`.
+
 ## Logging the conversation
 
 Three layers, two automatic:
