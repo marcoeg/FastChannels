@@ -44,3 +44,44 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+
+  # Voice-agent long-term memory (graphiti graph "voice_memory").
+  # Unlike the EPG FalkorDB, this data is NOT regenerable: AOF is on and the
+  # weekly voice-memory-backup timer copies dump.rdb to ~/backups.
+  # Bridge network + loopback publish (the worker connects from the host);
+  # same engine digest pin as the EPG stack (compose.epg.yml).
+  falkordb-voice:
+    image: falkordb/falkordb@sha256:ad09d5051bbda1cfee8cef9d7f41ffe1bcb1c5327b82c442c989e84ab8cc33d3
+    restart: unless-stopped
+    environment:
+      FALKORDB_PASSWORD: ${VOICE_FALKORDB_PASSWORD}
+      REDIS_ARGS: >-
+        --requirepass ${VOICE_FALKORDB_PASSWORD}
+        --appendonly yes
+        --appendfsync everysec
+        --maxmemory 512mb
+        --maxmemory-policy noeviction
+      # Memory queries are tiny — a low default catches engine wedges fast
+      # (deliberately NOT the EPG stack's 15000/60000 ingest tuning).
+      FALKORDB_ARGS: "TIMEOUT_DEFAULT 5000 TIMEOUT_MAX 30000"
+      BROWSER: "0"
+    volumes:
+      - falkordb_voice_data:/var/lib/falkordb/data
+    ports:
+      - "127.0.0.1:6390:6379"
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - redis-cli --no-auth-warning -a "$$FALKORDB_PASSWORD" -p 6379 ping | grep -q PONG
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  falkordb_voice_data:
