@@ -1,5 +1,12 @@
 # Hermes Voice — LiveKit bridge runbook
 
+> **Superseded as the default (2026-08-30):** the voice room is now served
+> by the standalone pydantic-ai agent — see `dev/hermes/VOICE-AGENT.md`.
+> This Hermes-backed worker (`hermes-voice-agent.service`) is kept intact
+> as the fallback; `Conflicts=` ensures only one worker runs. Everything
+> below still applies when the fallback is active, and the LiveKit/caddy/
+> client/CA sections apply to both.
+
 Talk to Hermes by voice from a browser. Built 2026-08-29; design in the
 approved plan (v1 = SSE bridge; v2 = native LiveKit platform adapter using
 Hermes' built-in `streaming_tts` seam, `gateway/platforms/base.py:4502`).
