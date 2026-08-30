@@ -1,0 +1,37 @@
+# TLS front for the Hermes voice client. Browsers require HTTPS for mic
+# access on non-localhost origins; the cert is mkcert-issued for
+# nucbox.local + the LAN IP, and the mkcert root CA must be imported once on
+# each browsing device (see dev/hermes/VOICE.md).
+
+https://nucbox.local:8443, https://192.168.50.17:8443 {
+	tls /certs/cert.pem /certs/key.pem
+
+	# LiveKit signal WebSocket + HTTP API
+	handle /rtc* {
+		reverse_proxy 127.0.0.1:7880
+	}
+	handle /twirp* {
+		reverse_proxy 127.0.0.1:7880
+	}
+
+	# The voice client page
+	handle {
+		root * /srv
+		file_server
+	}
+}
+
+# Plain-HTTP helper so devices can fetch the root CA BEFORE trusting it
+# (chicken-and-egg on first setup). Serves only the public CA cert.
+http://:8880 {
+	handle /hermes-ca.cer {
+		root * /srv
+		header Content-Type application/pkix-cert
+		header Content-Disposition "attachment; filename=hermes-ca.cer"
+		file_server
+	}
+	# Any other path (including typos) redirects straight to the download.
+	handle {
+		redir * /hermes-ca.cer 302
+	}
+}

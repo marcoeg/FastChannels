@@ -1,0 +1,46 @@
+# LiveKit voice stack for Hermes — see dev/hermes/VOICE.md and the design in
+# dev/EPG-GRAPH-PLAN.md's sibling plan. Host networking on purpose: WebRTC
+# ICE candidates must advertise the host's LAN address, and caddy proxies the
+# signal WebSocket over TLS for browser mic access.
+#
+#   cd /home/marco/Development/FastChannels/dev/voice
+#   sg docker -c "docker compose -f compose.livekit.yml -p hermes-voice up -d"
+#
+# Ports on the host:
+#   8443/tcp  caddy  — HTTPS client page + wss signal proxy (browsers)
+#   7880/tcp  livekit signal (plain ws; used by the local worker only)
+#   7881/tcp  livekit RTC over TCP (fallback)
+#   7882/udp  livekit RTC media
+#
+# Secrets live in ./livekit.yaml and ./.env (git-excluded).
+
+name: hermes-voice
+
+services:
+
+  livekit:
+    image: livekit/livekit-server:latest
+    restart: unless-stopped
+    network_mode: host
+    command: --config /etc/livekit.yaml
+    volumes:
+      - ./livekit.yaml:/etc/livekit.yaml:ro
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./ca:/certs:ro
+      - ./client:/srv:ro
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
