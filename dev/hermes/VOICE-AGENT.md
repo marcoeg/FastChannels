@@ -12,7 +12,8 @@ Browser mic ──wss:8443 (caddy)──► livekit-server (host net)
                                       │ room "voice"
                                       ▼
               voice-agent.service (dev/voice/voice_agent.py)
-              silero VAD → OpenAI STT → PydanticLLM → OpenAI TTS
+              silero VAD → OpenAI streaming STT → PydanticLLM
+                         → ElevenLabs Flash TTS (VOICE_TTS switch)
                                       │ in-process
                                       ▼
     pydantic-ai Agent (gpt-5.6-terra, reasoning effort none, priority tier)
@@ -58,6 +59,30 @@ Dynamic per-turn context: clock in Pacific AND UTC, plus remembered facts.
 - Memory extraction models are separate (MEMORY_LLM_MODEL=gpt-5-mini,
   MEMORY_LLM_SMALL=gpt-4.1-mini) — graphiti's defaults assume access to
   gpt-4.1-nano, which this project lacks.
+
+## Latency pipeline (upgraded 2026-08-30 after the first phone sessions)
+
+Measured bottleneck was three sequential OpenAI cloud calls, not anything
+local (FalkorDB recall: 1-2 ms). Upgrades, worth ~1.3 s/turn combined:
+
+- **Streaming STT**: `openai.STT(use_realtime=True)` — transcribes during
+  speech; transcript ready ~0.2 s after speech end vs ~1.0 s batch
+  Whisper, and interim transcripts enable LLM preemption.
+- **LLM preemption**: `turn_handling.preemptive_generation.enabled` — the
+  model starts on the live transcript before the endpointer commits.
+  **`preemptive_tts` must stay False**: with it True, TTS synthesized
+  successfully (metrics showed frames) but playout stayed SILENT — a
+  livekit 1.7.1 defect found via voice_probe.py. Re-test before enabling
+  after any livekit upgrade.
+- **ElevenLabs Flash v2.5 TTS** (`VOICE_TTS=elevenlabs`, key in .env):
+  TTFB 0.16-0.19 s measured vs ~0.7 s OpenAI TTS. `VOICE_TTS=openai`
+  restores the old voice. NOTE: LiveKit plugins must be imported at
+  module top level — importing inside the entrypoint raises "Plugins must
+  be registered on the main thread".
+- **`dev/voice/voice_probe.py`** — end-to-end AUDIO test without a phone:
+  joins a throwaway room, speaks a synthesized question as a mic track,
+  measures the reply (frames, seconds, peak RMS, time-to-first-audio).
+  The tool that isolated the preemptive_tts silence in one run.
 
 ## Testing without a browser
 

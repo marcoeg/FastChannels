@@ -2,7 +2,7 @@
 # /// script
 # requires-python = ">=3.11"
 # dependencies = [
-#   "livekit-agents[openai,silero]==1.7.1",
+#   "livekit-agents[openai,silero,elevenlabs]==1.7.1",
 #   "pydantic-ai-slim[openai,mcp]==2.31.1",
 #   "graphiti-core[falkordb]==0.29.3",
 # ]
@@ -48,7 +48,10 @@ from livekit.agents import (  # noqa: E402
     WorkerOptions,
     cli,
 )
-from livekit.plugins import openai, silero  # noqa: E402
+# elevenlabs imported at module level on purpose: LiveKit plugins must
+# register on the MAIN thread; importing inside the entrypoint (job event
+# loop thread) raises RuntimeError.
+from livekit.plugins import elevenlabs, openai, silero  # noqa: E402
 
 from pai_agent import VoiceBrain  # noqa: E402
 from pai_llm import PydanticLLM  # noqa: E402
@@ -122,11 +125,29 @@ async def entrypoint(ctx: agents.JobContext) -> None:
 
     ctx.add_shutdown_callback(_shutdown)
 
+    # TTS is switchable via VOICE_TTS (elevenlabs|openai) — flipping back to
+    # openai restores the original voice with one .env line.
+    if os.environ.get("VOICE_TTS", "openai") == "elevenlabs":
+        tts = elevenlabs.TTS(model="eleven_flash_v2_5",
+                             api_key=os.environ["ELEVENLABS_API_KEY"])
+    else:
+        tts = openai.TTS()
+
     session = AgentSession(
         vad=ctx.proc.userdata.get("vad") or silero.VAD.load(),
-        stt=openai.STT(),
+        # Streaming transcription: transcript finalizes ~0.2 s after speech
+        # end instead of ~1 s of post-hoc batch Whisper (measured), and
+        # interim transcripts are what lets preemptive generation fire.
+        stt=openai.STT(use_realtime=True),
         llm=pai,
-        tts=openai.TTS(),
+        tts=tts,
+        # Start LLM AND TTS on the live transcript before the endpointer
+        # commits the turn — overlaps model TTFT + TTS TTFB with the
+        # silence-detection wait. Discarded preemptive synthesis on a
+        # mid-sentence pause costs pennies on flash-tier TTS.
+        turn_handling={
+            "preemptive_generation": {"enabled": True, "preemptive_tts": False},
+        },
     )
 
     wire_session_metrics(session)
