@@ -40,7 +40,14 @@ for line in (Path(__file__).parent / ".env").read_text().splitlines():
 sys.path.insert(0, str(Path(__file__).parent))
 
 from livekit import agents  # noqa: E402
-from livekit.agents import Agent, AgentSession, JobProcess, WorkerOptions, cli  # noqa: E402
+from livekit.agents import (  # noqa: E402
+    Agent,
+    AgentSession,
+    JobProcess,
+    RoomInputOptions,
+    WorkerOptions,
+    cli,
+)
 from livekit.plugins import openai, silero  # noqa: E402
 
 from pai_agent import VoiceBrain  # noqa: E402
@@ -161,7 +168,22 @@ async def entrypoint(ctx: agents.JobContext) -> None:
                 logger.warning("warmup run failed: %s", e)
         asyncio.create_task(_warmup())
 
-    await session.start(room=ctx.room, agent=TvAssistant(pai))
+    # Phones drop their WebRTC connection constantly (screen lock, network
+    # hop). Keep the session alive across disconnects so a reconnect
+    # resumes with history intact — the default close_on_disconnect=True
+    # closed the session 3 s after a drop while the job kept squatting on
+    # the room, which read as "stuck" from the browser.
+    @session.on("close")
+    def _on_close(ev) -> None:
+        # When the session truly closes (room deleted, fatal error), end
+        # the job immediately so the room re-dispatches a fresh one.
+        ctx.shutdown(reason="session closed")
+
+    await session.start(
+        room=ctx.room,
+        agent=TvAssistant(pai),
+        room_input_options=RoomInputOptions(close_on_disconnect=False),
+    )
 
 
 if __name__ == "__main__":
