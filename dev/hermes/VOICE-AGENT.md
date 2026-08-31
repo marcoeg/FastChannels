@@ -63,7 +63,22 @@ Dynamic per-turn context: clock in Pacific AND UTC, plus remembered facts.
 ## Latency pipeline (upgraded 2026-08-30 after the first phone sessions)
 
 Measured bottleneck was three sequential OpenAI cloud calls, not anything
-local (FalkorDB recall: 1-2 ms). Upgrades, worth ~1.3 s/turn combined:
+local (FalkorDB recall: 1-2 ms). Measured result of the upgrade (medians,
+speech-end → first audio = EOU + LLM TTFT + TTS TTFB; before = 36 audio
+turns, after = 8):
+
+| | before | after |
+| --- | --- | --- |
+| plain turns | 3.59 s | **2.10 s** (−41%) |
+| tool turns | 4.26 s | **3.37 s** (−21%) |
+| TTS TTFB | 0.76 s | 0.16 s |
+| EOU p90 (endpointing-cap stalls) | 2.50 s | 1.24 s (outliers gone) |
+
+Residual budget: transcript finalization still ~0.95 s after speech end —
+realtime STT pays a server-side commit round trip, so the projected
+~0.2 s did not materialize; plus terra's ~0.9 s per model pass (×2 on
+tool turns). Next levers if ever needed: endpointing.min_delay 0.5→0.35,
+and the realtime-STT commit latency. The upgrades:
 
 - **Streaming STT**: `openai.STT(use_realtime=True)` — transcribes during
   speech; transcript ready ~0.2 s after speech end vs ~1.0 s batch
