@@ -136,17 +136,19 @@ class PydanticLLMStream(llm.LLMStream):
                             continue
                         elif isinstance(ev, FunctionToolCallEvent):
                             part = ev.part
+                            args = part.args if isinstance(part.args, str) \
+                                else str(part.args)
                             tool_started[part.tool_call_id] = (
-                                part.tool_name, time.monotonic())
+                                part.tool_name, time.monotonic(), args[:300])
                             if not spoken and filler_task is None:
                                 filler_task = asyncio.create_task(
                                     filler_after_delay())
                         elif isinstance(ev, FunctionToolResultEvent):
                             hit = tool_started.pop(ev.tool_call_id, None)
                             if hit:
-                                name, ts = hit
+                                name, ts, args = hit
                                 tool_spans.append(
-                                    {"name": name,
+                                    {"name": name, "args": args,
                                      "ms": round((time.monotonic() - ts) * 1000)})
                         elif isinstance(ev, AgentRunResultEvent):
                             pass            # loop ends after this event

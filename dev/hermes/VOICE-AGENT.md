@@ -15,7 +15,7 @@ Browser mic ──wss:8443 (caddy)──► livekit-server (host net)
               silero VAD → OpenAI STT → PydanticLLM → OpenAI TTS
                                       │ in-process
                                       ▼
-    pydantic-ai Agent (gpt-5-mini, reasoning effort minimal, priority tier)
+    pydantic-ai Agent (gpt-5.6-terra, reasoning effort none, priority tier)
       ├─ epg_* tools    MCP 127.0.0.1:8001 (read-only allowlist, 8 s cap)
       ├─ tv_* tools     MCP 127.0.0.1:8790 (TVShell remote, 5 s cap)
       ├─ search_memory  in-process graphiti-core
@@ -45,12 +45,16 @@ Dynamic per-turn context: clock in Pacific AND UTC, plus remembered facts.
 - Reasoning effort is per model FAMILY: gpt-5/gpt-5-mini take `minimal`;
   gpt-5.5/5.6 take `none`. Set VOICE_REASONING_EFFORT to match VOICE_MODEL
   or the API 400s.
-- Benchmarked TTFT (prompt-cached, priority tier): gpt-5-mini p50 779 ms,
-  gpt-5.5+none p50 740 ms. gpt-5.6-luna is the intended target ($0.20/M,
-  effort none) but the OpenAI project needs model access granted
-  (grants propagate slowly; failures appear MID-STREAM as
-  `model_not_found` after a 200 — check with a bare curl before blaming
-  the code).
+- **Model chosen on measured merit: gpt-5.6-terra** (live 2026-08-30).
+  The deciding test was temporal correctness — "is Columbo on right now"
+  against 15 schedule rows: luna FAILED it three different ways at effort
+  none AND low (nano tier cannot scan time ranges; dual-notation clock
+  injection didn't save it); gpt-5.5, terra, and sol all pass. TTFT p50/
+  p95 (prompt-cached, priority): terra 745/767 ms (tightest), 5.5 740 ms,
+  sol 625 ms warm but 2.6-3.0 s on HALF its calls (capacity tail), luna
+  608 ms. Terra = correctness + newest generation + no tail. Access
+  grants propagate slowly and failures appear MID-STREAM as
+  `model_not_found` after a 200 — check with a bare curl first.
 - Memory extraction models are separate (MEMORY_LLM_MODEL=gpt-5-mini,
   MEMORY_LLM_SMALL=gpt-4.1-mini) — graphiti's defaults assume access to
   gpt-4.1-nano, which this project lacks.
@@ -82,11 +86,17 @@ imports sounddevice even in text mode — no PortAudio on this host):
   (pai_agent.py) absorbs enter failures, serves zero tools while down,
   reconnects per run. Verified: EPG container stopped → honest "couldn't
   check", TV tools unaffected, auto-recovery on restart.
-- **EPG latency is query-shaped**: ranked `search_memory_facts` on
-  frequent terms measures 5.5-6.5 s server-side (same root cause as
-  Hermes' old 15 s timeouts); `list_memory_facts` is ~8 ms. The prompt
-  steers channel questions to find_channel → list; search keeps an 8 s
-  client cap. Fixing the server-side search cost is an open follow-up.
+- **EPG search + temporal filters = server-side bug**: slowlog-proven —
+  the similarity scan with a `valid_at` predicate takes 7,089 ms vs
+  633 ms without it: the extra WHERE clause defeats the `vecf32()` hoist
+  in FalkorDB's planner (per-row reconversion again, new door).
+  `list_memory_facts` does the same string comparisons in 8 ms. So the
+  prompt BANS filter params on search (discovery only) and routes all
+  time-scoped questions through the list tool; search keeps an 8 s
+  client cap as the wedge guillotine. Open follow-ups: fix the hoist in
+  falkor_fast_search for the filtered case (then upstream it), and/or a
+  deterministic in-worker `whats_on(channel)` tool that computes
+  on-air/next in Python instead of asking any model to scan time rows.
 - **Message parts are dataclasses** in pydantic-ai 2.31 (`model_copy`
   absent) — `_replace()` helper handles both shapes.
 - Console text turns don't fire the user-turn hook (see above).

@@ -37,11 +37,18 @@ def format_time_context(now_utc: datetime | None = None) -> str:
     local = now_utc.astimezone(_PACIFIC)
     tzname = local.tzname()  # PDT or PST
     offset_h = int(local.utcoffset().total_seconds() // 3600)
+    # Both notations on purpose: guide fact text uses 24-hour times
+    # ("19:10-20:57 PDT") and a no-reasoning model must be able to compare
+    # them to "now" without doing 12h->24h arithmetic itself.
     return (
-        f"Clock: {local:%A, %B %-d, %Y, %-I:%M %p} Pacific "
+        f"Clock: {local:%A, %B %-d, %Y, %-I:%M %p} Pacific — that is "
+        f"{local:%H:%M} in the 24-hour times the guide uses "
         f"({tzname}, UTC{offset_h:+d}).\n"
         f"UTC now: {now_utc:%Y-%m-%dT%H:%M:%S}Z. "
-        f"Guide coverage ends roughly 24 hours from now."
+        f"Guide coverage ends roughly 24 hours from now.\n"
+        f"A programme is on air now exactly when its start time is at or "
+        f"before {local:%H:%M} and its end time is after {local:%H:%M} "
+        f"(same day: {local:%a %d %b})."
     )
 
 
