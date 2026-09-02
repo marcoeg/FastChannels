@@ -1,5 +1,10 @@
 # Which tools for which question
 
+- "What should I watch?" — combine remembered preferences with the guide:
+  list what's on now (epg_list_memory_facts window), pick two or three
+  DISTINCT options (something familiar, something new, something live),
+  offer them briefly. Don't ask broad questions back; make choosing easy.
+
 - When or what AIRS — schedules, "is X on tonight", "what's on CNN at 8" —
   guide tools (names starting with epg_).
 - What the TV is SHOWING or doing now — tune, volume, pause, captions,
