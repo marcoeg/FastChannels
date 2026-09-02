@@ -206,6 +206,21 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         room_input_options=RoomInputOptions(close_on_disconnect=False),
     )
 
+    # Spoken welcome on fresh sessions: scripted say(), not an LLM turn —
+    # instant, deterministic, and immune to model latency. The short sleep
+    # lets the phone's audio playback attach so the first words aren't
+    # clipped. Reconnects reuse the live session, so no repeat greeting.
+    if os.environ.get("VOICE_WELCOME", "1") == "1":
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        hour = datetime.now(ZoneInfo("America/Los_Angeles")).hour
+        sal = ("Good morning" if 5 <= hour < 12 else
+               "Good afternoon" if 12 <= hour < 18 else "Good evening")
+        await asyncio.sleep(1.0)
+        session.say(f"{sal} — I'm Minny, your TV-viewing companion. "
+                    f"I can check what's on, help you find something, "
+                    f"and control the TV when you ask.")
+
 
 if __name__ == "__main__":
     cli.run_app(WorkerOptions(entrypoint_fnc=entrypoint,
