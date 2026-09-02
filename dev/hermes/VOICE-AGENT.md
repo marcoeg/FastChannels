@@ -126,17 +126,21 @@ imports sounddevice even in text mode — no PortAudio on this host):
   (pai_agent.py) absorbs enter failures, serves zero tools while down,
   reconnects per run. Verified: EPG container stopped → honest "couldn't
   check", TV tools unaffected, auto-recovery on restart.
-- **EPG search + temporal filters = server-side bug**: slowlog-proven —
-  the similarity scan with a `valid_at` predicate takes 7,089 ms vs
-  633 ms without it: the extra WHERE clause defeats the `vecf32()` hoist
-  in FalkorDB's planner (per-row reconversion again, new door).
-  `list_memory_facts` does the same string comparisons in 8 ms. So the
-  prompt BANS filter params on search (discovery only) and routes all
-  time-scoped questions through the list tool; search keeps an 8 s
-  client cap as the wedge guillotine. Open follow-ups: fix the hoist in
-  falkor_fast_search for the filtered case (then upstream it), and/or a
-  deterministic in-worker `whats_on(channel)` tool that computes
-  on-air/next in Python instead of asking any model to scan time rows.
+- **The FalkorDB label-join pathology (fixed 2026-09-01)**: with
+  `MATCH (n:Entity)-[e:RELATES_TO]->(m:Entity)` and NO selective node
+  anchor, FalkorDB's planner joins two label scans instead of scanning
+  edges once — 9,840 ms vs 3.6 ms for the IDENTICAL query with unlabeled
+  `(n)-[e]->(m)` at 17k edges. This was the true root cause of BOTH the
+  "filtered search is slow" mystery (earlier misdiagnosed as a vecf32
+  hoist defeat) and unanchored window lists ("movies tonight") timing
+  out while channel-anchored ones flew. Fixed by dropping the node
+  labels in list_memory_facts' cypher and falkor_fast_search's
+  similarity leg (graphiti_mcp_server.py + falkor_fast_search.py, EPG
+  MCP image rebuilt; vendored copy in dev/voice synced). Filtered
+  search now 0.25-0.8 s (embedding-bound), unanchored lists 31 ms; the
+  prompt's time-filter ban on search was lifted. Upstream-PR candidate.
+  The 8 s client cap stays as the wedge guillotine. Still on the shelf:
+  a deterministic in-worker `whats_on(channel)` tool.
 - **Message parts are dataclasses** in pydantic-ai 2.31 (`model_copy`
   absent) — `_replace()` helper handles both shapes.
 - Console text turns don't fire the user-turn hook (see above).

@@ -116,7 +116,10 @@ async def _fast_edge_similarity_search(
         filter_query = ' WHERE ' + (' AND '.join(filter_queries))
 
     cypher = (
-        'WITH vecf32($search_vector) AS qv MATCH (n:Entity)-[e:RELATES_TO]->(m:Entity)'
+        # Unlabeled node pattern on purpose: with :Entity labels and no
+        # selective node anchor, FalkorDB's planner joins two label scans
+        # (~10 s at 17k edges) instead of one edge scan (~4 ms).
+        'WITH vecf32($search_vector) AS qv MATCH (n)-[e:RELATES_TO]->(m)'
         + filter_query
         + """
         WITH DISTINCT e, n, m, (2 - vec.cosineDistance(e.fact_embedding, qv))/2 AS score

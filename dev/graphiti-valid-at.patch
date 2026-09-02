@@ -1,5 +1,5 @@
 diff --git a/mcp_server/src/graphiti_mcp_server.py b/mcp_server/src/graphiti_mcp_server.py
-index a281443..4c56604 100644
+index a281443..3ead958 100644
 --- a/mcp_server/src/graphiti_mcp_server.py
 +++ b/mcp_server/src/graphiti_mcp_server.py
 @@ -15,8 +15,10 @@ from uuid import uuid4
@@ -225,7 +225,7 @@ index a281443..4c56604 100644
 +            params['source_node_name'] = source_node_name
 +
 +        cypher = (
-+            'MATCH (n:Entity)-[e:RELATES_TO]->(m:Entity) WHERE '
++            'MATCH (n)-[e:RELATES_TO]->(m) WHERE '  # unlabeled on purpose: with :Entity labels and no node anchor, FalkorDB joins label scans (~10 s at 17k edges); one edge scan is ~4 ms
 +            + ' AND '.join(filters)
 +            + """
 +            RETURN e.uuid AS uuid, e.name AS name, e.fact AS fact,
@@ -272,10 +272,10 @@ index a281443..4c56604 100644
          error_msg = str(e)
 diff --git a/mcp_server/src/utils/falkor_fast_search.py b/mcp_server/src/utils/falkor_fast_search.py
 new file mode 100644
-index 0000000..81cceda
+index 0000000..a1a2df4
 --- /dev/null
 +++ b/mcp_server/src/utils/falkor_fast_search.py
-@@ -0,0 +1,226 @@
+@@ -0,0 +1,229 @@
 +"""Hoist vecf32($search_vector) out of the per-row loop in FalkorDB searches.
 +
 +graphiti-core 0.29.3 scores similarity with
@@ -394,7 +394,10 @@ index 0000000..81cceda
 +        filter_query = ' WHERE ' + (' AND '.join(filter_queries))
 +
 +    cypher = (
-+        'WITH vecf32($search_vector) AS qv MATCH (n:Entity)-[e:RELATES_TO]->(m:Entity)'
++        # Unlabeled node pattern on purpose: with :Entity labels and no
++        # selective node anchor, FalkorDB's planner joins two label scans
++        # (~10 s at 17k edges) instead of one edge scan (~4 ms).
++        'WITH vecf32($search_vector) AS qv MATCH (n)-[e:RELATES_TO]->(m)'
 +        + filter_query
 +        + """
 +        WITH DISTINCT e, n, m, (2 - vec.cosineDistance(e.fact_embedding, qv))/2 AS score
