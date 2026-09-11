@@ -114,6 +114,15 @@ imports sounddevice even in text mode — no PortAudio on this host):
 
 ## Hard-won gotchas (all bitten during the build)
 
+- **A long-idle worker goes deaf** (2026-09-10): after ~9 days untouched,
+  the worker's prewarmed job processes had died; a phone join then failed
+  dispatch three times ("failed to launch job on process", BrokenPipe on
+  the IPC channel) and no agent entered the room — connected session,
+  nobody home. Fix: restart. Prevention: `voice-agent-restart.timer`
+  recycles the worker daily at 04:30 via `try-restart` (a scheduled quiet-
+  hours restart, deliberately NOT RuntimeMaxSec, which would fire 24 h
+  after start and could kill a live conversation).
+
 - **Dependency wall**: livekit-agents 1.7.1 needs `openai>=2,<3`;
   pydantic-ai ≥2.32 needs `openai>=3` → pinned
   `pydantic-ai-slim[openai,mcp]==2.31.1` (newest compatible). Revisit both
