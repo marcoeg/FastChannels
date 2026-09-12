@@ -19,6 +19,7 @@ Browser mic ──wss:8443 (caddy)──► livekit-server (host net)
     pydantic-ai Agent (gpt-5.6-terra, reasoning effort none, priority tier)
       ├─ epg_* tools    MCP 127.0.0.1:8001 (read-only allowlist, 8 s cap)
       ├─ tv_* tools     MCP 127.0.0.1:8790 (TVShell remote, 5 s cap)
+      ├─ web_lookup     in-process Brave web search (~0.5 s)
       ├─ search_memory  in-process graphiti-core
       └─ memory         graph "voice_memory" in falkordb-voice (:6390, AOF)
 ```
@@ -36,6 +37,7 @@ Dynamic per-turn context: clock in Pacific AND UTC, plus remembered facts.
 | Memory DB | `falkordb-voice` service in `dev/voice/compose.livekit.yml` (project hermes-voice); AOF everysec, 127.0.0.1:6390, digest-pinned |
 | Memory backup | `voice-memory-backup.timer` Sun 04:00 → `~/backups/voice-memory/` (keep 8) |
 | Memory inspection | `dev/voice/memory_cli.py stats\|facts "q"\|episodes\|profile\|wipe --yes` |
+| Web search | Brave API, key `BRAVE_SEARCH_KEY` in `dev/voice/.env` (copied from `~/.env`); `dev/voice/websearch.py`, 4 s cap, 4 results, no URLs in output |
 | Config | `dev/voice/.env`: VOICE_MODEL, VOICE_REASONING_EFFORT, EPG_MCP_URL, TV_MCP_URL, VOICE_FALKORDB_* , MEMORY_LLM_MODEL/SMALL |
 | Telemetry | `~/news/voice-metrics.jsonl` (LiveKit eou/llm/tts metrics + per-turn rows: ttfd_ms, filler_used, tool_spans) |
 | Transcript | `~/news/voice-conversations.jsonl` (unchanged format) |
@@ -98,6 +100,18 @@ and the realtime-STT commit latency. The upgrades:
   joins a throwaway room, speaks a synthesized question as a mic track,
   measures the reply (frames, seconds, peak RMS, time-to-first-audio).
   The tool that isolated the preemptive_tts silence in one run.
+
+## Web lookups
+
+EPG descriptions are thin and often boilerplate, so `web_lookup(query)`
+(native in-process tool, not MCP — one Brave HTTPS call, ~0.5 s measured)
+supplies plot, cast, year, and background. Prompt rules live in
+`prompts/35-web.md`: content questions only (never schedule, tuner, or
+preferences — those tools are far faster), search title + a
+disambiguating word, guide wins on conflicts, spoiler discipline applies
+to snippets too, never read links aloud. Failure modes all degrade to a
+spoken sentence rather than an exception: missing key, bad key, HTTP
+error, 429, and a 4 s timeout are each their own honest message.
 
 ## Testing without a browser
 

@@ -160,6 +160,16 @@ def build_agent() -> Agent:
         return format_memory_context(ctx.deps.facts_profile,
                                      ctx.deps.facts_recent)
 
+    @agent.tool_plain
+    async def web_lookup(query: str) -> str:
+        """Look up background about a programme, film, person, or event on
+        the web: plot, cast, year, series context, reviews, real-world
+        facts. Use when guide descriptions are thin or the viewer asks
+        about content rather than scheduling. NOT for what is on TV, when
+        something airs, or the viewer's own preferences."""
+        from websearch import search
+        return await search(query)
+
     @agent.tool
     async def search_memory(ctx: RunContext[TurnDeps], query: str) -> str:
         """Search long-term memory of past conversations and household
