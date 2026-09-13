@@ -19,6 +19,7 @@ Browser mic ──wss:8443 (caddy)──► livekit-server (host net)
     pydantic-ai Agent (gpt-5.6-terra, reasoning effort none, priority tier)
       ├─ epg_* tools    MCP 127.0.0.1:8001 (read-only allowlist, 8 s cap)
       ├─ tv_* tools     MCP 127.0.0.1:8790 (TVShell remote, 5 s cap)
+      ├─ whats_on       deterministic on-air listing (code-filtered)
       ├─ web_lookup     in-process Brave web search (~0.5 s)
       ├─ search_memory  in-process graphiti-core
       └─ memory         graph "voice_memory" in falkordb-voice (:6390, AOF)
@@ -100,6 +101,33 @@ and the realtime-STT commit latency. The upgrades:
   joins a throwaway room, speaks a synthesized question as a mic track,
   measures the reply (frames, seconds, peak RMS, time-to-first-audio).
   The tool that isolated the preemptive_tts silence in one run.
+
+## whats_on — never let a model compare times
+
+`dev/voice/epg_now.py` answers every "what's on / is X on now / what's on
+at 9" question: it pages the EPG list tool over an overlap window, then
+filters and formats **in Python**, so the model only ever sees programmes
+genuinely airing at the requested moment, with Pacific times already
+rendered. Measured 13-355 ms.
+
+This exists because the prompt-level overlap rule ("fetch from 4 h back,
+keep rows still running") is not reliably executed by any model tested:
+luna failed it outright, and terra silently skipped the filter on long
+lists and announced films that had already ended (2026-09-12 session,
+films "until six oh five" read out at 6:57 pm). Time comparison is
+arithmetic, not judgement.
+
+Two traps found building it, both encoded:
+- **Paging is mandatory.** The server caps a page at 1000 rows ordered by
+  start time; a 6 h window across ~1,075 channels overflows it, so a
+  single call silently returns only the OLDEST rows — every one already
+  finished. "At 9pm" returned nothing until paging was added.
+- **A one-minute grace** (`MIN_REMAINING_S`): rows ending seconds after
+  the asked-about moment are technically airing but useless to offer.
+
+`at_time` accepts "now" or a clock time ("9pm", "21:30") and resolves it
+in code — bare hours are read as evening, past times roll to tomorrow —
+so the model never does date arithmetic either.
 
 ## Web lookups
 

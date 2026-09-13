@@ -161,6 +161,19 @@ def build_agent() -> Agent:
                                      ctx.deps.facts_recent)
 
     @agent.tool_plain
+    async def whats_on(at_time: str | None = None, channel: str | None = None,
+                       query: str | None = None) -> str:
+        """AUTHORITATIVE listing of what is actually ON AIR at a moment.
+        Times are computed in code, so rows are never stale. at_time: "now"
+        (default) or a clock time like "9pm"/"21:30". channel: exact
+        channel name to restrict to one channel. query: case-insensitive
+        keyword to match against channel, genres, title and description
+        (e.g. "Movie", "News", "Columbo"). Use this for every "what's on /
+        is X on now / what's on at 9" question."""
+        from epg_now import whats_on as _whats_on
+        return await _whats_on(at_time=at_time, channel=channel, query=query)
+
+    @agent.tool_plain
     async def web_lookup(query: str) -> str:
         """Look up background about a programme, film, person, or event on
         the web: plot, cast, year, series context, reviews, real-world

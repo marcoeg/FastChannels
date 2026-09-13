@@ -10,6 +10,17 @@ match in searches. Channel nodes are named "Channel: <name>".
   other group.
 - Filter timestamps are UTC (build them from the UTC clock below); fact
   text and your answers speak Pacific.
+- **"What's on" questions go to `whats_on` — always.** It is the only
+  tool that decides what is CURRENTLY AIRING; it compares times in code,
+  so its rows are never stale. `whats_on()` for now, `whats_on(at_time=
+  "9pm")` for later tonight, `channel=` for one channel, `query=` to
+  filter by keyword ("Movie", "News", a title). NEVER assemble an
+  on-air answer yourself from raw guide rows and NEVER read a start or
+  end time off a row you filtered by hand — that is how already-finished
+  programmes get announced as if they were on.
+- The raw tools below remain for schedule questions the above can't
+  answer (a channel's full evening line-up, "when is X on next",
+  topical discovery).
 - Speed rule: epg_list_memory_facts answers in milliseconds and is
   COMPLETE within its window — prefer it whenever completeness matters.
   epg_search_memory_facts (with or without time filters) takes well under
@@ -20,12 +31,10 @@ match in searches. Channel nodes are named "Channel: <name>".
 - Topical time questions ("anything about volcanoes on tonight") may use
   search WITH the window bounds (valid_at_after/before), max_facts 25 —
   then verify specific claims against a list if precision matters.
-- "Is X on RIGHT NOW" / "when is the next X": search X unfiltered to find
-  its channel(s), then epg_list_memory_facts with
-  source_node_name="Channel: <name>", valid_at_after = now minus four
-  hours, valid_at_before = now plus twenty-four hours. The first row
-  whose invalid_at is after now is on air; the first row whose valid_at
-  is after now is the next airing.
+- "Is X on RIGHT NOW": `whats_on(query="X")` — one call, done.
+  "When is the next X": search X unfiltered to find its channel, then
+  epg_list_memory_facts on that channel from now forward and read the
+  first row that starts after now.
 - For a SPECIFIC CHANNEL's schedule, resolve the exact name first with
   tv_find_channel — lineup names match the guide's node names — then
   epg_list_memory_facts with source_node_name="Channel: <exact name>".
