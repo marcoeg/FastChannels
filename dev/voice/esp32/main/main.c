@@ -14,6 +14,17 @@
 #include "room.h"
 #include "ui.h"
 
+// Internal RAM is the scarce resource here (FreeRTOS objects, task stacks
+// and SPI DMA must all live there) — log it at each stage so regressions
+// show up in the boot log instead of as mystery init failures.
+static void log_heap(const char *stage)
+{
+    ESP_LOGI("heap", "%s: internal=%u dma=%u total=%u", stage,
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_DMA),
+             (unsigned)esp_get_free_heap_size());
+}
+
 void app_main(void)
 {
     esp_log_level_set("*", ESP_LOG_INFO);
@@ -26,8 +37,11 @@ void app_main(void)
 
     livekit_system_init();   // must precede any media pipeline setup
     board_init();
+    log_heap("after board_init");
     ui_init();
+    log_heap("after ui_init");
     media_init();
+    log_heap("after media_init");
 
     // SNTP: JWT nbf/exp are validated server-side; a sane clock avoids
     // spurious auth failures after long power-offs.
@@ -41,6 +55,8 @@ void app_main(void)
         ESP_LOGE("main", "Network connection failed — check WiFi credentials");
         return;
     }
+    log_heap("after network");
 
     room_start();
+    log_heap("after room_start");
 }

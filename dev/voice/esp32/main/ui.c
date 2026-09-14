@@ -37,7 +37,7 @@ static const char *TAG = "ui";
 
 #define LCD_H_RES        172
 #define LCD_V_RES        320
-#define LCD_DRAW_BUF_H   50
+#define LCD_DRAW_BUF_H   24
 
 #define LCD_SPI_HOST     SPI3_HOST
 #define LCD_PIXEL_CLK_HZ (80 * 1000 * 1000)
@@ -187,10 +187,14 @@ static void render(void)
         }
     }
 
+    // No drop shadow on purpose: LVGL's software shadow blur of the big
+    // circle costs more per redraw than everything else on screen combined
+    // (it pegged a core). Active states get a bright border instead.
     lv_obj_set_style_bg_color(s_orb, lv_color_hex(orb), 0);
-    lv_obj_set_style_shadow_color(s_orb, lv_color_hex(orb), 0);
-    lv_obj_set_style_shadow_width(s_orb,
-        (orb == COL_LISTEN || orb == COL_SPEAK || orb == COL_THINK) ? 24 : 0, 0);
+    bool active = (orb == COL_LISTEN || orb == COL_SPEAK || orb == COL_THINK);
+    lv_obj_set_style_border_color(s_orb,
+        lv_color_hex(active ? orb : COL_BORDER), 0);
+    lv_obj_set_style_border_width(s_orb, active ? 4 : 2, 0);
     lv_label_set_text(s_state_label, state_text);
     lv_label_set_text(s_hint_label, hint_text);
 
@@ -254,11 +258,24 @@ static lv_obj_t *make_button(lv_obj_t *parent, int x, int y, int w, int h,
     return btn;
 }
 
+// Temporary bring-up diagnostic: catches phantom touch presses (a
+// misbehaving controller would spam this and constantly invalidate the UI).
+static void dbg_pressed(lv_event_t *e)
+{
+    lv_indev_t *indev = lv_indev_active();
+    if (indev) {
+        lv_point_t p;
+        lv_indev_get_point(indev, &p);
+        ESP_LOGI(TAG, "touch press at %d,%d", (int)p.x, (int)p.y);
+    }
+}
+
 static void build_screen(void)
 {
     lv_obj_t *scr = lv_screen_active();
     lv_obj_set_style_bg_color(scr, lv_color_hex(COL_BG), 0);
     lv_obj_remove_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_event_cb(scr, dbg_pressed, LV_EVENT_PRESSED, NULL);
 
     // Top bar
     lv_obj_t *title = lv_label_create(scr);
@@ -280,7 +297,7 @@ static void build_screen(void)
     lv_obj_set_style_bg_color(s_orb, lv_color_hex(COL_ORB_OFF), 0);
     lv_obj_set_style_border_color(s_orb, lv_color_hex(COL_BORDER), 0);
     lv_obj_set_style_border_width(s_orb, 2, 0);
-    lv_obj_set_style_shadow_spread(s_orb, 4, 0);
+    lv_obj_set_style_shadow_width(s_orb, 0, 0);
     lv_obj_remove_flag(s_orb, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(s_orb, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_add_event_cb(s_orb, orb_clicked, LV_EVENT_CLICKED, NULL);
@@ -404,20 +421,27 @@ static void display_init(void)
     ESP_ERROR_CHECK(esp_lcd_panel_invert_color(panel, true));
     ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(panel, true));
 
+    // Core 1: the AFE/AEC + WiFi + lwip saturate core 0 (measured — IDLE0
+    // watchdog), while core 1 (Opus encode, peer tasks) has headroom. LVGL
+    // at priority 4 yields to all media tasks there.
     const lvgl_port_cfg_t port_cfg = {
         .task_priority = 4,
         .task_stack = 8192,
-        .task_affinity = 0,           // keep LVGL off core 1 (LiveKit media)
+        .task_affinity = 1,
         .task_max_sleep_ms = 500,
-        .timer_period_ms = 10,
+        .timer_period_ms = 20,
     };
     ESP_ERROR_CHECK(lvgl_port_init(&port_cfg));
 
     const lvgl_port_display_cfg_t disp_cfg = {
         .io_handle = io_handle,
         .panel_handle = panel,
+        // Single small draw buffer in INTERNAL DMA RAM: a PSRAM buffer
+        // forces spi_master to allocate a transfer-sized internal bounce
+        // buffer on every flush, which failed (and wedged LVGL) once
+        // WiFi + the LiveKit engine had claimed internal heap.
         .buffer_size = LCD_V_RES * LCD_DRAW_BUF_H,
-        .double_buffer = true,
+        .double_buffer = false,
         .hres = LCD_V_RES,            // 320 (landscape)
         .vres = LCD_H_RES,            // 172
         .monochrome = false,
@@ -429,7 +453,7 @@ static void display_init(void)
         },
         .flags = {
             .buff_dma = true,
-            .buff_spiram = true,
+            .buff_spiram = false,
             .swap_bytes = true,
         },
     };
@@ -514,7 +538,7 @@ void ui_init(void)
     backlight_set(80);
 
     s_queue = xQueueCreate(16, sizeof(ui_event_t));
-    xTaskCreatePinnedToCore(ui_task, "ui_events", 4096, NULL, 4, NULL, 0);
+    xTaskCreatePinnedToCore(ui_task, "ui_events", 4096, NULL, 4, NULL, 1);
     ESP_LOGI(TAG, "UI ready (320x172 landscape)");
 }
 

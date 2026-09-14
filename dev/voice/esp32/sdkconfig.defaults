@@ -12,6 +12,10 @@ CONFIG_LK_SERVER_URL="ws://192.168.50.17:7880"
 # (example_utils stops retrying and nothing restarts it).
 CONFIG_LK_EXAMPLE_NETWORK_MAX_RETRIES=-1
 
+# ICE candidate bursts overflowed the engine's event queue during connect
+# ("Failed to enqueue event") — give it headroom.
+CONFIG_LK_ENGINE_QUEUE_SIZE=32
+
 #
 # LiveKit SDK requirements (from the custom_hardware example — keep verbatim)
 #
@@ -42,9 +46,16 @@ CONFIG_SPIRAM=y
 CONFIG_SPIRAM_MODE_OCT=y
 CONFIG_SPIRAM_SPEED_80M=y
 CONFIG_SPIRAM_FETCH_INSTRUCTIONS=y
-CONFIG_SPIRAM_RODATA=y
+# NOTE: deliberately NOT setting CONFIG_SPIRAM_RODATA (the Waveshare demo
+# does): it moves the esp-sr AEC's FFT coefficient tables into octal PSRAM,
+# and the resulting data-cache thrash made AEC slower than real time —
+# buffer_in/afe_feed pegged CPU0 and starved the idle task. The LiveKit
+# reference configs omit it too.
 CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=256
-CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=8192
+# Larger internal cushion than the LiveKit examples (8192): this firmware
+# also runs LVGL, and engine bring-up died of internal-heap exhaustion with
+# the small reserve.
+CONFIG_SPIRAM_MALLOC_RESERVE_INTERNAL=32768
 CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
 CONFIG_SPIRAM_USE_MALLOC=y
 
@@ -53,3 +64,7 @@ CONFIG_SPIRAM_USE_MALLOC=y
 #
 CONFIG_LV_FONT_MONTSERRAT_20=y
 CONFIG_LV_BUILD_EXAMPLES=n
+# LVGL's pool is plain internal RAM; the default 64K starved the LiveKit
+# engine (FreeRTOS queues/task stacks are internal-only) — the status UI
+# needs far less.
+CONFIG_LV_MEM_SIZE_KILOBYTES=24

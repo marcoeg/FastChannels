@@ -112,6 +112,25 @@ review of the IDF I2S driver:
   playback and capture at the same 64-bit frame no matter which side opens
   first.
 
+Hardware bring-up findings (2026-09-14, all encoded in the tree):
+
+- **Internal RAM is the scarce resource.** LVGL's pool is capped at 24 KB,
+  the draw buffer is one small internal-DMA strip (a PSRAM buffer forces a
+  32 KB internal bounce alloc per SPI flush, which failed under load and
+  wedged LVGL), and `SPIRAM_MALLOC_RESERVE_INTERNAL=32768`. `main.c` logs
+  internal/DMA heap at each init stage — watch those lines on any change.
+- **Never set `CONFIG_SPIRAM_RODATA`** (the Waveshare demo does): it puts
+  the esp-sr AEC's FFT tables in octal PSRAM and AEC drops below real time,
+  pegging core 0.
+- **No LVGL drop shadows.** The software-rendered shadow blur on the 84 px
+  orb alone starved a core (task_wdt); active states use a bright border.
+- **UI tasks live on core 1** — core 0 is owned by AFE/AEC + WiFi/lwip.
+- **The server must advertise few ICE candidates**: esp_peer caps remote
+  candidates at 10 (hard limit, precompiled lib). `dev/voice/livekit.yaml`
+  restricts candidates to `enp44s0` + `192.168.50.0/24`; without that, the
+  host-networking docker bridges plus 8 IPv6 ULA addresses flooded the list
+  and DTLS never came up.
+
 ## Known limitations
 
 - The SDK subscribes to **one** remote audio track — the reason the

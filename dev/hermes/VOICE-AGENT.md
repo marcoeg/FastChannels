@@ -223,6 +223,12 @@ voice. Backend-side contract:
   listening/thinking/speaking display — nothing else consumes the topic.
 - Echo cancellation runs on-device (esp-sr AFE with the board's hardware
   DAC→ES7210 loopback), so barge-in works like the browser client.
+- **livekit.yaml (git-excluded) now restricts ICE candidates** to interface
+  `enp44s0` + `ips.includes 192.168.50.0/24`. This is load-bearing for the
+  satellite: its esp_peer stack hard-caps remote candidates at 10, and the
+  docker bridges + IPv6 ULA addresses otherwise flood the list and DTLS
+  never completes. If livekit.yaml is ever recreated, restore that block
+  (it is commented inline).
 
 ## Relationship to Hermes
 
