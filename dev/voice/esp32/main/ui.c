@@ -337,35 +337,22 @@ static void build_screen(void)
 // Display / touch bring-up
 // ---------------------------------------------------------------------------
 
+// Bring-up: plain GPIO drive instead of LEDC PWM — removes any PWM-config
+// doubt while diagnosing a dark panel. Restore the demo's LEDC dimming
+// (13-bit @5 kHz, duty 8191-81*(100-x)) once the display is proven.
 static void backlight_init(void)
 {
-    ledc_timer_config_t timer_cfg = {
-        .speed_mode = LEDC_LOW_SPEED_MODE,
-        .duty_resolution = LEDC_TIMER_13_BIT,
-        .timer_num = LEDC_TIMER_0,
-        .freq_hz = 5000,
-        .clk_cfg = LEDC_AUTO_CLK,
+    gpio_config_t cfg = {
+        .pin_bit_mask = 1ULL << LCD_GPIO_BL,
+        .mode = GPIO_MODE_OUTPUT,
     };
-    ESP_ERROR_CHECK(ledc_timer_config(&timer_cfg));
-
-    ledc_channel_config_t chan_cfg = {
-        .gpio_num = LCD_GPIO_BL,
-        .speed_mode = LEDC_LOW_SPEED_MODE,
-        .channel = LEDC_CHANNEL_0,
-        .timer_sel = LEDC_TIMER_0,
-        .duty = 0,
-        .hpoint = 0,
-    };
-    ESP_ERROR_CHECK(ledc_channel_config(&chan_cfg));
+    ESP_ERROR_CHECK(gpio_config(&cfg));
+    gpio_set_level(LCD_GPIO_BL, 1);   // on immediately, full brightness
 }
 
 static void backlight_set(int percent)
 {
-    // Same duty curve as the Waveshare demo: usable range is the top of the
-    // 13-bit scale; 0 turns the backlight fully off.
-    uint32_t duty = (percent <= 0) ? 0 : 8191 - 81 * (100 - percent);
-    ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, duty);
-    ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0);
+    gpio_set_level(LCD_GPIO_BL, percent > 0 ? 1 : 0);
 }
 
 static void expander_pulse(esp_io_expander_pin_num_t pin, int low_ms, int high_ms)
@@ -528,14 +515,20 @@ void ui_init(void)
     backlight_init();
     display_init();
 
+    // Bring-up diagnostic: flood the panel white for 1.5 s before drawing
+    // the UI. If the screen stays dark through this, the problem is
+    // backlight power or the panel itself — not rendering.
+    if (lvgl_port_lock(0)) {
+        lv_obj_set_style_bg_color(lv_screen_active(), lv_color_hex(0xFFFFFF), 0);
+        lvgl_port_unlock();
+    }
+    ESP_LOGI(TAG, "screen should now be WHITE");
+    vTaskDelay(pdMS_TO_TICKS(1500));
+
     if (lvgl_port_lock(0)) {
         build_screen();
         lvgl_port_unlock();
     }
-    // Let the LVGL task push the first frame before revealing the panel —
-    // GRAM holds noise after reset.
-    vTaskDelay(pdMS_TO_TICKS(120));
-    backlight_set(80);
 
     s_queue = xQueueCreate(16, sizeof(ui_event_t));
     xTaskCreatePinnedToCore(ui_task, "ui_events", 4096, NULL, 4, NULL, 1);

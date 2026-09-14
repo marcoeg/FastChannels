@@ -208,10 +208,10 @@ static esp_err_t init_es8311(void)
         .ctrl_if    = ctrl,
         .gpio_if    = gpio,
         .pa_pin     = -1,           // PA is on the TCA9555 (EXIO8), not a GPIO
-        // MCLK (GPIO12) is wired to both codecs; ES8311 clocks from it.
-        // If playback misbehaves, Waveshare's own demo runs use_mclk=false
-        // (ES8311 derives its clock from BCLK instead) — proven fallback.
-        .use_mclk   = true,
+        // Clock from BCLK, not MCLK — Waveshare's proven setting for this
+        // board (their demos run use_mclk=false at the same 64*fs BCLK).
+        // With use_mclk=true the first live test produced silent playback.
+        .use_mclk   = false,
     };
     const audio_codec_if_t *codec = es8311_codec_new(&codec_cfg);
     ESP_RETURN_ON_FALSE(codec, ESP_FAIL, TAG, "ES8311 codec init failed");
@@ -293,6 +293,36 @@ void board_init(void)
 
     board_set_speaker_enabled(true);
     ESP_LOGI(TAG, "Board init complete — ES8311 (playback) + ES7210 (record) ready");
+}
+
+// Bring-up diagnostic: a short tone straight through esp_codec_dev,
+// bypassing the entire LiveKit/av_render pipeline. Audible beep at boot =
+// codec + PA + speaker wiring are good.
+void board_play_test_tone(void)
+{
+    esp_codec_dev_sample_info_t fs = {
+        .sample_rate = 16000,
+        .channel = 2,
+        .bits_per_sample = 16,
+    };
+    if (esp_codec_dev_open(play_dev, &fs) != ESP_CODEC_DEV_OK) {
+        ESP_LOGE(TAG, "test tone: open failed");
+        return;
+    }
+    enum { FRAMES = 4800 };  // 300 ms
+    int16_t *buf = malloc(FRAMES * 2 * sizeof(int16_t));
+    if (buf) {
+        for (int i = 0; i < FRAMES; i++) {
+            // 500 Hz square-ish tone, comfortable level
+            int16_t v = ((i / 16) % 2) ? 6000 : -6000;
+            buf[2 * i] = v;
+            buf[2 * i + 1] = v;
+        }
+        esp_codec_dev_write(play_dev, buf, FRAMES * 2 * sizeof(int16_t));
+        free(buf);
+        ESP_LOGI(TAG, "test tone played");
+    }
+    esp_codec_dev_close(play_dev);
 }
 
 esp_codec_dev_handle_t get_playback_handle(void) { return play_dev; }

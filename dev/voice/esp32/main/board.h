@@ -29,6 +29,9 @@ esp_io_expander_handle_t board_get_io_expander(void);
 // NS4150B power-amplifier enable (TCA9555 EXIO8, active high).
 void board_set_speaker_enabled(bool enabled);
 
+// Bring-up diagnostic: 300 ms tone straight through the codec (no LiveKit).
+void board_play_test_tone(void);
+
 // Speaker volume 0..100 (esp_codec_dev software+hardware volume).
 void board_set_volume(int volume);
 int  board_get_volume(void);

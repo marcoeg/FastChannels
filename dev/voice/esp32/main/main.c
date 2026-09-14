@@ -37,6 +37,7 @@ void app_main(void)
 
     livekit_system_init();   // must precede any media pipeline setup
     board_init();
+    board_play_test_tone();  // bring-up: audible = speaker path good
     log_heap("after board_init");
     ui_init();
     log_heap("after ui_init");

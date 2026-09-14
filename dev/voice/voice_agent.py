@@ -138,7 +138,9 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         # Streaming transcription: transcript finalizes ~0.2 s after speech
         # end instead of ~1 s of post-hoc batch Whisper (measured), and
         # interim transcripts are what lets preemptive generation fire.
-        stt=openai.STT(use_realtime=True),
+        # language pinned: auto-detect turned the satellite's "hi Minny"
+        # into Norwegian ("Hei, Minni") and the agent replied in kind.
+        stt=openai.STT(use_realtime=True, language="en"),
         llm=pai,
         tts=tts,
         # Start LLM AND TTS on the live transcript before the endpointer
