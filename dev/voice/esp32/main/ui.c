@@ -372,7 +372,7 @@ static void display_init(void)
     const spi_bus_config_t bus_cfg = {
         .sclk_io_num = LCD_GPIO_SCLK,
         .mosi_io_num = LCD_GPIO_MOSI,
-        .miso_io_num = GPIO_NUM_NC,
+        .miso_io_num = GPIO_NUM_8,    // LCD_MISO — used only for diagnostics
         .quadwp_io_num = GPIO_NUM_NC,
         .quadhd_io_num = GPIO_NUM_NC,
         // Landscape flush lines are V_RES wide.
@@ -407,6 +407,19 @@ static void display_init(void)
     ESP_ERROR_CHECK(esp_lcd_panel_init(panel));
     ESP_ERROR_CHECK(esp_lcd_panel_invert_color(panel, true));
     ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(panel, true));
+
+    // Bring-up diagnostic: read the controller's ID (RDDID 0x04) and status
+    // (RDDST 0x09) back over MISO. A sane, non-00/FF answer proves the SPI
+    // link and panel logic are alive (=> dark screen is backlight power);
+    // all-zeros/FF means the ribbon's data contacts aren't landing.
+    {
+        uint8_t id[4] = {0}, st[5] = {0};
+        esp_err_t r1 = esp_lcd_panel_io_rx_param(io_handle, 0x04, id, sizeof(id));
+        esp_err_t r2 = esp_lcd_panel_io_rx_param(io_handle, 0x09, st, sizeof(st));
+        ESP_LOGI(TAG, "panel RDDID(%s): %02X %02X %02X %02X | RDDST(%s): %02X %02X %02X %02X %02X",
+                 esp_err_to_name(r1), id[0], id[1], id[2], id[3],
+                 esp_err_to_name(r2), st[0], st[1], st[2], st[3], st[4]);
+    }
 
     // Core 1: the AFE/AEC + WiFi + lwip saturate core 0 (measured — IDLE0
     // watchdog), while core 1 (Opus encode, peer tasks) has headroom. LVGL
