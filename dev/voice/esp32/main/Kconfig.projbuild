@@ -1,0 +1,32 @@
+menu "Minny Satellite"
+
+    config LK_SERVER_URL
+        string "LiveKit server URL"
+        default "ws://192.168.50.17:7880"
+        help
+            Plain ws:// works for the self-hosted livekit-server on the LAN;
+            the caddy TLS front on :8443 is only needed by browsers.
+
+    config LK_TOKEN
+        string "LiveKit room token (JWT)"
+        default ""
+        help
+            Long-lived token minted by gen_secrets.py (identity "esp32",
+            room "voice"). Set via sdkconfig.secrets.defaults, not here.
+
+    config SPEAKER_VOLUME
+        int "Default speaker volume (0-100)"
+        default 70
+        range 0 100
+        help
+            Initial volume; the touch UI adjusts and persists it in NVS.
+
+    config MIC_GAIN_DB
+        int "Microphone analog gain (dB)"
+        default 30
+        range 0 37
+        help
+            ES7210 input gain. 30 dB matches both the LiveKit example and
+            Waveshare's demos for these mics.
+
+endmenu

@@ -1,0 +1,27 @@
+dependencies:
+  idf: ">=5.5"
+
+  # LiveKit client SDK — built from the pinned clone at
+  # ~/esp/client-sdk-esp32 (main @ e0616ef) rather than registry 0.3.10:
+  # the release still vendors nanopb ~0.4.9, whose FT_IGNORE skip bug breaks
+  # signal decoding against self-hosted livekit-server (SDK issue #86);
+  # main carries the 0.4.9.2 bump. Re-pin to the registry once >0.3.10 ships.
+  livekit/livekit:
+    version: "0.3.10"
+    override_path: "/home/marco/esp/client-sdk-esp32/components/livekit"
+  livekit/example_utils:
+    version: "~0.2.0"
+    override_path: "/home/marco/esp/client-sdk-esp32/components/example_utils"
+
+  # Audio codecs (same pair as the SDK's custom_hardware example)
+  espressif/esp_codec_dev: "~1.4"
+  espressif/es8311: "*"
+  espressif/es7210: "*"
+
+  # Display / touch / UI
+  espressif/esp_lvgl_port: "^2.6.0"
+  lvgl/lvgl:
+    version: "9.3.*"
+    public: true
+  espressif/esp_lcd_touch: "^1.1.2"
+  espressif/esp_io_expander_tca95xx_16bit: "^2.0.1"
