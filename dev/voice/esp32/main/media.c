@@ -36,15 +36,33 @@ typedef struct {
 static capture_system_t  capturer_system;
 static renderer_system_t renderer_system;
 
+// Bring-up diagnostic: AUDIO_RENDERED fires on the FIRST incoming frame —
+// its presence/absence splits "no audio arrives from the room" from
+// "audio arrives but the codec write path is silent".
+static int render_event_cb(av_render_event_t event, void *ctx)
+{
+    ESP_LOGI(TAG, "av_render event: %d%s", event,
+             event == AV_RENDER_EVENT_AUDIO_RENDERED ? " (first audio frame arrived)" :
+             event == AV_RENDER_EVENT_AUDIO_DECODE_ERR ? " (AUDIO DECODE ERROR)" : "");
+    return 0;
+}
+
 static int build_capturer_system(void)
 {
     esp_codec_dev_handle_t record_handle = get_record_handle();
     NULL_CHECK(record_handle, "Failed to get record handle");
 
-    // 4 TDM slots on the wire; hardware slot mask picks 0+1 = mic + AEC ref.
+    // channel=2 on purpose: the ES7210 emits 4 TDM slots, but slots 0+1 are
+    // mic (MIC1) + hardware AEC reference (MIC3 loopback) — all the AFE
+    // needs. Opening the record device 2-channel keeps the shared full-
+    // duplex bus at 2x16-bit slots (512 kHz BCLK), the same geometry the
+    // ES8311 playback clocking is proven with (boot beep); a 4-channel open
+    // forces 32-bit slots (1.024 MHz) and playback goes silent. The ES7210,
+    // as slave, simply restarts from slot 0 each frame — slots 2/3 (second
+    // mic, n/c) are truncated off the wire.
     esp_capture_audio_aec_src_cfg_t codec_cfg = {
         .record_handle = record_handle,
-        .channel = 4,
+        .channel = 2,
         .channel_mask = 1 | 2,
     };
     capturer_system.audio_source = esp_capture_new_audio_aec_src(&codec_cfg);
@@ -78,6 +96,7 @@ static int build_renderer_system(void)
     };
     renderer_system.av_renderer_handle = av_render_open(&render_cfg);
     NULL_CHECK(renderer_system.av_renderer_handle, "Failed to create AV renderer");
+    av_render_set_event_cb(renderer_system.av_renderer_handle, render_event_cb, NULL);
 
     av_render_audio_frame_info_t frame_info = {
         .sample_rate = 16000,
