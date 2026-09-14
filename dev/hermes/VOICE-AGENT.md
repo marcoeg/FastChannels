@@ -201,6 +201,29 @@ imports sounddevice even in text mode — no PortAudio on this host):
   never written; standing instructions (always/never/favorite/…) always
   are; tune-by-name passes through (repetition is the preference signal).
 
+## Hardware satellite (dev/voice/esp32)
+
+A Waveshare ESP32-S3-AUDIO-Board + 1.47" touch LCD joins its own room
+**`speaker`** as a dedicated mic/speaker/status terminal (LiveKit ESP32 SDK
+on ESP-IDF 5.5; full runbook in `dev/voice/esp32/README.md`). Own room
+because the ESP32 SDK subscribes to exactly ONE remote audio track — in a
+shared room it could latch onto the phone's mic instead of the agent's
+voice. Backend-side contract:
+
+- It connects to **plain `ws://<host>:7880`** (no caddy, no CA import) with
+  a long-lived token from `dev/voice/esp32/gen_secrets.py` (identity
+  `esp32`, room `speaker`, 365 d — re-mint + reflash yearly).
+- The spoken welcome is **gated to room `voice`** in voice_agent.py: the
+  satellite sits in `speaker` 24/7, so an ungated welcome would replay
+  through its loudspeaker on every worker recycle (04:30 daily).
+- The worker publishes agent-state transitions on the **`agent_state` data
+  topic** (`agent_state_changed` hook in voice_agent.py) because the ESP32
+  SDK speaks protocol v1 and cannot read the `lk.agent.state` participant
+  attribute. Removing that hook silently breaks the device's
+  listening/thinking/speaking display — nothing else consumes the topic.
+- Echo cancellation runs on-device (esp-sr AFE with the board's hardware
+  DAC→ES7210 loopback), so barge-in works like the browser client.
+
 ## Relationship to Hermes
 
 Hermes keeps running for chat/Telegram/etc. with its own memory graph —

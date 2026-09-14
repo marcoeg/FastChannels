@@ -152,6 +152,35 @@ async def entrypoint(ctx: agents.JobContext) -> None:
 
     wire_session_metrics(session)
 
+    # Mirror agent state (listening/thinking/speaking) onto the
+    # "agent_state" data topic for hardware clients: the ESP32 satellite
+    # (dev/voice/esp32) cannot read the lk.agent.state participant
+    # attribute — its SDK speaks protocol v1, which predates attributes.
+    @session.on("agent_state_changed")
+    def _on_agent_state(ev) -> None:
+        async def _publish() -> None:
+            try:
+                await ctx.room.local_participant.publish_data(
+                    str(ev.new_state).encode(),
+                    topic="agent_state", reliable=True)
+            except Exception:
+                logger.debug("agent_state publish failed", exc_info=True)
+        asyncio.create_task(_publish())
+
+    # Late joiners (the satellite reconnecting mid-session) missed earlier
+    # transitions — push the current state straight to them.
+    @ctx.room.on("participant_connected")
+    def _on_participant_connected(p) -> None:
+        async def _push() -> None:
+            try:
+                state = getattr(session, "agent_state", None) or "idle"
+                await ctx.room.local_participant.publish_data(
+                    str(state).encode(), topic="agent_state", reliable=True,
+                    destination_identities=[p.identity])
+            except Exception:
+                logger.debug("agent_state push failed", exc_info=True)
+        asyncio.create_task(_push())
+
     # Transcript log (playout truth) + memory writes from the same event.
     last_user = {"text": ""}
 
@@ -210,7 +239,10 @@ async def entrypoint(ctx: agents.JobContext) -> None:
     # instant, deterministic, and immune to model latency. The short sleep
     # lets the phone's audio playback attach so the first words aren't
     # clipped. Reconnects reuse the live session, so no repeat greeting.
-    if os.environ.get("VOICE_WELCOME", "1") == "1":
+    # Room-gated: the ESP32 satellite sits in room "speaker" around the
+    # clock, so a spoken welcome there would replay through the speaker on
+    # every worker recycle (04:30 daily) — its screen shows readiness instead.
+    if os.environ.get("VOICE_WELCOME", "1") == "1" and ctx.room.name == "voice":
         from datetime import datetime
         from zoneinfo import ZoneInfo
         hour = datetime.now(ZoneInfo("America/Los_Angeles")).hour
