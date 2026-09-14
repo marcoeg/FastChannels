@@ -1,0 +1,6 @@
+[Unit]
+Description=Delete LiveKit rooms that have participants but no agent
+
+[Service]
+Type=oneshot
+ExecStart=/home/marco/Development/FastChannels/dev/voice/heal_agentless_rooms.py

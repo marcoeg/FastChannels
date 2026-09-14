@@ -52,22 +52,19 @@ static int build_capturer_system(void)
     esp_codec_dev_handle_t record_handle = get_record_handle();
     NULL_CHECK(record_handle, "Failed to get record handle");
 
-    // channel=2 on purpose: the ES7210 emits 4 TDM slots, but slots 0+1 are
-    // mic (MIC1) + hardware AEC reference (MIC3 loopback) — all the AFE
-    // needs. Opening the record device 2-channel keeps the shared full-
-    // duplex bus at 2x16-bit slots (512 kHz BCLK), the same geometry the
-    // ES8311 playback clocking is proven with (boot beep); a 4-channel open
-    // forces 32-bit slots (1.024 MHz) and playback goes silent. The ES7210,
-    // as slave, simply restarts from slot 0 each frame — slots 2/3 (second
-    // mic, n/c) are truncated off the wire.
+    // Full 4-slot TDM capture is REQUIRED for echo cancellation: in
+    // truncated 2-slot frames the ES7210 falls back to emitting its two
+    // microphones (measured live: AEC then cancels the USER's voice —
+    // speech at -59/-42 dBFS — and lets the agent's own TTS leak back as
+    // user turns). The electrical DAC-loopback reference exists only in
+    // the full stream: slot 0 = reference, slot 1 = MIC1, hence "RM".
+    // The I2S hardware slot mask (1|2) captures just those two.
+    // Playback stays audible at this 32-bit-slot geometry because the
+    // ES8311 clocks from MCLK (see board.c).
     esp_capture_audio_aec_src_cfg_t codec_cfg = {
         .record_handle = record_handle,
-        .channel = 2,
+        .channel = 4,
         .channel_mask = 1 | 2,
-        // Slot order experiment: with the default "MR" the published speech
-        // measured -59 dBFS — the AEC was subtracting the voice from
-        // itself, i.e. the mic actually arrives in slot 1, reference in
-        // slot 0.
         .mic_layout = "RM",
     };
     capturer_system.audio_source = esp_capture_new_audio_aec_src(&codec_cfg);

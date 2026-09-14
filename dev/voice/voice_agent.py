@@ -189,6 +189,21 @@ async def entrypoint(ctx: agents.JobContext) -> None:
                 logger.debug("agent_state push failed", exc_info=True)
         asyncio.create_task(_push())
 
+    # ...and rebroadcast every 10 s regardless: the satellite's state
+    # display rides the data channel, whose one-shot messages are lost
+    # whenever its peer connection recycles. The ticker makes the device's
+    # status ring self-correct within seconds.
+    async def _state_ticker() -> None:
+        while True:
+            await asyncio.sleep(10)
+            try:
+                state = getattr(session, "agent_state", None) or "idle"
+                await ctx.room.local_participant.publish_data(
+                    str(state).encode(), topic="agent_state", reliable=True)
+            except Exception:
+                logger.debug("state ticker publish failed", exc_info=True)
+    asyncio.create_task(_state_ticker())
+
     # Transcript log (playout truth) + memory writes from the same event.
     last_user = {"text": ""}
 

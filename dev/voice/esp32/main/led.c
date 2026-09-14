@@ -1,7 +1,11 @@
 #include "led.h"
 
 #include "esp_log.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 #include "led_strip.h"
+
+static void fill(uint8_t r, uint8_t g, uint8_t b);
 
 static const char *TAG = "led";
 
@@ -18,6 +22,9 @@ void led_init(void)
         .led_model = LED_MODEL_WS2812,
         .color_component_format = LED_STRIP_COLOR_COMPONENT_FMT_GRB,
     };
+    // RMT backend — the configuration that showed correct colors in the
+    // first headless build. (An SPI-backend experiment showed the same
+    // wrong-color symptom, so the backend was not the culprit.)
     led_strip_rmt_config_t rmt_cfg = {
         .resolution_hz = 10 * 1000 * 1000,
     };
@@ -29,15 +36,36 @@ void led_init(void)
     led_strip_clear(s_strip);
 }
 
+// Boot self-test: pure red, green, blue for 1.5 s each. The observed order
+// pins down any color-order/timing remap between driver and LEDs.
+void led_self_test(void)
+{
+    ESP_LOGI(TAG, "self-test: RED");
+    fill(60, 0, 0);
+    vTaskDelay(pdMS_TO_TICKS(1500));
+    ESP_LOGI(TAG, "self-test: GREEN");
+    fill(0, 60, 0);
+    vTaskDelay(pdMS_TO_TICKS(1500));
+    ESP_LOGI(TAG, "self-test: BLUE");
+    fill(0, 0, 60);
+    vTaskDelay(pdMS_TO_TICKS(1500));
+}
+
 static void fill(uint8_t r, uint8_t g, uint8_t b)
 {
+    static uint8_t last_r = 255, last_g = 255, last_b = 255;
     if (s_strip == NULL) {
         return;
     }
     for (int i = 0; i < LED_COUNT; i++) {
         led_strip_set_pixel(s_strip, i, r, g, b);
     }
-    led_strip_refresh(s_strip);
+    esp_err_t err = led_strip_refresh(s_strip);
+    // Log only actual color changes; the 1 Hz repaint stays quiet.
+    if (r != last_r || g != last_g || b != last_b) {
+        ESP_LOGI(TAG, "ring <- %u,%u,%u (%s)", r, g, b, esp_err_to_name(err));
+        last_r = r; last_g = g; last_b = b;
+    }
 }
 
 void led_update(ui_conn_t conn, ui_agent_t agent, bool mic_muted)

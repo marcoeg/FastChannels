@@ -11,6 +11,9 @@ extern "C" {
 // while running headless (no LCD).
 void led_init(void);
 
+// Boot diagnostic: red / green / blue, 1.5 s each.
+void led_self_test(void);
+
 // Recompute and show the ring color from connection + agent state + mute.
 void led_update(ui_conn_t conn, ui_agent_t agent, bool mic_muted);
 

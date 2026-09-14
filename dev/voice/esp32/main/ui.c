@@ -24,6 +24,7 @@
 #include "esp_lcd_panel_ops.h"
 #include "esp_lcd_touch_axs5106.h"
 #include "esp_lvgl_port.h"
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
@@ -507,15 +508,31 @@ static void ui_task(void *arg)
 {
     ui_event_t ev;
     for (;;) {
-        if (xQueueReceive(s_queue, &ev, portMAX_DELAY) != pdTRUE) {
-            continue;
+        // 1 s timeout = periodic repaint: WS2812 frames occasionally get
+        // corrupted (observed: a green write reported OK, ring stayed on
+        // the old color), and event-only painting freezes a glitched frame
+        // forever. The repaint self-heals within a second.
+        bool got_event = xQueueReceive(s_queue, &ev, pdMS_TO_TICKS(1000)) == pdTRUE;
+        // Leak watch: the peer connection has died every ~2-3 minutes in
+        // long sessions — track internal heap to catch exhaustion.
+        static int tick;
+        if (++tick >= 30) {
+            tick = 0;
+            ESP_LOGI(TAG, "heap watch: internal=%u dma=%u",
+                     (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+                     (unsigned)heap_caps_get_free_size(MALLOC_CAP_DMA));
         }
-        switch (ev.kind) {
-            case EV_CONN:  s_conn = (ui_conn_t)ev.value; break;
-            case EV_AGENT: s_agent = (ui_agent_t)ev.value; break;
-            default: break;
+        if (got_event) {
+            switch (ev.kind) {
+                case EV_CONN:  s_conn = (ui_conn_t)ev.value; break;
+                case EV_AGENT: s_agent = (ui_agent_t)ev.value; break;
+                default: break;
+            }
         }
         led_update(s_conn, s_agent, board_get_mic_muted());
+        if (!got_event) {
+            continue;
+        }
         if (!s_headless && lvgl_port_lock(0)) {   // 0 = block until acquired
             render();
             lvgl_port_unlock();
@@ -531,6 +548,7 @@ void ui_init(void)
 {
     volume_load();
     led_init();
+    led_self_test();
     led_update(UI_CONN_BOOT, UI_AGENT_NONE, false);
     s_queue = xQueueCreate(16, sizeof(ui_event_t));
     xTaskCreatePinnedToCore(ui_task, "ui_events", 4096, NULL, 4, NULL, 1);

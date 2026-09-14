@@ -28,6 +28,13 @@ static void log_heap(const char *stage)
 void app_main(void)
 {
     esp_log_level_set("*", ESP_LOG_INFO);
+    // CRITICAL: with no host reading the USB-Serial-JTAG console, log
+    // writes stall the printing task — and esp_peer prints hundreds of
+    // benign "Not found for bind remote" errors inside the ICE hot path.
+    // Unwatched boots wedged at CONNECTING forever; boots with a serial
+    // monitor attached always connected. Filter the flood before it prints.
+    esp_log_level_set("AGENT", ESP_LOG_NONE);
+    esp_log_level_set("livekit_protocol", ESP_LOG_NONE);
 
     esp_err_t err = nvs_flash_init();
     if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {

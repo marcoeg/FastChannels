@@ -1,0 +1,9 @@
+[Unit]
+Description=Periodic agent-less room healing (LiveKit never re-dispatches to a living room)
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=2min
+
+[Install]
+WantedBy=timers.target
