@@ -6,6 +6,8 @@
 CONFIG_IDF_TARGET="esp32s3"
 
 CONFIG_LK_SERVER_URL="ws://192.168.50.17:7880"
+# Louder default: 70 was reported too quiet on the NS4150B/speaker combo.
+CONFIG_SPEAKER_VOLUME=85
 
 # Infinite WiFi retries: with the default 10, a router outage longer than a
 # few seconds permanently bricks the satellite until a power cycle

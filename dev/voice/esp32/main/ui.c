@@ -16,6 +16,7 @@
 
 #include <string.h>
 #include "board.h"
+#include "led.h"
 #include "driver/ledc.h"
 #include "driver/spi_master.h"
 #include "esp_lcd_jd9853.h"
@@ -79,6 +80,9 @@ typedef struct {
 static QueueHandle_t s_queue;
 static ui_conn_t  s_conn  = UI_CONN_BOOT;
 static ui_agent_t s_agent = UI_AGENT_NONE;
+// True when no display module is attached (touch controller absent from
+// the I2C bus): status goes to the LED ring only.
+static bool s_headless;
 
 static lv_display_t *s_disp;
 static lv_obj_t *s_conn_label;
@@ -511,7 +515,8 @@ static void ui_task(void *arg)
             case EV_AGENT: s_agent = (ui_agent_t)ev.value; break;
             default: break;
         }
-        if (lvgl_port_lock(0)) {   // 0 = block until acquired
+        led_update(s_conn, s_agent, board_get_mic_muted());
+        if (!s_headless && lvgl_port_lock(0)) {   // 0 = block until acquired
             render();
             lvgl_port_unlock();
         }
@@ -525,6 +530,21 @@ static void ui_task(void *arg)
 void ui_init(void)
 {
     volume_load();
+    led_init();
+    led_update(UI_CONN_BOOT, UI_AGENT_NONE, false);
+    s_queue = xQueueCreate(16, sizeof(ui_event_t));
+    xTaskCreatePinnedToCore(ui_task, "ui_events", 4096, NULL, 4, NULL, 1);
+
+    // Display auto-detection: the touch controller shares the module's FPC,
+    // so its I2C presence is the "display attached" signal. Without it,
+    // run headless on the LED ring (touch init would otherwise abort).
+    if (i2c_master_probe(board_get_i2c_bus(),
+                         ESP_LCD_TOUCH_IO_I2C_AXS5106_ADDRESS, 100) != ESP_OK) {
+        s_headless = true;
+        ESP_LOGW(TAG, "no display module detected — running headless (LED ring only)");
+        return;
+    }
+
     backlight_init();
     display_init();
 
@@ -542,9 +562,6 @@ void ui_init(void)
         build_screen();
         lvgl_port_unlock();
     }
-
-    s_queue = xQueueCreate(16, sizeof(ui_event_t));
-    xTaskCreatePinnedToCore(ui_task, "ui_events", 4096, NULL, 4, NULL, 1);
     ESP_LOGI(TAG, "UI ready (320x172 landscape)");
 }
 

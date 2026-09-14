@@ -64,6 +64,11 @@ static int build_capturer_system(void)
         .record_handle = record_handle,
         .channel = 2,
         .channel_mask = 1 | 2,
+        // Slot order experiment: with the default "MR" the published speech
+        // measured -59 dBFS — the AEC was subtracting the voice from
+        // itself, i.e. the mic actually arrives in slot 1, reference in
+        // slot 0.
+        .mic_layout = "RM",
     };
     capturer_system.audio_source = esp_capture_new_audio_aec_src(&codec_cfg);
     NULL_CHECK(capturer_system.audio_source, "Failed to create audio source");
