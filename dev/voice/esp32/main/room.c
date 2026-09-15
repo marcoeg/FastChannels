@@ -15,6 +15,7 @@
 #include <string.h>
 #include "board.h"
 #include "esp_log.h"
+#include "esp_system.h"   // esp_restart
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "livekit.h"
@@ -115,6 +116,36 @@ static void supervisor_task(void *arg)
             ESP_LOGI(TAG, "asleep — listening for wake word");
         }
         s_awake_now = want_awake;
+    }
+}
+
+// Capture health watchdog. WakeNet runs inside the capture read path, so if
+// that pipeline dies the device goes deaf to the wake word with no other
+// symptom. This happened overnight: repeated reconnects desynced the shared
+// full-duplex I2S enable state, the AUD_SRC GMF job failed, and capture
+// stopped — heap froze and the wake word stopped working. esp_capture can't
+// cleanly restart just that pipeline, so recover by rebooting: a fresh boot
+// re-inits I2S and comes back asleep in ~15 s. Only fires while CONNECTED (a
+// stall during a reconnect is expected); 30 s with no captured frame is
+// unambiguously a dead pipeline (read_frame runs every 20 ms otherwise).
+static void capture_health_task(void *arg)
+{
+    uint32_t last = wake_frame_ticks();
+    int stalled_ms = 0;
+    for (;;) {
+        vTaskDelay(pdMS_TO_TICKS(5000));
+        uint32_t now = wake_frame_ticks();
+        if (!s_connected || now != last) {
+            last = now;
+            stalled_ms = 0;
+            continue;
+        }
+        stalled_ms += 5000;
+        if (stalled_ms >= 30000) {
+            ESP_LOGE(TAG, "capture pipeline dead %d ms while connected — "
+                          "rebooting to restore the wake word", stalled_ms);
+            esp_restart();
+        }
     }
 }
 
@@ -318,4 +349,8 @@ void room_start(void)
 
     xTaskCreatePinnedToCore(room_task, "room_mgr", 6144, NULL, 5,
                             &room_task_handle, 0);
+
+    // Reboot-to-recover if the capture pipeline ever dies while connected.
+    xTaskCreatePinnedToCore(capture_health_task, "cap_health", 3072, NULL, 4,
+                            NULL, 0);
 }

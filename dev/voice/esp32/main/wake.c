@@ -61,6 +61,12 @@ typedef struct {
 
 static gated_src_t *s_src;   // singleton (one mic)
 
+// Liveness counter: bumped on every read_frame. A stalled counter while the
+// room is connected means the capture/I2S pipeline died (seen after repeated
+// reconnects desynced the shared-bus I2S enable state) — the supervisor's
+// health watchdog reboots on that, since WakeNet lives in this read path.
+static volatile uint32_t s_frame_ticks;
+
 // ---- esp_capture_audio_src_if (mirrors capture_audio_dev_src.c) ----------
 
 static esp_capture_err_t src_open(esp_capture_audio_src_if_t *h)
@@ -193,6 +199,7 @@ static esp_capture_err_t src_read_frame(esp_capture_audio_src_if_t *h,
     frame->pts = s->frame_num * samples * 1000 /
                  (s->info.sample_rate ? s->info.sample_rate : 16000);
     s->frame_num++;
+    s_frame_ticks++;   // liveness for the capture health watchdog
     return ESP_CAPTURE_ERR_OK;
 }
 
@@ -287,4 +294,9 @@ void wake_set_awake(bool awake)
 bool wake_is_gated(void)
 {
     return s_src != NULL && s_src->wn != NULL;
+}
+
+uint32_t wake_frame_ticks(void)
+{
+    return s_frame_ticks;
 }

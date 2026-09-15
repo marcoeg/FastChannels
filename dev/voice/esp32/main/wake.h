@@ -1,6 +1,7 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stdint.h>
 #include "esp_capture_audio_src_if.h"
 #include "esp_codec_dev.h"
 
@@ -29,6 +30,11 @@ void wake_set_awake(bool awake);
 
 // True if wake gating is active (a model loaded).
 bool wake_is_gated(void);
+
+// Monotonic count of capture frames read — bumped on every read_frame. Used by
+// the capture health watchdog to detect a dead pipeline (a stalled count while
+// connected means WakeNet has stopped running).
+uint32_t wake_frame_ticks(void);
 
 #ifdef __cplusplus
 }
