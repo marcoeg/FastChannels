@@ -85,7 +85,8 @@ void led_update(ui_conn_t conn, ui_agent_t agent, bool mic_muted)
         default: break;
     }
     switch (agent) {
-        case UI_AGENT_LISTENING: fill(0, 55, 18);  break;  // green
+        case UI_AGENT_LISTENING: fill(0, 60, 0);   break;  // pure green (the
+            // blue-tinted 0,55,18 read as violet on the ring when idle)
         case UI_AGENT_THINKING:  fill(55, 30, 0);  break;  // amber
         case UI_AGENT_SPEAKING:  fill(10, 25, 70); break;  // blue
         case UI_AGENT_NONE:      fill(20, 12, 0);  break;  // dim amber: no agent yet

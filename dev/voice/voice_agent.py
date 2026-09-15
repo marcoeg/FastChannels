@@ -133,6 +133,20 @@ async def entrypoint(ctx: agents.JobContext) -> None:
     else:
         tts = openai.TTS()
 
+    # Interruption / barge-in is per ROOM, not global. The browser/phone
+    # (room "voice") has real client-side echo cancellation, so it keeps full
+    # full-duplex async conversation — interrupt Minny any time. Only the
+    # ESP32 satellite (room "speaker"), which has NO on-device echo
+    # cancellation, runs half-duplex (interruption off + discard mic while
+    # speaking) so it doesn't transcribe and loop on its own voice.
+    is_satellite = ctx.room.name == "speaker"
+    turn_handling = {
+        "preemptive_generation": {"enabled": True, "preemptive_tts": False},
+    }
+    if is_satellite:
+        turn_handling["interruption"] = {
+            "enabled": False, "discard_audio_if_uninterruptible": True}
+
     session = AgentSession(
         vad=ctx.proc.userdata.get("vad") or silero.VAD.load(),
         # Streaming transcription: transcript finalizes ~0.2 s after speech
@@ -153,19 +167,7 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         # commits the turn — overlaps model TTFT + TTS TTFB with the
         # silence-detection wait. Discarded preemptive synthesis on a
         # mid-sentence pause costs pennies on flash-tier TTS.
-        turn_handling={
-            "preemptive_generation": {"enabled": True, "preemptive_tts": False},
-            # Half-duplex on the ESP32 satellite: its on-device echo
-            # cancellation does not remove Minny's own voice from the mic,
-            # so full-duplex makes her transcribe herself and loop. With
-            # interruption disabled, audio captured while she speaks is
-            # discarded, breaking the loop. Cost: no barge-in until the
-            # hardware AEC channel mapping is fixed. The browser/phone in
-            # room "voice" is unaffected (this is the shared default; revisit
-            # if barge-in there regresses).
-            "interruption": {"enabled": False,
-                             "discard_audio_if_uninterruptible": True},
-        },
+        turn_handling=turn_handling,
     )
 
     wire_session_metrics(session)
