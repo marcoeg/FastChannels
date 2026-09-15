@@ -20,7 +20,11 @@ void led_init(void)
         .strip_gpio_num = LED_GPIO,
         .max_leds = LED_COUNT,
         .led_model = LED_MODEL_WS2812,
-        .color_component_format = LED_STRIP_COLOR_COMPONENT_FMT_GRB,
+        // This board's ring is wired RGB order, not the usual WS2812 GRB.
+        // Verified empirically: with GRB, listening(0,60,0) showed red,
+        // thinking(55,30,0) showed green, speaking(10,25,70) showed blue —
+        // exactly a red/green byte swap. RGB makes all three correct.
+        .color_component_format = LED_STRIP_COLOR_COMPONENT_FMT_RGB,
     };
     // RMT backend — the configuration that showed correct colors in the
     // first headless build. (An SPI-backend experiment showed the same
