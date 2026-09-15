@@ -174,6 +174,17 @@ async def entrypoint(ctx: agents.JobContext) -> None:
     # "agent_state" data topic for hardware clients: the ESP32 satellite
     # (dev/voice/esp32) cannot read the lk.agent.state participant
     # attribute — its SDK speaks protocol v1, which predates attributes.
+    # Echo-tail guard for the ESP32 satellite: it has no on-device echo
+    # cancellation, so when Minny stops "speaking" the device's speaker is
+    # still draining the last ~0.5 s of her audio into the open mic, which
+    # STT transcribes (e.g. the tail of "Hi, what would you like to watch"
+    # comes back as "hi Minny") and loops. On the speaking->listening edge,
+    # mute the mic input for a cooldown covering that drain, then re-enable.
+    # Only for the "speaker" room; the browser/phone room "voice" has real
+    # AEC and keeps full barge-in.
+    ECHO_COOLDOWN_S = 1.0
+    _cooldown_task: dict = {}
+
     @session.on("agent_state_changed")
     def _on_agent_state(ev) -> None:
         async def _publish() -> None:
@@ -184,6 +195,19 @@ async def entrypoint(ctx: agents.JobContext) -> None:
             except Exception:
                 logger.debug("agent_state publish failed", exc_info=True)
         asyncio.create_task(_publish())
+
+        if ctx.room.name == "speaker" and \
+                str(ev.old_state) == "speaking" and str(ev.new_state) == "listening":
+            async def _cooldown() -> None:
+                try:
+                    session.input.set_audio_enabled(False)
+                    await asyncio.sleep(ECHO_COOLDOWN_S)
+                finally:
+                    session.input.set_audio_enabled(True)
+            old = _cooldown_task.get("t")
+            if old and not old.done():
+                old.cancel()
+            _cooldown_task["t"] = asyncio.create_task(_cooldown())
 
     # Late joiners (the satellite reconnecting mid-session) missed earlier
     # transitions — push the current state straight to them.

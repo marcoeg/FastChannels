@@ -1,11 +1,17 @@
 // Capture and render pipelines, from the LiveKit custom_hardware example.
 //
-// Capture: esp_capture AEC source wraps the ES7210 record device and runs
-// the esp-sr AFE (low-cost mode) for echo cancellation, producing 16 kHz
-// mono 16-bit for the Opus encoder. On the ESP32-S3-AUDIO-Board the ES7210
-// TDM wire order is slot0=MIC1, slot1=MIC3 (the hardware loopback of the
-// ES8311 output), so channel_mask 1|2 captures exactly [mic, reference] via
-// the I2S hardware slot mask and the AFE's default "MR" layout applies.
+// Capture: PLAIN codec source (esp_capture_new_audio_dev_src) — raw PCM
+// straight from the ES7210 to the Opus encoder, no esp-sr AFE.
+//
+// The AFE (acoustic front-end / echo canceller) was removed after a JTAG
+// halt of a wedged board showed a hard deadlock in the media pipeline with
+// the AFE's tasks (buffer_in / afe_fetch) in the stall and the whole system
+// spinning on kernel locks. The agent runs half-duplex, so on-device echo
+// cancellation is not needed; dropping the AFE removes both the deadlock
+// suspect and an unused, heavy component. The dev_src opens the record
+// device at the Opus format (16 kHz mono), which esp_codec_dev serves from
+// slot 0 (MIC1) at the same 2x16-bit slot geometry that keeps playback
+// audible on this shared full-duplex bus.
 
 #include "esp_check.h"
 #include "esp_log.h"
@@ -52,21 +58,10 @@ static int build_capturer_system(void)
     esp_codec_dev_handle_t record_handle = get_record_handle();
     NULL_CHECK(record_handle, "Failed to get record handle");
 
-    // 2-slot capture: keeps the shared full-duplex bus at 2x16-bit slots,
-    // the only geometry with confirmed-audible playback on this board. On-
-    // device echo cancellation is intentionally NOT relied upon (its
-    // channel mapping was never verified and it silenced/mangled the mic);
-    // the agent runs half-duplex instead (discards mic while speaking), so
-    // no hardware AEC is needed for a working, non-looping device.
-    // slot 0 = MIC1, slot 1 = the DAC loopback; "RM" keeps the AFE's
-    // residual processing sane even though barge-in is off.
-    esp_capture_audio_aec_src_cfg_t codec_cfg = {
+    esp_capture_audio_dev_src_cfg_t codec_cfg = {
         .record_handle = record_handle,
-        .channel = 2,
-        .channel_mask = 1 | 2,
-        .mic_layout = "RM",
     };
-    capturer_system.audio_source = esp_capture_new_audio_aec_src(&codec_cfg);
+    capturer_system.audio_source = esp_capture_new_audio_dev_src(&codec_cfg);
     NULL_CHECK(capturer_system.audio_source, "Failed to create audio source");
 
     esp_capture_cfg_t cfg = {
@@ -89,11 +84,19 @@ static int build_renderer_system(void)
     renderer_system.audio_renderer = av_render_alloc_i2s_render(&i2s_cfg);
     NULL_CHECK(renderer_system.audio_renderer, "Failed to create I2S renderer");
 
+    // Small playout buffers on purpose. The SDK example uses 100 KB (~3 s at
+    // 16 kHz mono) to ride out internet jitter, but on a 2 ms LAN that just
+    // adds playout latency — and with no AFE, that latency IS the echo
+    // window: the agent finishes "speaking" while 3 s of her audio is still
+    // draining to the speaker, the hot mic hears it, and she transcribes
+    // herself. ~0.5 s render / ~0.25 s raw keeps LAN playback smooth while
+    // aligning "done speaking" with actual audio-out so half-duplex can
+    // suppress the echo.
     av_render_cfg_t render_cfg = {
         .audio_render = renderer_system.audio_renderer,
-        .audio_raw_fifo_size = 8 * 4096,
-        .audio_render_fifo_size = 100 * 1024,
-        .allow_drop_data = false,
+        .audio_raw_fifo_size = 8 * 1024,
+        .audio_render_fifo_size = 16 * 1024,
+        .allow_drop_data = true,
     };
     renderer_system.av_renderer_handle = av_render_open(&render_cfg);
     NULL_CHECK(renderer_system.av_renderer_handle, "Failed to create AV renderer");
