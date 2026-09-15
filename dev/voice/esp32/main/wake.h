@@ -1,31 +1,34 @@
 #pragma once
 
-#include "esp_err.h"
+#include <stdbool.h>
+#include "esp_capture_audio_src_if.h"
+#include "esp_codec_dev.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-// Called from the WakeNet task when the wake word ("Hey Wanda") is detected.
-// The detector has already released the microphone by the time this fires, so
-// the callback (or whatever it notifies) may immediately hand the mic to the
-// publish path via esp_capture_start(). Keep it lightweight — it runs on the
-// WakeNet task.
+// Called (on the capture thread) when the wake word is detected. Keep it
+// lightweight — it should just kick the supervisor (chime + LED). The source
+// is already AWAKE (publishing real audio) by the time this fires.
 typedef void (*wake_detected_cb_t)(void *ctx);
 
-// Load the WakeNet model and spawn the (initially paused) detector task.
-// Must be called after board_init() (the record codec must exist). Returns
-// ESP_ERR_NOT_FOUND if the model partition/model is missing.
-esp_err_t wake_init(wake_detected_cb_t cb, void *ctx);
+// Create the gated capture source that wraps the record device: it publishes
+// silence while asleep (running WakeNet on the real mic) and real audio once
+// woken. Pass the result as esp_capture's audio source. If the wake model is
+// missing it runs always-awake. Returns NULL on allocation failure.
+esp_capture_audio_src_if_t *wake_create_source(esp_codec_dev_handle_t record);
 
-// Begin listening for the wake word — the detector OWNS the mic (opens the
-// record device). Call when the device goes ASLEEP. No-op if already listening.
-void wake_listen_start(void);
+// Register the wake-detected callback (after wake_create_source).
+void wake_set_detected_cb(wake_detected_cb_t cb, void *ctx);
 
-// Stop listening and RELEASE the mic (close the record device), so the
-// publish path can open it. Blocks until the mic is actually free. Call
-// before esp_capture_start(). No-op if not listening.
-void wake_listen_stop(void);
+// Set the gate: false = ASLEEP (publish silence + listen for wake word),
+// true = AWAKE (publish real mic). Detection sets it true automatically; the
+// supervisor sets it false after an idle conversation. No-op if ungated.
+void wake_set_awake(bool awake);
+
+// True if wake gating is active (a model loaded).
+bool wake_is_gated(void);
 
 #ifdef __cplusplus
 }

@@ -32,6 +32,9 @@ void board_set_speaker_enabled(bool enabled);
 // Bring-up diagnostic: 300 ms tone straight through the codec (no LiveKit).
 void board_play_test_tone(void);
 
+// Wake chime: a short rising two-note tone, distinct from the boot beep.
+void board_play_wake_chime(void);
+
 // Speaker volume 0..100 (esp_codec_dev software+hardware volume).
 void board_set_volume(int volume);
 int  board_get_volume(void);

@@ -328,6 +328,48 @@ void board_play_test_tone(void)
     esp_codec_dev_close(play_dev);
 }
 
+// Wake chime: two short ascending sine-ish tones — deliberately distinct
+// from the boot beep so a wake never sounds like a reboot.
+//
+// CRITICAL: av_render owns play_dev for the whole session (it opens it once
+// per subscribed audio track — the agent publishes one track, so one open).
+// esp_codec_dev has a single output_opened flag with no refcount, and
+// esp_codec_dev_close() clears it, after which every av_render write returns
+// WRONG_STATE and the agent's reply is silent for the rest of the session.
+// So the chime must NOT close play_dev: it opens it (a no-op when av_render
+// already holds it) and writes, then leaves the device exactly as it found it.
+void board_play_wake_chime(void)
+{
+    esp_codec_dev_sample_info_t fs = {
+        .sample_rate = 16000,
+        .channel = 2,
+        .bits_per_sample = 16,
+    };
+    if (esp_codec_dev_open(play_dev, &fs) != ESP_CODEC_DEV_OK) {
+        return;  // play device unavailable — skip the chime
+    }
+    // ~90 ms at 660 Hz then ~110 ms at 990 Hz (a rising two-note "ding-dong").
+    const int steps[][2] = { {660, 1440}, {990, 1760} };  // {hz, frames}
+    for (int s = 0; s < 2; s++) {
+        int frames = steps[s][1];
+        int period = 16000 / steps[s][0];
+        int16_t *buf = malloc(frames * 2 * sizeof(int16_t));
+        if (!buf) break;
+        for (int i = 0; i < frames; i++) {
+            // Soft square (half amplitude) with a short fade to avoid clicks.
+            int16_t v = ((i % period) < period / 2) ? 4000 : -4000;
+            if (i < 64) v = v * i / 64;
+            if (i > frames - 64) v = v * (frames - i) / 64;
+            buf[2 * i] = v;
+            buf[2 * i + 1] = v;
+        }
+        esp_codec_dev_write(play_dev, buf, frames * 2 * sizeof(int16_t));
+        free(buf);
+    }
+    // Intentionally NO esp_codec_dev_close() — see the note above. av_render
+    // manages play_dev's lifecycle; closing it here silences the agent.
+}
+
 esp_codec_dev_handle_t get_playback_handle(void) { return play_dev; }
 esp_codec_dev_handle_t get_record_handle(void)   { return rec_dev; }
 i2c_master_bus_handle_t board_get_i2c_bus(void)  { return i2c_bus; }

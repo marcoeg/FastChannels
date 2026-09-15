@@ -14,7 +14,6 @@
 
 #include <string.h>
 #include "board.h"
-#include "esp_capture.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -39,21 +38,22 @@ static volatile bool         agent_left_reconnect;
 // -------------------------------------------------------------------------
 // Wake/sleep supervisor.
 //
-// Owns the single-open mic: while ASLEEP the WakeNet detector holds it; while
-// AWAKE the publish path (esp_capture) holds it. Driven by two inputs —
-// whether the room is connected and whether we intend to be asleep — and
-// applied on a dedicated task so the blocking hand-off (wake_listen_stop,
-// esp_capture_start/stop) never runs inside an SDK callback.
+// Capture runs CONTINUOUSLY (the LiveKit engine starts/stops it on connect/
+// disconnect). The gated source (main/wake.c) decides, per frame, whether to
+// publish the real mic or silence — so waking/sleeping is a pure software flag
+// (wake_set_awake), never a mic open/close that would disturb the shared bus.
 //
-// Desired detector-listening = connected && sleep_intent. The detector may
-// only own the mic while connected, otherwise the SDK's auto-start on
-// (re)connect would collide with it.
+// Desired AWAKE = connected && !sleep_intent. Applied on a dedicated task so
+// the chime (board_play_wake_chime blocks ~0.4 s) never runs inside an SDK or
+// capture-thread callback. On the transition to AWAKE the mic is still gated
+// to silence, so the chime is played BEFORE wake_set_awake(true) and is not
+// captured into the published stream.
 // -------------------------------------------------------------------------
 
 static TaskHandle_t  s_sup_task;
 static volatile bool s_connected;
 static volatile bool s_sleep_intent = true;   // start asleep; re-wake after drops
-static bool          s_listening_now;          // supervisor-private mic state
+static bool          s_awake_now;              // supervisor-private gate state
 
 static void sup_notify(void)
 {
@@ -62,8 +62,30 @@ static void sup_notify(void)
     }
 }
 
-// Wake word fired (runs on the WakeNet task — the detector has already freed
-// the mic). Ask the supervisor to go AWAKE.
+// Tell the agent to resume/suspend its STT. While asleep the device still
+// publishes (silence), so the ONLY thing that keeps cloud STT from running on
+// that silent stream — the whole reason for the wake word — is the agent
+// gating its own audio input on these messages. "wake" is sent slightly ahead
+// of opening the mic so the agent's STT is live before real speech arrives.
+static void publish_session(const char *msg)
+{
+    if (room_handle == NULL) {
+        return;
+    }
+    livekit_data_payload_t payload = {
+        .bytes = (uint8_t *)msg,
+        .size = strlen(msg),
+    };
+    livekit_data_publish_options_t opts = {
+        .payload = &payload,
+        .topic = "session",
+        .lossy = false,
+    };
+    livekit_room_publish_data(room_handle, &opts);
+}
+
+// Wake word fired (runs on the AUD_SRC capture thread — the source has latched
+// and is still publishing silence). Ask the supervisor to go AWAKE.
 static void on_wake_word(void *ctx)
 {
     s_sleep_intent = false;
@@ -74,29 +96,25 @@ static void supervisor_task(void *arg)
 {
     for (;;) {
         ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
-        bool want_listen = s_connected && s_sleep_intent;
-        if (want_listen == s_listening_now) {
+        bool want_awake = s_connected && !s_sleep_intent;
+        if (want_awake == s_awake_now) {
             continue;
         }
-        if (want_listen) {
-            // ASLEEP: take the mic from the publish path, give it to WakeNet.
-            esp_capture_stop(media_get_capturer());
-            wake_listen_start();
+        if (want_awake) {
+            // Tell the agent to resume STT first; the chime that follows gives
+            // it ~0.4 s to spin up before the mic gate opens.
+            publish_session("wake");
+            // Mic is still gated to silence here, so the chime is not captured.
+            board_play_wake_chime();       // distinct from the boot beep
+            wake_set_awake(true);          // now publish the real mic
+            ui_post_sleep(false);
+            ESP_LOGI(TAG, "awake — publishing to the agent");
+        } else {
+            wake_set_awake(false);         // publish silence + re-arm detector
             ui_post_sleep(true);
             ESP_LOGI(TAG, "asleep — listening for wake word");
-        } else {
-            // AWAKE (or disconnected): free the detector's mic. If connected,
-            // chime while the mic is idle (so it isn't captured), then hand
-            // the mic to the publish path.
-            wake_listen_stop();
-            if (s_connected) {
-                board_play_test_tone();
-                esp_capture_start(media_get_capturer());
-                ESP_LOGI(TAG, "awake — publishing to the agent");
-            }
-            ui_post_sleep(false);
         }
-        s_listening_now = want_listen;
+        s_awake_now = want_awake;
     }
 }
 
@@ -284,15 +302,18 @@ void room_start(void)
         return;
     }
 
-    // On-device wake word. If the model is missing, fall back to always-on
-    // (no gating) so the device still works rather than staying mute.
-    if (wake_init(on_wake_word, NULL) == ESP_OK) {
+    // On-device wake word. The gated source was created in media_init(); here
+    // we just register the detection callback and, if a model loaded, run the
+    // wake/sleep supervisor. If the model is missing the source publishes the
+    // mic always (no gating) so the device still works rather than staying mute.
+    wake_set_detected_cb(on_wake_word, NULL);
+    if (wake_is_gated()) {
         xTaskCreatePinnedToCore(supervisor_task, "wake_sup", 4096, NULL, 6,
                                 &s_sup_task, 0);
         ui_post_sleep(true);   // show standby until the first connect settles
     } else {
         ESP_LOGW(TAG, "wake word unavailable — running always-on (no gate)");
-        s_sleep_intent = false;   // never gate; publish path owns the mic
+        s_sleep_intent = false;   // never gate; source publishes the mic
     }
 
     xTaskCreatePinnedToCore(room_task, "room_mgr", 6144, NULL, 5,

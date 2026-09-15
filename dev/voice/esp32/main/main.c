@@ -45,7 +45,9 @@ void app_main(void)
 
     livekit_system_init();   // must precede any media pipeline setup
     board_init();
-    board_play_test_tone();  // bring-up: audible = speaker path good
+    // Boot is now silent — the speaker path is proven, and a boot beep is
+    // indistinguishable from the wake chime, which read as "reboots". The
+    // wake chime (board_play_wake_chime) is the only tone the user hears.
     log_heap("after board_init");
     ui_init();
     log_heap("after ui_init");
