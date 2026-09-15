@@ -72,7 +72,7 @@ static const char *TAG = "ui";
 // State model + event queue
 // ---------------------------------------------------------------------------
 
-typedef enum { EV_CONN, EV_AGENT, EV_REFRESH } ev_kind_t;
+typedef enum { EV_CONN, EV_AGENT, EV_SLEEP, EV_REFRESH } ev_kind_t;
 typedef struct {
     ev_kind_t kind;
     int value;
@@ -81,6 +81,7 @@ typedef struct {
 static QueueHandle_t s_queue;
 static ui_conn_t  s_conn  = UI_CONN_BOOT;
 static ui_agent_t s_agent = UI_AGENT_NONE;
+static bool       s_asleep;   // standby: waiting for the wake word
 // True when no display module is attached (touch controller absent from
 // the I2C bus): status goes to the LED ring only.
 static bool s_headless;
@@ -526,10 +527,17 @@ static void ui_task(void *arg)
             switch (ev.kind) {
                 case EV_CONN:  s_conn = (ui_conn_t)ev.value; break;
                 case EV_AGENT: s_agent = (ui_agent_t)ev.value; break;
+                case EV_SLEEP: s_asleep = (bool)ev.value; break;
                 default: break;
             }
         }
-        led_update(s_conn, s_agent, board_get_mic_muted());
+        // Standby overrides the agent-state colors: while asleep the device
+        // isn't acting on the agent's (still-arriving) state ticker.
+        if (s_asleep && s_conn == UI_CONN_CONNECTED) {
+            led_show_asleep();
+        } else {
+            led_update(s_conn, s_agent, board_get_mic_muted());
+        }
         if (!got_event) {
             continue;
         }
@@ -594,3 +602,4 @@ static void post(ev_kind_t kind, int value)
 
 void ui_post_conn(ui_conn_t state)   { post(EV_CONN, state); }
 void ui_post_agent(ui_agent_t state) { post(EV_AGENT, state); }
+void ui_post_sleep(bool asleep)      { post(EV_SLEEP, asleep ? 1 : 0); }

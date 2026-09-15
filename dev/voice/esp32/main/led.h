@@ -17,6 +17,9 @@ void led_self_test(void);
 // Recompute and show the ring color from connection + agent state + mute.
 void led_update(ui_conn_t conn, ui_agent_t agent, bool mic_muted);
 
+// Standby: dim "waiting for wake word" indication.
+void led_show_asleep(void);
+
 #ifdef __cplusplus
 }
 #endif

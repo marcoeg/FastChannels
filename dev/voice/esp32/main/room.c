@@ -13,6 +13,8 @@
 #include "room.h"
 
 #include <string.h>
+#include "board.h"
+#include "esp_capture.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -20,6 +22,7 @@
 
 #include "media.h"
 #include "ui.h"
+#include "wake.h"
 
 static const char *TAG = "room";
 
@@ -33,9 +36,83 @@ static bool                  agent_present;
 // it), so the room task must close + reconnect to hear the next agent job.
 static volatile bool         agent_left_reconnect;
 
+// -------------------------------------------------------------------------
+// Wake/sleep supervisor.
+//
+// Owns the single-open mic: while ASLEEP the WakeNet detector holds it; while
+// AWAKE the publish path (esp_capture) holds it. Driven by two inputs —
+// whether the room is connected and whether we intend to be asleep — and
+// applied on a dedicated task so the blocking hand-off (wake_listen_stop,
+// esp_capture_start/stop) never runs inside an SDK callback.
+//
+// Desired detector-listening = connected && sleep_intent. The detector may
+// only own the mic while connected, otherwise the SDK's auto-start on
+// (re)connect would collide with it.
+// -------------------------------------------------------------------------
+
+static TaskHandle_t  s_sup_task;
+static volatile bool s_connected;
+static volatile bool s_sleep_intent = true;   // start asleep; re-wake after drops
+static bool          s_listening_now;          // supervisor-private mic state
+
+static void sup_notify(void)
+{
+    if (s_sup_task) {
+        xTaskNotifyGive(s_sup_task);
+    }
+}
+
+// Wake word fired (runs on the WakeNet task — the detector has already freed
+// the mic). Ask the supervisor to go AWAKE.
+static void on_wake_word(void *ctx)
+{
+    s_sleep_intent = false;
+    sup_notify();
+}
+
+static void supervisor_task(void *arg)
+{
+    for (;;) {
+        ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+        bool want_listen = s_connected && s_sleep_intent;
+        if (want_listen == s_listening_now) {
+            continue;
+        }
+        if (want_listen) {
+            // ASLEEP: take the mic from the publish path, give it to WakeNet.
+            esp_capture_stop(media_get_capturer());
+            wake_listen_start();
+            ui_post_sleep(true);
+            ESP_LOGI(TAG, "asleep — listening for wake word");
+        } else {
+            // AWAKE (or disconnected): free the detector's mic. If connected,
+            // chime while the mic is idle (so it isn't captured), then hand
+            // the mic to the publish path.
+            wake_listen_stop();
+            if (s_connected) {
+                board_play_test_tone();
+                esp_capture_start(media_get_capturer());
+                ESP_LOGI(TAG, "awake — publishing to the agent");
+            }
+            ui_post_sleep(false);
+        }
+        s_listening_now = want_listen;
+    }
+}
+
 static void on_state_changed(livekit_connection_state_t state, void *ctx)
 {
     ESP_LOGI(TAG, "Room state: %s", livekit_connection_state_str(state));
+
+    // Feed the wake/sleep supervisor. On (re)connect we default to ASLEEP;
+    // any non-connected state releases the detector's mic so the SDK's
+    // auto-start on reconnect can take it, and re-arms sleep-intent so a
+    // fresh wake word is required after a drop.
+    s_connected = (state == LIVEKIT_CONNECTION_STATE_CONNECTED);
+    if (!s_connected) {
+        s_sleep_intent = true;
+    }
+    sup_notify();
 
     switch (state) {
         case LIVEKIT_CONNECTION_STATE_CONNECTED:
@@ -95,7 +172,23 @@ static void on_participant_info(const livekit_participant_info_t *info, void *ct
 
 static void on_data_received(const livekit_data_received_t *data, void *ctx)
 {
-    if (data->topic == NULL || strcmp(data->topic, "agent_state") != 0) {
+    if (data->topic == NULL) {
+        return;
+    }
+    // Agent asks the device to go back to sleep after an idle conversation.
+    if (strcmp(data->topic, "session") == 0) {
+        char msg[16] = {0};
+        size_t n = data->payload.size < sizeof(msg) - 1 ? data->payload.size
+                                                        : sizeof(msg) - 1;
+        memcpy(msg, data->payload.bytes, n);
+        if (strcmp(msg, "sleep") == 0) {
+            ESP_LOGI(TAG, "agent requested sleep");
+            s_sleep_intent = true;
+            sup_notify();
+        }
+        return;
+    }
+    if (strcmp(data->topic, "agent_state") != 0) {
         return;
     }
     char state[24] = {0};
@@ -189,6 +282,17 @@ void room_start(void)
         ESP_LOGE(TAG, "Failed to create room");
         ui_post_conn(UI_CONN_FAILED);
         return;
+    }
+
+    // On-device wake word. If the model is missing, fall back to always-on
+    // (no gating) so the device still works rather than staying mute.
+    if (wake_init(on_wake_word, NULL) == ESP_OK) {
+        xTaskCreatePinnedToCore(supervisor_task, "wake_sup", 4096, NULL, 6,
+                                &s_sup_task, 0);
+        ui_post_sleep(true);   // show standby until the first connect settles
+    } else {
+        ESP_LOGW(TAG, "wake word unavailable — running always-on (no gate)");
+        s_sleep_intent = false;   // never gate; publish path owns the mic
     }
 
     xTaskCreatePinnedToCore(room_task, "room_mgr", 6144, NULL, 5,

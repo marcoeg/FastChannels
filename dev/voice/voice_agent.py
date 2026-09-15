@@ -243,6 +243,13 @@ async def entrypoint(ctx: agents.JobContext) -> None:
     # Transcript log (playout truth) + memory writes from the same event.
     last_user = {"text": ""}
 
+    # Idle-sleep for the ESP32 satellite: it runs an on-device wake word and
+    # only streams while awake, so it relies on the backend (which has real
+    # turn detection) to tell it when to go back to sleep. Track the last user
+    # turn; a watchdog sends "sleep" on the "session" topic after a quiet spell.
+    SLEEP_AFTER_S = 30.0
+    sleep_state = {"last_activity": time.monotonic(), "slept": False}
+
     @session.on("conversation_item_added")
     def _on_item(ev) -> None:
         try:
@@ -259,10 +266,27 @@ async def entrypoint(ctx: agents.JobContext) -> None:
                             room=ctx.room.name)
             if role == "user":
                 last_user["text"] = text
+                sleep_state["last_activity"] = time.monotonic()
+                sleep_state["slept"] = False
             elif role == "assistant" and memory is not None and last_user["text"]:
                 memory.remember(last_user["text"], text, interrupted=interrupted)
         except Exception:  # noqa: BLE001 — logging must never break the pipeline
             logger.debug("conversation_item handler failed", exc_info=True)
+
+    if is_satellite:
+        async def _sleep_watchdog() -> None:
+            while True:
+                await asyncio.sleep(5)
+                idle = time.monotonic() - sleep_state["last_activity"]
+                if idle >= SLEEP_AFTER_S and not sleep_state["slept"]:
+                    try:
+                        await ctx.room.local_participant.publish_data(
+                            b"sleep", topic="session", reliable=True)
+                        sleep_state["slept"] = True
+                        logger.info("satellite idle %.0fs -> sleep", idle)
+                    except Exception:
+                        logger.debug("sleep publish failed", exc_info=True)
+        asyncio.create_task(_sleep_watchdog())
 
     # Prime TLS + priority-tier routing so the first real turn isn't cold.
     if os.environ.get("VOICE_WARMUP", "1") == "1":
@@ -298,12 +322,10 @@ async def entrypoint(ctx: agents.JobContext) -> None:
     # instant, deterministic, and immune to model latency. The short sleep
     # lets the phone's audio playback attach so the first words aren't
     # clipped. Reconnects reuse the live session, so no repeat greeting.
-    # Room-gated: the ESP32 satellite sits in room "speaker" around the
-    # clock, so a spoken welcome there would replay through the speaker on
-    # every worker recycle (04:30 daily) — its screen shows readiness instead.
-    # TEMPORARY: also greet in "speaker" to exercise the device playback path
-    # end-to-end during bring-up.
-    if os.environ.get("VOICE_WELCOME", "1") == "1" and ctx.room.name in ("voice", "speaker"):
+    # Room-gated to "voice" (phone/browser) only: the ESP32 satellite (room
+    # "speaker") stays asleep until its on-device wake word fires and signals
+    # readiness with a local chime, so it must not greet on connect.
+    if os.environ.get("VOICE_WELCOME", "1") == "1" and ctx.room.name == "voice":
         from datetime import datetime
         from zoneinfo import ZoneInfo
         hour = datetime.now(ZoneInfo("America/Los_Angeles")).hour

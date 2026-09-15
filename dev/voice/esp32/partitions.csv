@@ -2,3 +2,5 @@
 nvs,      data, nvs,     0x9000,  0x6000,
 phy_init, data, phy,     0xf000,  0x1000,
 factory,  app,  factory, 0x10000, 6M,
+# esp-sr WakeNet model ("Hey Wanda"); esp_srmodel_init("model") reads this.
+model,    data, spiffs,  ,        1M,

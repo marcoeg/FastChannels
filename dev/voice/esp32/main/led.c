@@ -72,6 +72,11 @@ static void fill(uint8_t r, uint8_t g, uint8_t b)
     }
 }
 
+void led_show_asleep(void)
+{
+    fill(3, 3, 4);   // dim near-white standby glow ("listening for wake word")
+}
+
 void led_update(ui_conn_t conn, ui_agent_t agent, bool mic_muted)
 {
     // Muted trumps everything the user can act on.

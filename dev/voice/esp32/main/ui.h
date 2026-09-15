@@ -1,5 +1,7 @@
 #pragma once
 
+#include <stdbool.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -34,6 +36,11 @@ void ui_init(void);
 // Thread-safe state updates (queued to the UI task; callable from any task).
 void ui_post_conn(ui_conn_t state);
 void ui_post_agent(ui_agent_t state);
+
+// Standby indicator: when asleep, the ring shows a dim "waiting for wake word"
+// state that overrides the agent-state colors (the agent keeps sending its
+// state, but the device isn't listening to it). Callable from any task.
+void ui_post_sleep(bool asleep);
 
 #ifdef __cplusplus
 }

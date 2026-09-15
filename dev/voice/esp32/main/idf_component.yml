@@ -18,6 +18,11 @@ dependencies:
   espressif/es8311: "*"
   espressif/es7210: "*"
 
+  # On-device wake word — standalone WakeNet from esp-sr (main/wake.c).
+  # We use only the WakeNet iface (esp_wn_*), NOT the AFE, to avoid the
+  # PSRAM-stack deadlock that forced the AFE's removal from the capture path.
+  espressif/esp-sr: "~2.1.5"
+
   # Display / touch / UI
   espressif/esp_lvgl_port: "^2.6.0"
   lvgl/lvgl:

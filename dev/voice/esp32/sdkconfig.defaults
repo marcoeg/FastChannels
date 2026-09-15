@@ -62,6 +62,14 @@ CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
 CONFIG_SPIRAM_USE_MALLOC=y
 
 #
+# On-device wake word (esp-sr WakeNet, standalone — NOT the AFE).
+# Only "Hey Wanda" is packed; MultiNet and other wake words stay off
+# (their Kconfig defaults are None/False), keeping srmodels.bin ~300 KB.
+# Model lives in the `model` spiffs partition (partitions.csv).
+#
+CONFIG_SR_WN_WN9_HEYWANDA_TTS=y
+
+#
 # LVGL
 #
 CONFIG_LV_FONT_MONTSERRAT_20=y
