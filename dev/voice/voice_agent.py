@@ -187,6 +187,23 @@ async def entrypoint(ctx: agents.JobContext) -> None:
     ECHO_COOLDOWN_S = 1.0
     _cooldown_task: dict = {}
 
+    # Wake-gated STT for the satellite. The device streams continuously (so its
+    # shared-bus speaker keeps working) and only runs an on-device wake word;
+    # it CANNOT stop sending audio without breaking playback. So the agent is
+    # what keeps cloud STT from running on the silent asleep stream — the whole
+    # point of the wake word: it disables its own audio input while the device
+    # sleeps and re-enables it on the device's "wake" signal. Feeding the STT a
+    # 24/7 silent stream also timed it out ("resetting Realtime STT session")
+    # and dropped the next request. Effective input = awake AND not in the
+    # post-speech echo cooldown. Non-satellite rooms are never gated.
+    mic = {"awake": not is_satellite, "cooldown": False}
+
+    def _apply_mic() -> None:
+        try:
+            session.input.set_audio_enabled(mic["awake"] and not mic["cooldown"])
+        except Exception:
+            logger.debug("set_audio_enabled failed", exc_info=True)
+
     @session.on("agent_state_changed")
     def _on_agent_state(ev) -> None:
         async def _publish() -> None:
@@ -201,11 +218,13 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         if ctx.room.name == "speaker" and \
                 str(ev.old_state) == "speaking" and str(ev.new_state) == "listening":
             async def _cooldown() -> None:
+                mic["cooldown"] = True
+                _apply_mic()
                 try:
-                    session.input.set_audio_enabled(False)
                     await asyncio.sleep(ECHO_COOLDOWN_S)
                 finally:
-                    session.input.set_audio_enabled(True)
+                    mic["cooldown"] = False
+                    _apply_mic()   # re-enable only if still awake
             old = _cooldown_task.get("t")
             if old and not old.done():
                 old.cancel()
@@ -274,6 +293,36 @@ async def entrypoint(ctx: agents.JobContext) -> None:
             logger.debug("conversation_item handler failed", exc_info=True)
 
     if is_satellite:
+        # Device -> agent "wake": the satellite fired its on-device wake word
+        # and is about to stream real speech. Resume STT (it was disabled while
+        # asleep) with enough lead that the first words aren't dropped.
+        @ctx.room.on("data_received")
+        def _on_session_data(packet) -> None:
+            try:
+                if getattr(packet, "topic", None) != "session":
+                    return
+                if bytes(packet.data or b"") != b"wake":
+                    return
+                mic["awake"] = True
+                mic["cooldown"] = False
+                sleep_state["last_activity"] = time.monotonic()
+                sleep_state["slept"] = False
+                _apply_mic()
+                logger.info("satellite wake -> resume STT")
+            except Exception:
+                logger.debug("wake data handler failed", exc_info=True)
+
+        # The satellite reconnects asleep (it re-arms its wake word on every
+        # reconnect). The session persists across the drop, so drop STT here
+        # too — otherwise it runs on the device's silent stream until the
+        # watchdog self-corrects ~30 s later.
+        @ctx.room.on("participant_disconnected")
+        def _on_participant_gone(p) -> None:
+            mic["awake"] = False
+            mic["cooldown"] = False
+            sleep_state["slept"] = True
+            _apply_mic()
+
         async def _sleep_watchdog() -> None:
             while True:
                 await asyncio.sleep(5)
@@ -283,6 +332,8 @@ async def entrypoint(ctx: agents.JobContext) -> None:
                         await ctx.room.local_participant.publish_data(
                             b"sleep", topic="session", reliable=True)
                         sleep_state["slept"] = True
+                        mic["awake"] = False
+                        _apply_mic()   # stop STT — no cloud cost while asleep
                         logger.info("satellite idle %.0fs -> sleep", idle)
                     except Exception:
                         logger.debug("sleep publish failed", exc_info=True)
@@ -317,6 +368,12 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         agent=TvAssistant(pai),
         room_input_options=RoomInputOptions(close_on_disconnect=False),
     )
+
+    # The satellite connects asleep (mic["awake"] starts False): keep STT off
+    # until its first on-device "wake", so cloud STT never runs on the idle
+    # stream. Non-satellite rooms stay fully enabled.
+    if is_satellite:
+        _apply_mic()
 
     # Spoken welcome on fresh sessions: scripted say(), not an LLM turn —
     # instant, deterministic, and immune to model latency. The short sleep
