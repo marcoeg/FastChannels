@@ -155,6 +155,16 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         # mid-sentence pause costs pennies on flash-tier TTS.
         turn_handling={
             "preemptive_generation": {"enabled": True, "preemptive_tts": False},
+            # Half-duplex on the ESP32 satellite: its on-device echo
+            # cancellation does not remove Minny's own voice from the mic,
+            # so full-duplex makes her transcribe herself and loop. With
+            # interruption disabled, audio captured while she speaks is
+            # discarded, breaking the loop. Cost: no barge-in until the
+            # hardware AEC channel mapping is fixed. The browser/phone in
+            # room "voice" is unaffected (this is the shared default; revisit
+            # if barge-in there regresses).
+            "interruption": {"enabled": False,
+                             "discard_audio_if_uninterruptible": True},
         },
     )
 
@@ -265,7 +275,9 @@ async def entrypoint(ctx: agents.JobContext) -> None:
     # Room-gated: the ESP32 satellite sits in room "speaker" around the
     # clock, so a spoken welcome there would replay through the speaker on
     # every worker recycle (04:30 daily) — its screen shows readiness instead.
-    if os.environ.get("VOICE_WELCOME", "1") == "1" and ctx.room.name == "voice":
+    # TEMPORARY: also greet in "speaker" to exercise the device playback path
+    # end-to-end during bring-up.
+    if os.environ.get("VOICE_WELCOME", "1") == "1" and ctx.room.name in ("voice", "speaker"):
         from datetime import datetime
         from zoneinfo import ZoneInfo
         hour = datetime.now(ZoneInfo("America/Los_Angeles")).hour

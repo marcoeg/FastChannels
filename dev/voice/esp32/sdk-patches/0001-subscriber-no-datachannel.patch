@@ -1,0 +1,18 @@
+diff --git a/components/livekit/core/peer.c b/components/livekit/core/peer.c
+index 6827533..c420336 100644
+--- a/components/livekit/core/peer.c
++++ b/components/livekit/core/peer.c
+@@ -306,7 +306,12 @@ peer_err_t peer_create(peer_handle_t *handle, peer_options_t *options)
+         .video_dir = video_dir,
+         .audio_info = options->media->audio_info,
+         .video_info = options->media->video_info,
+-        .enable_data_channel = true,
++        // Only the publisher peer runs a data channel. LiveKit does not run
++        // SCTP on the subscriber connection, so enabling it there makes
++        // esp_peer send SCTP INIT forever with no reply (observed: ~10
++        // INITs/sec, permanent). Remote participant data still arrives over
++        // the publisher connection's bidirectional channels. [local patch]
++        .enable_data_channel = (peer->options.role == PEER_ROLE_PUBLISHER),
+         .manual_ch_create = true,
+         .no_auto_reconnect = false,
+         .extra_cfg = &default_peer_cfg,

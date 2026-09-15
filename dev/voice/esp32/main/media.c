@@ -52,18 +52,17 @@ static int build_capturer_system(void)
     esp_codec_dev_handle_t record_handle = get_record_handle();
     NULL_CHECK(record_handle, "Failed to get record handle");
 
-    // Full 4-slot TDM capture is REQUIRED for echo cancellation: in
-    // truncated 2-slot frames the ES7210 falls back to emitting its two
-    // microphones (measured live: AEC then cancels the USER's voice —
-    // speech at -59/-42 dBFS — and lets the agent's own TTS leak back as
-    // user turns). The electrical DAC-loopback reference exists only in
-    // the full stream: slot 0 = reference, slot 1 = MIC1, hence "RM".
-    // The I2S hardware slot mask (1|2) captures just those two.
-    // Playback stays audible at this 32-bit-slot geometry because the
-    // ES8311 clocks from MCLK (see board.c).
+    // 2-slot capture: keeps the shared full-duplex bus at 2x16-bit slots,
+    // the only geometry with confirmed-audible playback on this board. On-
+    // device echo cancellation is intentionally NOT relied upon (its
+    // channel mapping was never verified and it silenced/mangled the mic);
+    // the agent runs half-duplex instead (discards mic while speaking), so
+    // no hardware AEC is needed for a working, non-looping device.
+    // slot 0 = MIC1, slot 1 = the DAC loopback; "RM" keeps the AFE's
+    // residual processing sane even though barge-in is off.
     esp_capture_audio_aec_src_cfg_t codec_cfg = {
         .record_handle = record_handle,
-        .channel = 4,
+        .channel = 2,
         .channel_mask = 1 | 2,
         .mic_layout = "RM",
     };

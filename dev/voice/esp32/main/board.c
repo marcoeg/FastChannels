@@ -208,12 +208,13 @@ static esp_err_t init_es8311(void)
         .ctrl_if    = ctrl,
         .gpio_if    = gpio,
         .pa_pin     = -1,           // PA is on the TCA9555 (EXIO8), not a GPIO
-        // Clock from MCLK: the capture side needs 4x16-bit TDM frames (the
-        // electrical AEC reference only exists in the full 4-slot stream),
-        // which puts 16-bit data in 32-bit playback slots — a geometry the
-        // BCLK-derived clocking gets wrong (silent DAC, observed live).
-        // MCLK stays at 256*fs regardless of slot width.
-        .use_mclk   = true,
+        // Clock from BCLK (Waveshare's proven setting). Paired with 2-slot
+        // capture (media.c channel=2) this keeps the shared bus at 2x16-bit
+        // slots / 512 kHz BCLK — the ONLY geometry in which playback has
+        // been confirmed audible on this board. Do not raise capture to 4
+        // channels without re-proving playback: that forces 32-bit slots
+        // and silences the DAC.
+        .use_mclk   = false,
     };
     const audio_codec_if_t *codec = es8311_codec_new(&codec_cfg);
     ESP_RETURN_ON_FALSE(codec, ESP_FAIL, TAG, "ES8311 codec init failed");

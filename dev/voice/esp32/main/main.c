@@ -11,6 +11,7 @@
 
 #include "board.h"
 #include "media.h"
+#include "net_log.h"
 #include "room.h"
 #include "ui.h"
 
@@ -64,6 +65,8 @@ void app_main(void)
         return;
     }
     log_heap("after network");
+    net_log_start("192.168.50.17", 5514);
+    log_heap("after net_log");
 
     room_start();
     log_heap("after room_start");
