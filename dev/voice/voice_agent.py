@@ -24,6 +24,7 @@ VOICE_METRICS_LOG, SEMAPHORE_LIMIT, GRAPHITI_TELEMETRY_ENABLED.
 """
 
 import asyncio
+import contextlib
 import json
 import logging
 import os
@@ -97,6 +98,89 @@ def prewarm(proc: JobProcess) -> None:
     proc.userdata["vad"] = silero.VAD.load()
 
 
+# --- Realtime STT session recycle (satellite only) --------------------------
+# OpenAI hard-caps a realtime transcription socket at 60 min. The plugin's own
+# recycle (livekit/plugins/openai/stt.py: `_pool.remove(ws); _reconnect_event
+# .set()`) only runs after a transcript, so an always-on idle satellite never
+# hits it and the socket dies fatally. We drive that SAME reconnect path on a
+# ~50-min timer instead. Every private-attribute touch is guarded: if a plugin
+# upgrade renames these internals, the recycle degrades to a logged no-op
+# rather than crashing the agent (the socket would then age out — the startup
+# probe warns to pin the plugin or fall back to non-realtime STT).
+_STT_RECYCLE_INTERVAL_S = 50 * 60     # comfortably under OpenAI's 60-min cap
+_STT_RECYCLE_BUSY_STEP_S = 30         # if mid-utterance, re-poll...
+_STT_RECYCLE_BUSY_MAX_S = 5 * 60      # ...but never defer past ~55 min
+
+
+def _stt_streams(stt):
+    """Live realtime SpeechStreams held by the STT, or None if the internal
+    is gone (plugin upgrade)."""
+    return getattr(stt, "_streams", None)
+
+
+def _stt_busy(stt) -> bool:
+    """Best-effort: is any live stream mid-utterance? Missing attr -> False."""
+    for s in list(_stt_streams(stt) or []):
+        if getattr(s, "_speaking", False):
+            return True
+    return False
+
+
+def _recycle_realtime_stt(stt) -> bool:
+    """Drive the plugin's own reconnect on every live stream. Returns False if
+    the internals are absent (whole lever unavailable)."""
+    streams = _stt_streams(stt)
+    if streams is None:
+        return False
+    driven = False
+    for s in list(streams):
+        ev = getattr(s, "_reconnect_event", None)
+        if ev is None or not hasattr(ev, "set"):
+            continue
+        # Evict the aged socket so the pool opens a fresh one. Belt-and-braces:
+        # at 50 min the socket already exceeds the pool's 10-min max, so it is
+        # discarded on re-acquire even if this remove() is skipped — the event
+        # is the load-bearing call.
+        pool = getattr(s, "_pool", None)
+        ws = getattr(s, "_ws", None)
+        if pool is not None and ws is not None and hasattr(pool, "remove"):
+            try:
+                pool.remove(ws)
+            except Exception:
+                logger.warning("stt pool.remove() failed during recycle",
+                               exc_info=True)
+        try:
+            ev.set()   # _run awaits this concurrently -> re-acquires a fresh ws
+            driven = True
+        except Exception:
+            logger.warning("stt _reconnect_event.set() failed", exc_info=True)
+    return driven
+
+
+async def _stt_recycle_loop(stt) -> None:
+    if _stt_streams(stt) is None:
+        logger.error("realtime STT recycle unavailable (stt._streams missing "
+                     "— livekit-plugins-openai changed); socket will hit the "
+                     "60-min cap. Pin the plugin or use non-realtime STT.")
+        return
+    while True:
+        await asyncio.sleep(_STT_RECYCLE_INTERVAL_S)
+        waited = 0
+        while _stt_busy(stt) and waited < _STT_RECYCLE_BUSY_MAX_S:
+            await asyncio.sleep(_STT_RECYCLE_BUSY_STEP_S)
+            waited += _STT_RECYCLE_BUSY_STEP_S
+        try:
+            ok = _recycle_realtime_stt(stt)
+        except Exception:
+            logger.exception("realtime STT recycle raised; loop continues")
+            continue
+        if ok:
+            logger.info("recycled realtime STT socket (reset 60-min clock)")
+        else:
+            logger.warning("realtime STT recycle was a no-op (plugin internals "
+                           "absent); socket will age to the 60-min cap")
+
+
 async def entrypoint(ctx: agents.JobContext) -> None:
     await ctx.connect()
 
@@ -147,20 +231,29 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         turn_handling["interruption"] = {
             "enabled": False, "discard_audio_if_uninterruptible": True}
 
+    # language + prompt: "en" alone is only a hint — short greetings from the
+    # satellite's mic still code-switched ("hi Minny" became Norwegian "Hei,
+    # Minni" and Thai "ไอมินนี่", and the session then missed English
+    # follow-ups). The prompt anchors the model (both STT modes support it).
+    _stt_prompt = ("English conversation with Minny, a TV-viewing assistant. "
+                   "Expect greetings like 'hi Minny' and TV, channel, and "
+                   "programme names.")
+    # Realtime STT both rooms: finalizes ~0.2 s after speech (vs ~1 s batch)
+    # and emits interim transcripts that feed preemptive generation. It holds
+    # ONE OpenAI websocket open continuously, and OpenAI hard-caps a realtime
+    # session at 60 min. The plugin auto-recycles at 10 min — but only inside
+    # its transcription-result handler, so the always-on, mostly-idle satellite
+    # never recycles, the socket ages out, and OpenAI kills it with a fatal
+    # error that crashes the AgentSession (~hourly), which reconnect-thrashed
+    # the ESP32 until its shared-I2S capture pipeline died. Fix: the satellite
+    # runs a ~50-min recycle timer (below) that drives the plugin's own
+    # reconnect before the cap. Phones are short-lived sessions, so they never
+    # reach the cap and need no timer.
+    stt = openai.STT(use_realtime=True, language="en", prompt=_stt_prompt)
+
     session = AgentSession(
         vad=ctx.proc.userdata.get("vad") or silero.VAD.load(),
-        # Streaming transcription: transcript finalizes ~0.2 s after speech
-        # end instead of ~1 s of post-hoc batch Whisper (measured), and
-        # interim transcripts are what lets preemptive generation fire.
-        # language + prompt: "en" alone is only a hint — short greetings
-        # from the satellite's mic still code-switched ("hi Minny" became
-        # Norwegian "Hei, Minni" and Thai "ไอมินนี่", and the session then
-        # missed English follow-ups). The prompt anchors the model.
-        stt=openai.STT(
-            use_realtime=True, language="en",
-            prompt="English conversation with Minny, a TV-viewing "
-                   "assistant. Expect greetings like 'hi Minny' and TV, "
-                   "channel, and programme names."),
+        stt=stt,
         llm=pai,
         tts=tts,
         # Start LLM AND TTS on the live transcript before the endpointer
@@ -374,6 +467,16 @@ async def entrypoint(ctx: agents.JobContext) -> None:
     # stream. Non-satellite rooms stay fully enabled.
     if is_satellite:
         _apply_mic()
+
+        # Recycle the realtime STT socket before OpenAI's 60-min cap kills it
+        # (the always-on satellite never triggers the plugin's own recycle).
+        _stt_recycle = asyncio.create_task(_stt_recycle_loop(stt))
+
+        async def _cancel_stt_recycle() -> None:
+            _stt_recycle.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await _stt_recycle
+        ctx.add_shutdown_callback(_cancel_stt_recycle)
 
     # Spoken welcome on fresh sessions: scripted say(), not an LLM turn —
     # instant, deterministic, and immune to model latency. The short sleep
