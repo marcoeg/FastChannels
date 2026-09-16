@@ -14,6 +14,7 @@ already rendered in Pacific.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -27,6 +28,8 @@ logger = logging.getLogger("voice.epg_now")
 
 PACIFIC = ZoneInfo("America/Los_Angeles")
 TIMEOUT_S = 8.0
+RETRIES = 1              # one retry rides out a brief transient DB/MCP hiccup
+RETRY_DELAY_S = 0.4
 LOOKBACK_H = 6           # longest plausible programme, for overlap capture
 DESC_CHARS = 90
 MIN_REMAINING_S = 60     # a programme with seconds left is not "on"
@@ -147,12 +150,25 @@ async def whats_on(at_time: str | None = None, channel: str | None = None,
     now = datetime.now(timezone.utc)
     when = resolve_when(at_time, now)
 
-    try:
-        facts = await _call_list_facts(
-            when - timedelta(hours=LOOKBACK_H), when + timedelta(minutes=1),
-            channel)
-    except Exception as e:  # noqa: BLE001
-        logger.warning("epg now lookup failed: %s", e)
+    # One retry: the guide read shares the EPG MCP with the hourly ingest, and
+    # ~once a day an ingest transiently overloads it and a single read times
+    # out. A brief retry turns that blip into a ~1 s pause instead of a
+    # user-visible "I couldn't check the guide". (A multi-minute overload still
+    # fails gracefully — that's the ingest's problem to fix, not the read's.)
+    facts = last_err = None
+    for attempt in range(RETRIES + 1):
+        try:
+            facts = await _call_list_facts(
+                when - timedelta(hours=LOOKBACK_H), when + timedelta(minutes=1),
+                channel)
+            break
+        except Exception as e:  # noqa: BLE001 — transient MCP/DB overload
+            last_err = e
+            if attempt < RETRIES:
+                await asyncio.sleep(RETRY_DELAY_S)
+    if facts is None:
+        logger.warning("epg now lookup failed after %d attempt(s): %s",
+                       RETRIES + 1, last_err)
         return "I couldn't check the guide just now."
 
     rows = []
