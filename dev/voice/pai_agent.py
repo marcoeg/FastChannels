@@ -17,10 +17,11 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from pydantic_ai import Agent, RunContext
-from pydantic_ai.mcp import MCPToolset
+from pydantic_ai.mcp import MCPToolset, load_mcp_toolsets
 from pydantic_ai.toolsets import WrapperToolset
 from pydantic_ai.messages import (
     ModelMessage,
@@ -112,20 +113,12 @@ class TurnDeps:
 
 
 def build_agent() -> Agent:
-    epg = ResilientToolset(
-        MCPToolset(os.environ["EPG_MCP_URL"],
-                   cache_tools=True,
-                   init_timeout=5.0,
-                   # Ranked search on frequent terms measures 5.5-6.5 s on
-                   # this server (query-shape cost, pre-existing; Hermes hit
-                   # 15 s timeouts on the same thing). 8 s admits real
-                   # queries while still guillotining true wedges; the
-                   # prompt steers channel listings to the ~8 ms list tool.
-                   read_timeout=8.0,
-                   tool_error_behavior="failed")
-        .filtered(lambda ctx, td: td.name in EPG_ALLOW)
-        .prefixed("epg"),
-        svc="epg")
+    # Two TV-search backends, selected at startup and never mixed (alternatives,
+    # not summative): "minny" (default) = the Minny MCP over the operator's
+    # OpenSearch catalogue; "falkordb" = the local Graphiti guide graph via the
+    # EPG MCP. Flip with VOICE_EPG_BACKEND.
+    backend = os.environ.get("VOICE_EPG_BACKEND", "minny")
+
     tv = ResilientToolset(
         MCPToolset(os.environ["TV_MCP_URL"],
                    cache_tools=True,
@@ -134,6 +127,29 @@ def build_agent() -> Agent:
                    tool_error_behavior="failed")
         .prefixed("tv"),
         svc="tv")
+
+    if backend == "minny":
+        # Minny MCP (stdio) from mcp.json — one toolset per server, already
+        # prefixed "minny_". Wrap for the same dead-server resilience as the
+        # others. The server needs the Minerva VPN up (see VPN-CONNECT.md).
+        minny_cfg = str(Path(__file__).parent / "mcp.json")
+        tv_search = [ResilientToolset(ts, svc="minny")
+                     for ts in load_mcp_toolsets(minny_cfg)]
+    else:
+        tv_search = [ResilientToolset(
+            MCPToolset(os.environ["EPG_MCP_URL"],
+                       cache_tools=True,
+                       init_timeout=5.0,
+                       # Ranked search on frequent terms measures 5.5-6.5 s on
+                       # this server (query-shape cost, pre-existing; Hermes hit
+                       # 15 s timeouts on the same thing). 8 s admits real
+                       # queries while still guillotining true wedges; the
+                       # prompt steers channel listings to the ~8 ms list tool.
+                       read_timeout=8.0,
+                       tool_error_behavior="failed")
+            .filtered(lambda ctx, td: td.name in EPG_ALLOW)
+            .prefixed("epg"),
+            svc="epg")]
 
     settings = OpenAIResponsesModelSettings(
         openai_reasoning_effort=os.environ.get("VOICE_REASONING_EFFORT", "none"),
@@ -145,8 +161,8 @@ def build_agent() -> Agent:
 
     agent = Agent(
         OpenAIResponsesModel(os.environ.get("VOICE_MODEL", "gpt-5.6-luna")),
-        instructions=load_static_instructions(),
-        toolsets=[epg, tv],
+        instructions=load_static_instructions(backend),
+        toolsets=[*tv_search, tv],
         model_settings=settings,
         deps_type=TurnDeps,
     )
@@ -160,18 +176,20 @@ def build_agent() -> Agent:
         return format_memory_context(ctx.deps.facts_profile,
                                      ctx.deps.facts_recent)
 
-    @agent.tool_plain
-    async def whats_on(at_time: str | None = None, channel: str | None = None,
-                       query: str | None = None) -> str:
-        """AUTHORITATIVE listing of what is actually ON AIR at a moment.
-        Times are computed in code, so rows are never stale. at_time: "now"
-        (default) or a clock time like "9pm"/"21:30". channel: exact
-        channel name to restrict to one channel. query: case-insensitive
-        keyword to match against channel, genres, title and description
-        (e.g. "Movie", "News", "Columbo"). Use this for every "what's on /
-        is X on now / what's on at 9" question."""
-        from epg_now import whats_on as _whats_on
-        return await _whats_on(at_time=at_time, channel=channel, query=query)
+    if backend == "falkordb":
+        @agent.tool_plain
+        async def whats_on(at_time: str | None = None,
+                           channel: str | None = None,
+                           query: str | None = None) -> str:
+            """AUTHORITATIVE listing of what is actually ON AIR at a moment.
+            Times are computed in code, so rows are never stale. at_time: "now"
+            (default) or a clock time like "9pm"/"21:30". channel: exact
+            channel name to restrict to one channel. query: case-insensitive
+            keyword to match against channel, genres, title and description
+            (e.g. "Movie", "News", "Columbo"). Use this for every "what's on /
+            is X on now / what's on at 9" question."""
+            from epg_now import whats_on as _whats_on
+            return await _whats_on(at_time=at_time, channel=channel, query=query)
 
     @agent.tool_plain
     async def web_lookup(query: str) -> str:

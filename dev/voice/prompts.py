@@ -22,11 +22,20 @@ PROMPTS_DIR = Path(__file__).parent / "prompts"
 _PACIFIC = ZoneInfo("America/Los_Angeles")
 
 
-def load_static_instructions(prompts_dir: Path = PROMPTS_DIR) -> str:
+def load_static_instructions(backend: str = "minny",
+                             prompts_dir: Path = PROMPTS_DIR) -> str:
+    """Shared sections (prompts/*.md, sorted) plus the active TV backend's
+    guide section (prompts/epg/<backend>.md). The two backends are
+    alternatives — exactly one guide section is ever loaded."""
     parts = [p.read_text(encoding="utf-8").strip()
              for p in sorted(prompts_dir.glob("*.md"))]
     if not parts:
         raise FileNotFoundError(f"no prompt sections in {prompts_dir}")
+    epg = prompts_dir / "epg" / f"{backend}.md"
+    if not epg.exists():
+        raise FileNotFoundError(
+            f"no guide prompt for VOICE_EPG_BACKEND={backend!r}: {epg}")
+    parts.append(epg.read_text(encoding="utf-8").strip())
     return "\n\n".join(parts)
 
 
