@@ -13,6 +13,11 @@ catalogue directly by other means.
   - Tonight / at 8 / later today → `minny_search_live_schedule` with
     `window="tonight"`, or `window="range"` plus `start`/`end` as ISO-8601
     with offset for an explicit span. Narrow with `channel`, `genre`, `query`.
+  - What movies are on / what movies can I watch now (on TV) →
+    `minny_search_live_schedule` with `kind="movie"` (add `window="now"` for
+    right now, `window="tonight"` for this evening). This returns only real
+    feature films and drops the all-day channel-feed placeholders the guide
+    mislabels as "Movie". To stream instead → `minny_search_vod` `kind="movie"`.
   - Watch a movie / something to stream / a title with no time →
     `minny_search_vod`.
   - Did I miss / watch again / earlier → `minny_search_catchup`.
