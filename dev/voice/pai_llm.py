@@ -7,8 +7,6 @@ proven aclose()->CancelledError barge-in contract.
 
 Behaviors:
 - speech sanitation: markdown stripped per-delta before TTS sees it
-- progress filler: armed when a tool call starts before any text, but
-  DELAYED 0.9 s so fast TV-control calls finish silently
 - barge-in: cancellation aborts the pydantic-ai run; the partial spoken
   text is appended to history manually (new_messages() is unavailable
   after a cancelled run)
@@ -35,11 +33,9 @@ from pydantic_ai.messages import TextPart
 
 from pai_agent import VoiceBrain
 from telemetry import log_turn
-from textnorm import FILLER, sanitize
+from textnorm import sanitize
 
 logger = logging.getLogger("voice.llm")
-
-FILLER_DELAY_S = 0.9
 
 
 class PydanticLLM(llm.LLM):
@@ -96,20 +92,11 @@ class PydanticLLMStream(llm.LLMStream):
                 recall = None
 
         spoken: list[str] = []
-        filler_task: asyncio.Task | None = None
-        filler_used = False
         t0 = time.monotonic()
         ttfd_ms: float | None = None
         tool_started: dict[str, tuple[str, float]] = {}
         tool_spans: list[dict] = []
         interrupted = False
-
-        async def filler_after_delay() -> None:
-            nonlocal filler_used
-            await asyncio.sleep(FILLER_DELAY_S)
-            if not spoken:
-                filler_used = True
-                self._emit(FILLER + " ")
 
         async with self._pai.turn_lock:
             try:
@@ -140,9 +127,6 @@ class PydanticLLMStream(llm.LLMStream):
                                 else str(part.args)
                             tool_started[part.tool_call_id] = (
                                 part.tool_name, time.monotonic(), args[:300])
-                            if not spoken and filler_task is None:
-                                filler_task = asyncio.create_task(
-                                    filler_after_delay())
                         elif isinstance(ev, FunctionToolResultEvent):
                             hit = tool_started.pop(ev.tool_call_id, None)
                             if hit:
@@ -162,14 +146,11 @@ class PydanticLLMStream(llm.LLMStream):
                 if not spoken:
                     self._emit("Sorry, something went wrong on my side.")
             finally:
-                if filler_task:
-                    filler_task.cancel()
                 log_turn({
                     "type": "turn_timing",
                     "user_chars": len(user_text),
                     "recall_used": recall is not None,
                     "ttfd_ms": round(ttfd_ms) if ttfd_ms is not None else None,
-                    "filler_used": filler_used,
                     "tool_spans": tool_spans,
                     "total_ms": round((time.monotonic() - t0) * 1000),
                     "interrupted": interrupted,
