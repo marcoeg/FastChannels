@@ -39,25 +39,30 @@ def load_static_instructions(backend: str = "minny",
     return "\n\n".join(parts)
 
 
-def format_time_context(now_utc: datetime | None = None) -> str:
-    """Both zones, computed from zoneinfo — the model builds EPG bounds in
-    UTC but speaks Pacific, and DST means the offset can't be hardcoded."""
+def format_time_context(now_utc: datetime | None = None,
+                        tz: ZoneInfo = _PACIFIC) -> str:
+    """Current time in the viewer's zone, computed from zoneinfo — the model
+    builds EPG bounds and speaks in that zone, and DST means the offset can't be
+    hardcoded. `tz` MUST match the active backend's catalogue zone (Eastern for
+    the salesd/minny catalogue, Pacific for the local guide); otherwise the model
+    miscomputes 'now'/'today'/'tonight' and builds windows in the wrong offset."""
     now_utc = now_utc or datetime.now(timezone.utc)
-    local = now_utc.astimezone(_PACIFIC)
-    tzname = local.tzname()  # PDT or PST
+    local = now_utc.astimezone(tz)
+    tzname = local.tzname()  # e.g. EDT / EST / PDT / PST
     offset_h = int(local.utcoffset().total_seconds() // 3600)
     # Both notations on purpose: guide fact text uses 24-hour times
-    # ("19:10-20:57 PDT") and a no-reasoning model must be able to compare
+    # ("19:10-20:57 EDT") and a no-reasoning model must be able to compare
     # them to "now" without doing 12h->24h arithmetic itself.
     return (
-        f"Clock: {local:%A, %B %-d, %Y, %-I:%M %p} Pacific — that is "
+        f"Clock: {local:%A, %B %-d, %Y, %-I:%M %p} {tzname} — that is "
         f"{local:%H:%M} in the 24-hour times the guide uses "
-        f"({tzname}, UTC{offset_h:+d}).\n"
+        f"(UTC{offset_h:+d}). Speak times in this zone; never say UTC.\n"
         f"UTC now: {now_utc:%Y-%m-%dT%H:%M:%S}Z. "
         f"Guide coverage ends roughly 24 hours from now.\n"
         f"A programme is on air now exactly when its start time is at or "
         f"before {local:%H:%M} and its end time is after {local:%H:%M} "
-        f"(same day: {local:%a %d %b})."
+        f"(same day: {local:%a %d %b}). Build every time window "
+        f"(now/today/tonight/range) in this zone, offset UTC{offset_h:+d}."
     )
 
 

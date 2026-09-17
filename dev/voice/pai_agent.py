@@ -19,6 +19,7 @@ import os
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
+from zoneinfo import ZoneInfo
 
 from pydantic_ai import Agent, RunContext
 from pydantic_ai.mcp import MCPToolset, load_mcp_toolsets
@@ -118,6 +119,13 @@ def build_agent() -> Agent:
     # OpenSearch catalogue; "falkordb" = the local Graphiti guide graph via the
     # EPG MCP. Flip with VOICE_EPG_BACKEND.
     backend = os.environ.get("VOICE_EPG_BACKEND", "minny")
+    # Speak and build time windows in the VIEWER's local zone — the Minny
+    # satellite sits in the Bay Area (Pacific), so times are Pacific no matter
+    # which catalogue answers. The salesd catalogue's operator zone is Eastern,
+    # but that is a property of the tenant's data, not of where the person in the
+    # room is: converting to PT is what makes "three this afternoon" mean 3 pm to
+    # them. Override with VOICE_LOCAL_TZ if the device ever moves.
+    tz = ZoneInfo(os.environ.get("VOICE_LOCAL_TZ", "America/Los_Angeles"))
 
     tv = ResilientToolset(
         MCPToolset(os.environ["TV_MCP_URL"],
@@ -169,7 +177,7 @@ def build_agent() -> Agent:
 
     @agent.instructions
     def time_context(ctx: RunContext[TurnDeps]) -> str:
-        return format_time_context()
+        return format_time_context(tz=tz)
 
     @agent.instructions
     def memory_context(ctx: RunContext[TurnDeps]) -> str:
