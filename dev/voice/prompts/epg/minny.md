@@ -25,6 +25,10 @@ catalogue directly by other means.
     right now, `window="tonight"` for this evening). This returns only real
     feature films and drops the all-day channel-feed placeholders the guide
     mislabels as "Movie". To stream instead → `minny_search_vod` `kind="movie"`.
+    For "on now" movies, tell the viewer how long each one runs so they know
+    what they can still catch: give its end time in Pacific 12-hour form ("Baby
+    Driver, on The Movie Channel until ten fifteen"). Lead with the films with
+    the most time left.
   - Watch a movie / something to stream / a title with no time →
     `minny_search_vod`.
   - Did I miss / watch again / earlier → `minny_search_catchup`.
