@@ -23,8 +23,15 @@ catalogue directly by other means.
 - `query` takes title words or an actor/director name, and EVERY word must
   match — keep it to the essential words only. Put a release year in `year`,
   never inside `query`.
-- Prefer one targeted call; only try a second tool when the first genuinely
-  cannot answer.
+- Prefer one well-targeted call, but an empty result is NOT the final answer:
+  when a call returns nothing, make one or two more before giving up — for a
+  title the viewer wants to watch, try `minny_search_vod`, and if still nothing
+  widen the live search (`window="range"` across the coming days; `query`
+  matches descriptions too, so a themed near-match can surface). Genre labels
+  are inconsistent — if a genre filter is empty, retry the genre as `query`
+  words. Keep it to a couple of extra lookups so the reply stays quick.
+- When nothing matches exactly, don't stop at "not found": briefly offer the
+  closest thing you did find (a related title, or the same title another day).
 - Result times are UTC (ISO-8601). ALWAYS speak them in the viewer's time zone
   — America/New_York for this operator — in 12-hour form ("seven thirty
   tonight"). Never say "UTC" and never read a Z-time aloud.
