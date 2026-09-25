@@ -1,22 +1,30 @@
 # Minny voice satellite — project status
 
-_Last updated 2026-09-14._
+_Last updated 2026-09-24. (Previous revision 2026-09-14 predated the wake
+word, the wake-gated STT, the STT recycle and the capture watchdog.)_
 
 ## TL;DR
 
 A Waveshare **ESP32-S3-AUDIO-Board** runs as a standalone voice terminal for
 the Minny agent: it joins the self-hosted LiveKit room `speaker` over WiFi,
-publishes its microphone, and plays Minny's replies through its speaker. It
-holds good multi-turn conversations (EPG lookups, "what's on," plot
-summaries, TV control) and is **stable** over long sessions.
+sleeps until it hears the on-device wake word **"Hey Wanda"**, then holds
+multi-turn conversations (EPG lookups, "what's on," plot summaries, TV
+control) and goes back to sleep after ~30 s of quiet. It is **stable
+unattended**: soaked 7 h with 8 STT recycles clean (2026-09-14/15), and it
+self-recovers from its one known device-side failure (capture pipeline death)
+by rebooting.
 
 **Working today**
 - Standalone: powered from any 5V USB charger (no computer needed); WiFi
   creds + a 1-year LiveKit token are baked into flash. Needs the nucbox host
   (LiveKit server + `voice-agent` worker) up on the LAN. `loginctl` lingering
   is on, so the backend survives reboots unattended.
-- Status shown on the board's 7-LED RGB ring: green = listening/idle,
-  amber = thinking, blue = speaking, red = connection failed.
+- **Wake word on the device** (WakeNet `wn9_heywanda_tts`). While asleep the
+  board publishes digital silence (-140 dBFS) — TV and room audio never
+  leave it — and the agent keeps STT **off**, so there is no cloud cost
+  while idle. On wake: chime → mic live → STT enabled.
+- Status on the 7-LED RGB ring: dim standby = asleep, bright green =
+  awake/listening, amber = thinking, blue = speaking, red = connection failed.
 
 **Two accepted limitations**
 1. **Half-duplex** — you must let Minny finish before speaking; no barge-in
@@ -28,7 +36,9 @@ summaries, TV control) and is **stable** over long sessions.
 ## What was done, and why
 
 The build was a chain of real hardware/SDK bugs, each fixed from evidence.
-Commits `c4cdb17` → `2d0120b` on `origin` (private mirror).
+Bring-up: commits `c4cdb17` → `2d0120b`; wake word and hardening:
+`e9ea045` → `4e6203d` (backend `c5c4709`, `81a911e`), all on `origin`
+(private mirror).
 
 | Problem (symptom) | Root cause | Fix |
 | --- | --- | --- |
@@ -40,6 +50,12 @@ Commits `c4cdb17` → `2d0120b` on `origin` (private mirror).
 | Phone lost barge-in | half-duplex config was global | Made `turn_handling` per-room: half-duplex for `speaker` only, full-duplex for `voice` |
 | Wrong LED colors | Ring is wired **RGB**, firmware assumed GRB (red/green byte swap) | `LED_STRIP_COLOR_COMPONENT_FMT_RGB` |
 | STT code-switching ("hi Minny" → Norwegian/Thai) | realtime STT auto-detect on short raw-mic phrases | Pin `language="en"` + topic prompt |
+| Device transcribed the TV all day | always-on mic, no local gate | On-device WakeNet ("Hey Wanda") on the raw mic — standalone `esp_wn_iface`, NOT the AFE; 8 KB **internal-RAM** stack, pinned core (`e9ea045`) |
+| Replies silent after waking | (a) gating by `esp_capture_stop/start` toggles the shared I2S record device and silences playback; (b) the wake chime called `esp_codec_dev_close()` on the play device, clearing av_render's `output_opened` flag | Capture runs **continuously** through a gated-tee source (`wake.c`) that publishes silence while asleep; the chime opens-if-needed and never closes (`c397f67`) |
+| Encoder reboot-loop after adding the gated source | registering our esp_capture thread scheduler (to pin WakeNet's stack internal) **replaces** the SDK's, dropping its 40 KB Opus stack | `media.c` scheduler reproduces the 40 KB stack for `aenc_0` |
+| Cloud STT billed 24/7 on silence; next request swallowed | device streams continuously, so STT ran on the idle silent stream and the Realtime session timed out | Gate on the **agent**: STT disabled while asleep, enabled on the device's `wake` data message (topic `session`), disabled on idle-sleep/disconnect (`c5c4709`) |
+| Agent session died ~hourly, reconnect-thrashing the device | OpenAI caps a realtime STT session at 60 min; the plugin's own recycle is activity-gated, so the idle satellite ages out | Satellite-only ~50-min timer drives the plugin's own reconnect path; guarded to a logged no-op if a plugin upgrade renames the internals (`81a911e`) |
+| Device "connected" but deaf overnight | reconnect churn desynced the shared-I2S enable state → AUD_SRC job failed → capture (and WakeNet with it) stopped | Watchdog: `wake_frame_ticks()` must advance while CONNECTED, else `esp_restart()` after 30 s; fresh boot is asleep again in ~15 s (`4e6203d`) |
 
 **Debugging methods worth keeping** (in the tree):
 - `main/net_log.c` — the device streams `esp_log` over UDP to
@@ -49,6 +65,31 @@ Commits `c4cdb17` → `2d0120b` on `origin` (private mirror).
   `xtensa-esp32s3-elf-gdb build/minny_satellite.elf` → `thread apply all bt`.
   Needs `sudo chmod 666 /dev/bus/usb/<bus>/<dev>` for the S3's USB-JTAG node
   (the node number changes on re-enumeration).
+- The UDP log is **quiet while the board sleeps** — say the wake word to get
+  a live trace. A reboot in the log is most likely the capture watchdog
+  ("capture pipeline dead ... rebooting"), i.e. a self-recovery, not a crash.
+
+## Running it — backend operations
+
+Everything is systemd **user** units on nucbox (`systemctl --user …`,
+`journalctl --user -u …`):
+
+| Unit | Role |
+| --- | --- |
+| `voice-agent.service` | The worker. Restart after editing `voice_agent.py` or prompts. `Conflicts=hermes-voice-agent.service`. Its `ExecStartPost` runs `heal_agentless_rooms.py` twice (at +75 s and +135 s) to re-dispatch the satellite's orphaned room after a restart (log: `/tmp/voice-room-healer.log`) |
+| `voice-room-healer.timer` | Deletes agent-less rooms every 2 min — LiveKit never re-dispatches into an existing room, so this is what heals the always-on device after any worker death |
+| `voice-agent-restart.timer` | Daily 04:30 `try-restart` of the worker (a worker left idle for days ended up with a dead prewarmed process pool) |
+| `voice-memory-backup.timer` | Weekly snapshot of the memory FalkorDB |
+
+Satellite-only behaviour lives in `voice_agent.py`, keyed to room `speaker`:
+half-duplex (interruption off + discard-while-speaking), 1 s post-speech mic
+cooldown, wake-gated STT, the ~30 s idle `sleep` message, and the ~50-min STT
+recycle. Room `voice` (phone/browser) keeps full barge-in, no wake word, and
+the spoken welcome. **Never globalize the satellite settings.**
+
+Normal log noise from room `speaker`: "current speech generation cannot be
+interrupted" (someone spoke over a reply — expected under half-duplex) and an
+occasional "STT stream ended … recreating" (recovered automatically).
 
 ## The LCD display (removed)
 
@@ -91,29 +132,55 @@ it is a real task, not a toggle. In order:
 4. **Drop the agent-side crutches for room `speaker`** once hardware AEC
    works: remove the `interruption:{enabled:False}` half-duplex block and the
    post-speech cooldown in `voice_agent.py`. Room `voice` already shows the
-   target full-duplex behavior — the goal is parity.
+   target full-duplex behavior — the goal is parity. Keep the wake gate and
+   the STT recycle: those are independent of echo.
+
+Constraint added since this path was written: capture now runs through the
+gated-tee source (`wake.c`) with WakeNet in its read path on an internal-RAM
+stack. Any AFE/AEC must slot into that same continuous pipeline — gating by
+stopping/starting capture is known to silence playback, and the AFE's
+original deadlock was on a PSRAM stack, so give it an internal one as well.
 
 If on-device AEC proves impractical on this board, the fallback is to keep
 half-duplex but tighten it (shorter cooldown, tune endpointing) — the
 current experience is already usable, just not interruptible.
 
-## Temporary bring-up bits to revert when convenient
+## Bring-up leftovers
 
-- `voice_agent.py`: the spoken welcome is **un-gated to room `speaker`** (was
-  added to test playback end-to-end). Re-gate to `voice` only so the speaker
-  doesn't greet on every reconnect/worker-recycle.
-- `main/board.c` plays a **boot beep** (test tone) and `main/ui.c` does a
-  **boot RGB self-test** + white flash. Fine to keep as a power-on chime /
-  panel check, or remove for a silent boot.
-- `main/ui.c` has a 30 s heap-watch log (harmless; useful if instability
-  ever returns).
+Done since the last revision:
+- Spoken welcome re-gated to room `voice` only — the satellite stays silent
+  on connect until its wake word fires (`e9ea045`).
+- Boot test tone removed — it sounded identical to the wake chime and read as
+  a reboot (`c397f67`).
+
+Still in the tree (harmless; remove when convenient):
+- `main/ui.c` **boot RGB self-test** (`led_self_test()`), plus the white
+  flash on a working panel. Fine as a power-on check.
+- `main/ui.c` 30 s **heap-watch** log — useful if instability returns.
+
+## Open items
+
+1. **Barge-in on the satellite** — the path above; step 1 (ES7210 loopback
+   slot map) is the gate for everything else.
+2. **Tighten half-duplex** if on-device AEC proves impractical: shorter
+   post-speech cooldown, endpointing tuning.
+3. **LiveKit deprecations** in `voice_agent.py` (`RoomInputOptions` →
+   `RoomOptions`, `metrics_collected` → `session_usage_updated`). Harmless
+   today; they will bite on the next livekit-agents upgrade — and so may the
+   STT recycle, which touches plugin internals (it degrades to a logged
+   no-op and warns at startup if they move).
+4. **Replacement LCD panel** — no firmware work needed (see above).
 
 ## Key file map
 
 ```
-main/board.c   I2C, TCA9555 expander, I2S, ES8311+ES7210, PA, test tone
-main/media.c   capture (dev_src, no AFE) + av_render pipelines
-main/room.c    LiveKit room lifecycle, reconnect, agent presence + state topic
+main/board.c   I2C, TCA9555 expander, I2S, ES8311+ES7210, PA, wake chime
+main/media.c   capture scheduler (internal-RAM AUD_SRC, 40 KB aenc_0) +
+               av_render pipelines
+main/wake.c    gated-tee capture source + WakeNet ("Hey Wanda"),
+               wake_frame_ticks() liveness counter
+main/room.c    LiveKit room lifecycle, reconnect, agent presence + state
+               topic, wake/sleep messages (topic "session"), capture watchdog
 main/ui.c      panel auto-detect; JD9853+AXS5106+LVGL UI or headless LED
 main/led.c     7x WS2812 ring status (RGB order)
 main/net_log.c UDP log sink for USB-free debugging
