@@ -74,6 +74,10 @@ async def main() -> None:
                       + str(ep.content).replace("\n", "\n  "))
         elif args.cmd == "profile":
             from prompts import format_memory_context
+            # create() warms the profile cache in the background; without
+            # waiting, recall() races it and shows an empty profile.
+            if mem.profile_ready is not None:
+                await mem.profile_ready
             r = await mem.recall("")
             block = format_memory_context(r.profile, r.recent)
             print(block or "(empty — nothing would be injected)")

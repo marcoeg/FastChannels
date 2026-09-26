@@ -35,6 +35,11 @@ from graphiti_core import Graphiti
 from graphiti_core.driver.falkordb_driver import FalkorDriver
 from graphiti_core.nodes import EpisodeType
 from graphiti_core.search.search_config_recipes import EDGE_HYBRID_SEARCH_RRF
+from graphiti_core.search.search_filters import (
+    ComparisonOperator,
+    DateFilter,
+    SearchFilters,
+)
 
 logger = logging.getLogger("voice.memory")
 
@@ -83,6 +88,7 @@ class VoiceMemory:
         self._driver = driver
         self._profile: list[str] = []
         self._queue: asyncio.Queue = asyncio.Queue(maxsize=100)
+        self.profile_ready: asyncio.Task | None = None
         self._consumer: asyncio.Task | None = None
         self._closing = False
         self._last_enqueued_user = ""
@@ -107,7 +113,8 @@ class VoiceMemory:
         await driver.build_indices_and_constraints()
         self = cls(graphiti, driver)
         self._consumer = asyncio.create_task(self._consume(), name="memory-writer")
-        asyncio.create_task(self._refresh_profile(), name="memory-profile-warmup")
+        self.profile_ready = asyncio.create_task(
+            self._refresh_profile(), name="memory-profile-warmup")
         return self
 
     # ── hot path ──────────────────────────────────────────────────────
@@ -153,7 +160,8 @@ class VoiceMemory:
         cfg = EDGE_HYBRID_SEARCH_RRF.model_copy(deep=True)
         cfg.limit = limit
         results = await self._graphiti.search_(
-            query=query, config=cfg, group_ids=[VOICE_MEMORY_GROUP])
+            query=query, config=cfg, group_ids=[VOICE_MEMORY_GROUP],
+            search_filter=_current_facts_filter())
         return _format_edges(results.edges)
 
     # ── background ────────────────────────────────────────────────────
@@ -187,7 +195,8 @@ class VoiceMemory:
             cfg.limit = 12
             results = await self._graphiti.search_(
                 query=PROFILE_QUERY, config=cfg,
-                group_ids=[VOICE_MEMORY_GROUP])
+                group_ids=[VOICE_MEMORY_GROUP],
+                search_filter=_current_facts_filter())
             self._profile = _format_edges(results.edges)
         except Exception as e:  # noqa: BLE001
             logger.debug("profile refresh failed (keeping old cache): %s", e)
@@ -204,10 +213,55 @@ class VoiceMemory:
         await self._graphiti.close()
 
 
+def _current_facts_filter() -> SearchFilters:
+    """Only facts that are still true.
+
+    Graphiti never deletes: a correction ("Columbo is my favorite now")
+    stamps the old edge with invalid_at/expired_at. Searching without this
+    filter serves superseded facts back into the prompt — which is how
+    Minny kept offering "your usual Al Jazeera" for days after being told
+    to drop it. Filtering in the query (not afterwards) keeps the result
+    limit filled with live facts.
+    """
+    now = datetime.now(timezone.utc)
+    return SearchFilters(
+        # invalid_at unset, or set in the future (fact still in force)
+        invalid_at=[
+            [DateFilter(comparison_operator=ComparisonOperator.is_null)],
+            [DateFilter(date=now,
+                        comparison_operator=ComparisonOperator.greater_than)],
+        ],
+        expired_at=[
+            [DateFilter(comparison_operator=ComparisonOperator.is_null)],
+        ],
+    )
+
+
+def _is_current(e, now: datetime) -> bool:
+    # Belt and braces for the query filter: FalkorDB stores these as ISO
+    # strings, and a driver/filter regression must not resurrect dead facts.
+    if getattr(e, "expired_at", None) is not None:
+        return False
+    inv = getattr(e, "invalid_at", None)
+    if inv is None:
+        return True
+    if isinstance(inv, str):
+        try:
+            inv = datetime.fromisoformat(inv)
+        except ValueError:
+            return False
+    if inv.tzinfo is None:
+        inv = inv.replace(tzinfo=timezone.utc)
+    return inv > now
+
+
 def _format_edges(edges) -> list[str]:
     out: list[str] = []
     seen: set[str] = set()
+    now = datetime.now(timezone.utc)
     for e in edges:
+        if not _is_current(e, now):
+            continue
         fact = " ".join(str(getattr(e, "fact", "") or "").split())
         if not fact or fact.casefold() in seen:
             continue
