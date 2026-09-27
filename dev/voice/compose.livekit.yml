@@ -64,11 +64,15 @@ services:
       # Memory queries are tiny — a low default catches engine wedges fast
       # (deliberately NOT the EPG stack's 15000/60000 ingest tuning).
       FALKORDB_ARGS: "TIMEOUT_DEFAULT 5000 TIMEOUT_MAX 30000"
-      BROWSER: "0"
+      # FalkorDB Browser for inspecting Minny's memory graph. Loopback only.
+      # It connects server-side from INSIDE this container, so log in with
+      # host localhost, port 6379, empty username, VOICE_FALKORDB_PASSWORD.
+      BROWSER: "1"
     volumes:
       - falkordb_voice_data:/var/lib/falkordb/data
     ports:
       - "127.0.0.1:6390:6379"
+      - "127.0.0.1:3002:3000"
     healthcheck:
       test:
         - CMD-SHELL
