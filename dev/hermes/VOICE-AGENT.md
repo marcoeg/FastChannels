@@ -46,6 +46,25 @@ Dynamic per-turn context: clock in Pacific AND UTC, plus remembered facts.
 
 ## Model notes
 
+- **Brain switch: `VOICE_LLM`** in `dev/voice/.env`, then
+  `systemctl --user restart voice-agent`.
+  - `openai` (default): the Responses API on `VOICE_MODEL` (gpt-5.6-terra),
+    priority tier, `VOICE_REASONING_EFFORT`.
+  - `local`: an OpenAI-compatible server (llama.cpp) through Chat
+    Completions, configured ONLY by `LOCAL_LLM_BASE_URL`,
+    `LOCAL_LLM_API_KEY` and `LOCAL_LLM_MODEL` (default `qwen3.5-9b`). The
+    server must support tool calls (llama.cpp `--jinja`). Thinking is off,
+    and the system messages are merged into one (Qwen's template rejects a
+    second one).
+  - Never point the local model at `OPENAI_BASE_URL` / `OPENAI_API_KEY`: the
+    OpenAI SDK reads those from the environment, so they would also redirect
+    speech-to-text, memory extraction and embeddings, which must stay on
+    OpenAI.
+  - Feasibility test (2026-10-01, qwen3.5-9b): tool calling works (~2.4 s
+    to first token on a tool turn, close to terra), but it follows the guide
+    rules loosely — wrong time windows, false "nothing on" after an empty
+    genre search, a promised lookup it never made.
+
 - Reasoning effort is per model FAMILY: gpt-5/gpt-5-mini take `minimal`;
   gpt-5.5/5.6 take `none`. Set VOICE_REASONING_EFFORT to match VOICE_MODEL
   or the API 400s.

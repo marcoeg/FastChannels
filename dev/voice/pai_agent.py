@@ -113,6 +113,51 @@ class TurnDeps:
     memory: "VoiceMemory | None" = None
 
 
+def _brain_model():
+    """The brain's model + settings, switchable by VOICE_LLM.
+
+    openai (default) — the original path, unchanged: Responses API on
+        VOICE_MODEL with priority tier and reasoning effort.
+    local — an OpenAI-compatible server (llama.cpp) via Chat Completions,
+        using its OWN LOCAL_LLM_* variables passed explicitly. Never set
+        OPENAI_BASE_URL for this: the OpenAI SDK reads it from the
+        environment, which would also redirect STT, memory extraction and
+        embeddings — those stay on OpenAI.
+    """
+    if os.environ.get("VOICE_LLM", "openai") == "local":
+        from pydantic_ai.models.openai import OpenAIChatModel, OpenAIChatModelSettings
+        from pydantic_ai.profiles.openai import OpenAIModelProfile
+        from pydantic_ai.providers.openai import OpenAIProvider
+        provider = OpenAIProvider(base_url=os.environ["LOCAL_LLM_BASE_URL"],
+                                  api_key=os.environ["LOCAL_LLM_API_KEY"])
+        # Qwen chat templates reject a second system message ("System
+        # message must be at the beginning"); our static instructions and
+        # the per-turn clock/memory blocks arrive as separate ones, so have
+        # pydantic-ai merge them into a single leading system message.
+        model = OpenAIChatModel(
+            os.environ.get("LOCAL_LLM_MODEL", "qwen3.5-9b"), provider=provider,
+            profile=OpenAIModelProfile(openai_chat_supports_multiple_system_messages=False))
+        settings = OpenAIChatModelSettings(
+            parallel_tool_calls=True,
+            max_tokens=700,
+            # Qwen-style chat templates: skip the thinking block, which a
+            # voice turn would otherwise wait on (llama.cpp honours this).
+            extra_body={"chat_template_kwargs": {"enable_thinking": False}},
+        )
+        logger.info("brain: local LLM %s at %s",
+                    model.model_name, os.environ["LOCAL_LLM_BASE_URL"])
+        return model, settings
+
+    settings = OpenAIResponsesModelSettings(
+        openai_reasoning_effort=os.environ.get("VOICE_REASONING_EFFORT", "none"),
+        openai_service_tier="priority",
+        openai_reasoning_context="current_turn",
+        parallel_tool_calls=True,
+        max_tokens=700,                            # spoken answers are short
+    )
+    return OpenAIResponsesModel(os.environ.get("VOICE_MODEL", "gpt-5.6-luna")), settings
+
+
 def build_agent() -> Agent:
     # Two TV-search backends, selected at startup and never mixed (alternatives,
     # not summative): "minny" (default) = the Minny MCP over the operator's
@@ -159,16 +204,10 @@ def build_agent() -> Agent:
             .prefixed("epg"),
             svc="epg")]
 
-    settings = OpenAIResponsesModelSettings(
-        openai_reasoning_effort=os.environ.get("VOICE_REASONING_EFFORT", "none"),
-        openai_service_tier="priority",
-        openai_reasoning_context="current_turn",
-        parallel_tool_calls=True,
-        max_tokens=700,                            # spoken answers are short
-    )
+    model, settings = _brain_model()
 
     agent = Agent(
-        OpenAIResponsesModel(os.environ.get("VOICE_MODEL", "gpt-5.6-luna")),
+        model,
         instructions=load_static_instructions(backend),
         toolsets=[*tv_search, tv],
         model_settings=settings,
