@@ -141,6 +141,46 @@ to snippets too, never read links aloud. Failure modes all degrade to a
 spoken sentence rather than an exception: missing key, bad key, HTTP
 error, 429, and a 4 s timeout are each their own honest message.
 
+## Rollout tracing (training / eval data for NeMo Gym)
+
+Every voice turn, on either brain, is written as one JSONL record to
+`~/news/voice-rollouts/YYYY-MM-DD.jsonl` (`dev/voice/rollouts.py`; outside
+the repo — it holds household conversations). Disable with `VOICE_TRACE=0`;
+relocate with `VOICE_ROLLOUT_DIR`.
+
+Each record (`schema: minny-rollout/1`) is exactly what the model saw and did,
+in NeMo Gym's Responses-API shape:
+
+- `responses_create_params.input`: the instructions as sent (one developer
+  message: prompts + clock + memory), the history actually passed to the run,
+  and the user's utterance; `responses_create_params.tools`: the function
+  tools offered, with JSON schemas.
+- `response.output`: the trajectory — `function_call` (full arguments),
+  `function_call_output` (full result), the final assistant message.
+- `requests[]`: one per model request (a tool turn makes 2+), with model,
+  latency, finish reason and token usage.
+- `brain` (openai/local + model), `session_id` / `turn_index` / `turn_id` /
+  `run_id`, `spoken_text`, `interrupted`, `error`, latency.
+- `signals`: interrupted, cancelled_before_speech (preemptive-generation
+  cancels, never heard), tool_errors, empty_tool_results,
+  unanswered_tool_calls; the exporter adds viewer_corrected_next.
+
+Join keys: the same `session_id` is on every `voice-conversations.jsonl`
+row and every `turn_timing` metrics row (which also carries `turn_id`).
+
+Capture: a per-run pydantic-ai capability (`before/after_model_request`)
+records the real requests, so warmup runs and memory extraction are never
+traced. On barge-in the partial run comes from
+`RunCancelled.from_cancellation`, not the synthetic history entry. Records are
+queued and written off the event loop; tracing can never fail a turn.
+
+Export: `dev/voice/rollouts_export.py --out DIR [--since DAY] [--room voice]
+[--llm openai]` writes `eval.jsonl` (prompts + tools, with the teacher's
+answer as `expected_answer`) and `sft.jsonl` (OpenAI-brain turns as
+messages + tools, for distilling into the local model). Preemptive cancels,
+errors and (by default) interrupted turns are dropped; invalid lines are
+reported, not silently skipped.
+
 ## Testing without a browser
 
 `console --text` mode, driven through a pty (stdin EOF kills it, and it

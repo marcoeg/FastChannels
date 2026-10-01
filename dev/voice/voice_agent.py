@@ -56,6 +56,7 @@ from livekit.plugins import elevenlabs, openai, silero  # noqa: E402
 
 from pai_agent import VoiceBrain  # noqa: E402
 from pai_llm import PydanticLLM  # noqa: E402
+from rollouts import RolloutWriter, tracing_enabled  # noqa: E402
 from telemetry import log_turn, wire_session_metrics  # noqa: E402
 
 logger = logging.getLogger("voice.worker")
@@ -195,7 +196,12 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         logger.warning("voice memory unavailable, running without it: %s", e)
 
     brain = VoiceBrain(memory)
-    pai = PydanticLLM(brain)
+    # One session = one job = one conversation history; the id joins the
+    # rollout traces, the transcript rows and the turn_timing metrics.
+    session_id = f"{ctx.room.name}:{ctx.job.id}"
+    tracer = RolloutWriter() if tracing_enabled() else None
+    pai = PydanticLLM(brain, session_id=session_id, room=ctx.room.name,
+                      is_satellite=ctx.room.name == "speaker", tracer=tracer)
 
     # Keep MCP sessions warm for the whole job (otherwise per-run setup).
     await brain.agent.__aenter__()
@@ -204,6 +210,8 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         try:
             await brain.agent.__aexit__(None, None, None)
         finally:
+            if tracer is not None:
+                await tracer.aclose()
             if memory is not None:
                 await memory.aclose()
 
@@ -375,7 +383,7 @@ async def entrypoint(ctx: agents.JobContext) -> None:
                 return
             interrupted = bool(getattr(item, "interrupted", False))
             _log_transcript(role, text, interrupted=interrupted,
-                            room=ctx.room.name)
+                            room=ctx.room.name, session_id=session_id)
             if role == "user":
                 last_user["text"] = text
                 sleep_state["last_activity"] = time.monotonic()

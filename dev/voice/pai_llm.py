@@ -8,8 +8,9 @@ proven aclose()->CancelledError barge-in contract.
 Behaviors:
 - speech sanitation: markdown stripped per-delta before TTS sees it
 - barge-in: cancellation aborts the pydantic-ai run; the partial spoken
-  text is appended to history manually (new_messages() is unavailable
-  after a cancelled run)
+  text is appended to history manually
+- rollout tracing (rollouts.py): one NeMo Gym-shaped record per turn,
+  including barge-ins and failures, written off the voice path
 - serialization: one turn at a time (process-level lock, Hermes-era rule)
 """
 
@@ -18,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+import uuid
 
 from livekit.agents import llm
 from livekit.agents.types import DEFAULT_API_CONNECT_OPTIONS
@@ -29,9 +31,11 @@ from pydantic_ai import (
     PartStartEvent,
     TextPartDelta,
 )
+from pydantic_ai.exceptions import RunCancelled
 from pydantic_ai.messages import TextPart
 
 from pai_agent import VoiceBrain
+from rollouts import RolloutWriter, TraceCapability, build_record
 from telemetry import log_turn
 from textnorm import sanitize
 
@@ -39,11 +43,19 @@ logger = logging.getLogger("voice.llm")
 
 
 class PydanticLLM(llm.LLM):
-    def __init__(self, brain: VoiceBrain) -> None:
+    def __init__(self, brain: VoiceBrain, *, session_id: str = "",
+                 room: str = "", is_satellite: bool = False,
+                 tracer: RolloutWriter | None = None) -> None:
         super().__init__()
         self.brain = brain
         self.turn_lock = asyncio.Lock()
         self.pending_recall = None          # set per turn by on_user_turn_completed
+        # rollout tracing: one session per LiveKit job (= one history)
+        self.session_id = session_id or uuid.uuid4().hex
+        self.room = room
+        self.is_satellite = is_satellite
+        self.tracer = tracer
+        self.turn_index = 0
 
     def chat(self, *, chat_ctx: llm.ChatContext, tools=None,
              conn_options=DEFAULT_API_CONNECT_OPTIONS,
@@ -58,6 +70,9 @@ class PydanticLLMStream(llm.LLMStream):
         super().__init__(pai, chat_ctx=chat_ctx, tools=tools,
                          conn_options=conn_options)
         self._pai = pai
+        # Chunk id = turn id, so LiveKit's LLMMetrics.request_id joins the
+        # metrics log to the rollout record (it used to be a constant).
+        self._turn_id = uuid.uuid4().hex
 
     def _last_user_text(self) -> str:
         for item in reversed(self._chat_ctx.items):
@@ -72,7 +87,7 @@ class PydanticLLMStream(llm.LLMStream):
         if not text:
             return
         self._event_ch.send_nowait(
-            llm.ChatChunk(id="pai",
+            llm.ChatChunk(id=self._turn_id,
                           delta=llm.ChoiceDelta(role="assistant", content=text)))
 
     async def _run(self) -> None:
@@ -93,17 +108,25 @@ class PydanticLLMStream(llm.LLMStream):
 
         spoken: list[str] = []
         t0 = time.monotonic()
+        wall0 = time.time()
         ttfd_ms: float | None = None
-        tool_started: dict[str, tuple[str, float]] = {}
+        tool_started: dict[str, tuple[str, float, str]] = {}
         tool_spans: list[dict] = []
         interrupted = False
+        trace = TraceCapability() if self._pai.tracer else None
+        turn_messages: list | None = None
+        error: str | None = None
+        self._pai.turn_index += 1
+        turn_index = self._pai.turn_index
 
         async with self._pai.turn_lock:
             try:
                 async with brain.agent.run_stream_events(
                         user_text,
                         message_history=list(brain.history),
-                        deps=brain.make_deps(recall)) as events:
+                        deps=brain.make_deps(recall),
+                        conversation_id=self._pai.session_id,
+                        capabilities=[trace] if trace else None) as events:
                     async for ev in events:
                         d = None
                         if isinstance(ev, PartStartEvent) and isinstance(
@@ -136,18 +159,45 @@ class PydanticLLMStream(llm.LLMStream):
                                      "ms": round((time.monotonic() - ts) * 1000)})
                         elif isinstance(ev, AgentRunResultEvent):
                             pass            # loop ends after this event
-                    brain.commit_turn(events.new_messages())
-            except asyncio.CancelledError:
+                    # serialize-before-commit: commit_turn trims history and
+                    # blanks old tool results; the trace needs them intact
+                    turn_messages = list(events.new_messages())
+                    brain.commit_turn(turn_messages)
+            except asyncio.CancelledError as exc:
                 interrupted = True
+                rc = RunCancelled.from_cancellation(exc)
+                if rc is not None:      # the real partial run, for the trace
+                    try:
+                        turn_messages = list(rc.new_messages())
+                    except Exception:  # noqa: BLE001
+                        pass
                 brain.commit_interrupted(user_text, "".join(spoken))
                 raise
-            except Exception:
+            except Exception as exc:
+                error = f"{type(exc).__name__}: {exc}"[:500]
                 logger.exception("voice turn failed")
                 if not spoken:
                     self._emit("Sorry, something went wrong on my side.")
             finally:
+                if trace is not None:
+                    try:
+                        self._pai.tracer.enqueue(build_record(
+                            session_id=self._pai.session_id,
+                            turn_index=turn_index, turn_id=self._turn_id,
+                            room=self._pai.room,
+                            is_satellite=self._pai.is_satellite,
+                            user_text=user_text, trace=trace,
+                            new_messages=turn_messages,
+                            spoken="".join(spoken), interrupted=interrupted,
+                            error=error, ts_start=wall0, ttfd_ms=ttfd_ms,
+                            total_ms=(time.monotonic() - t0) * 1000,
+                            recall_used=recall is not None))
+                    except Exception:  # noqa: BLE001 — never break a turn
+                        logger.debug("rollout build failed", exc_info=True)
                 log_turn({
                     "type": "turn_timing",
+                    "session_id": self._pai.session_id,
+                    "turn_id": self._turn_id,
                     "user_chars": len(user_text),
                     "recall_used": recall is not None,
                     "ttfd_ms": round(ttfd_ms) if ttfd_ms is not None else None,

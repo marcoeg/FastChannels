@@ -1163,6 +1163,56 @@ VLC. Nothing else on this machine needs changing: `.m3u` already resolves to
 
 ---
 
+## Voice agent rollout tracing — `dev/voice/rollouts.py`
+
+The Minny voice agent (`dev/voice/`, runbook in `dev/hermes/VOICE-AGENT.md`)
+records every voice turn as training and evaluation data for NVIDIA NeMo Gym:
+the exact prompt and tools the model saw, every tool call with its full
+arguments and result, and the final answer. The data feeds fine-tuning and
+RL of the local Qwen model, with the OpenAI brain's turns as teacher examples.
+
+### Where it goes
+
+`~/news/voice-rollouts/YYYY-MM-DD.jsonl`, one line per turn, outside the
+repo — it holds household conversations. `~/news/voice-rollouts/README.md`
+describes the files, their fields and the export.
+
+| Setting (`dev/voice/.env`) | Effect |
+| --- | --- |
+| `VOICE_TRACE=0` | Disable tracing (default: on) |
+| `VOICE_ROLLOUT_DIR` | Write elsewhere |
+
+### How it works
+
+| Piece | Role |
+| --- | --- |
+| `rollouts.TraceCapability` | A pydantic-ai capability attached to each voice run. `before_model_request` captures the real request (messages, instructions, tool definitions); `after_model_request` records model, latency and token usage. Per-run, so the warmup run and memory extraction are never traced. |
+| `rollouts.to_items` | Converts pydantic-ai messages to Responses-API items: `developer`, `user`, `function_call`, `function_call_output`, `assistant`. |
+| `rollouts.build_record` | Assembles the `minny-rollout/1` record and its implicit signals. |
+| `rollouts.RolloutWriter` | Queue + one background task; appends happen off the event loop, and a failure is logged and dropped, never raised into a turn. |
+| `pai_llm.PydanticLLMStream._run` | Collects the turn's messages before history trimming, recovers the real partial run on barge-in (`RunCancelled.from_cancellation`), and enqueues one record per turn — success, barge-in or failure. |
+| `voice_agent.py` | Creates the session id (`<room>:<job id>`) and the writer, flushes it on shutdown, and stamps the session id on transcript rows. |
+
+Join keys: `session_id` is on every rollout, every
+`~/news/voice-conversations.jsonl` row and every `turn_timing` row in
+`~/news/voice-metrics.jsonl`; `turn_id` joins the metrics and LiveKit's
+`LLMMetrics.request_id` to the rollout.
+
+### Export
+
+```bash
+cd dev/voice
+./rollouts_export.py --out ~/minny-gym [--since 2026-10-01] [--until …] \
+    [--room voice|speaker] [--llm openai|local] [--include-interrupted]
+```
+
+Writes `eval.jsonl` (prompt + tools, with the OpenAI brain's answer as
+`expected_answer`) and `sft.jsonl` (OpenAI-brain turns as messages + tools).
+Preemptive cancels, errors and (by default) barge-ins are dropped; invalid
+lines are reported rather than silently skipped. Standard library only.
+
+---
+
 ## Repository
 
 This working copy lives in a **private** repo, independent of upstream:
@@ -1292,6 +1342,8 @@ Absence of that line means the rebuild did not pick up the change.
 - `docs/openapi.yaml` and `docs/API.md` — the FastChannels HTTP API these
   scripts read from. 184 paths, verified against the route handlers by
   `dev/check_api_docs.py`.
+- `dev/hermes/VOICE-AGENT.md` — the Minny voice agent runbook (architecture,
+  operations, latency, rollout tracing).
 - `dev/hermes/SKILL.md` — the same API described for the Hermes agent, with
   `dev/hermes/PROMPT.md` as the onboarding message. `dev/hermes/RECORD-SKILL.md`
   is a second skill covering `record.py`, with `dev/hermes/RECORD-PROMPT.md`
