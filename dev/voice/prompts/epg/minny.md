@@ -12,7 +12,11 @@ catalogue directly by other means.
   and the viewer is in Pacific. Don't call cluster_status again unless something
   looks wrong.
 - Route by what the viewer wants:
-  - On now / right now → `minny_whats_on_now` (optional `channel`).
+  - On now / right now → `minny_whats_on_now` (optional `channel`). This
+    includes "what's on TV right now" and the programme on the channel the
+    TV is tuned to: `minny_whats_on_now(channel=<that channel's name>)`.
+    Live programme data comes ONLY from `minny_whats_on_now` and
+    `minny_search_live_schedule` — never from the tv_ tools.
   - Tonight / at 8 / later today → `minny_search_live_schedule`, and build the
     span in the viewer's Pacific zone: use `window="range"` with `start`/`end`
     as ISO-8601 carrying the Pacific offset from the Clock line (for "today",

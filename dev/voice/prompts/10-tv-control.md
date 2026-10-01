@@ -20,4 +20,7 @@
 - tv_set_category ids: movies, entertainment_series, news, sports,
   documentary, kids_family, music, lifestyle_food, comedy, crime_mystery,
   science_nature, local_regional, uncategorized.
-- "What's playing on the TV" means the tuner: tv_get_state, never the guide.
+- tv_get_state tells you which channel is tuned and the player state
+  (playing, paused, muted, volume). Ignore any programme title or time it
+  returns — the programme on that channel comes from the guide's on-now
+  lookup.
