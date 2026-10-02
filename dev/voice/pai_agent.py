@@ -14,6 +14,7 @@ recent exchanges (EPG results are bulky and stale within a session).
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 from dataclasses import dataclass, field
@@ -172,14 +173,35 @@ def build_agent() -> Agent:
     # them. Override with VOICE_LOCAL_TZ if the device ever moves.
     tz = ZoneInfo(os.environ.get("VOICE_LOCAL_TZ", "America/Los_Angeles"))
 
-    tv = ResilientToolset(
-        MCPToolset(os.environ["TV_MCP_URL"],
-                   cache_tools=True,
-                   init_timeout=5.0,
-                   read_timeout=5.0,
-                   tool_error_behavior="failed")
-        .prefixed("tv"),
-        svc="tv")
+    # The player the tv_ tools drive, by VOICE_TV (alternatives — one only):
+    #   tvshell (default): the TVShell kiosk via its MCP bridge at TV_MCP_URL
+    #   ytvn: the ytvn-epg web viewer via its control-only MCP server, spawned
+    #     over stdio from mcp-tv-ytvn.json (server name "tv" keeps the tv_
+    #     prefix). It needs `python3 serve.py` running in ytvn-epg and the page
+    #     open in a browser; otherwise its tools report the TV as not connected.
+    player = os.environ.get("VOICE_TV", "tvshell")
+    ytvn = None
+    if player == "ytvn":
+        # The model never sees the raw-id tune (guide ids are the catalogue's,
+        # not the player's) nor play_url: it watches by name through the
+        # resolver tools below, which call the server directly. play_asset
+        # stays for picking one of several titles the resolver listed.
+        prefixed = load_mcp_toolsets(
+            str(Path(__file__).parent / "mcp-tv-ytvn.json"))[0]
+        ytvn = prefixed.wrapped
+        tv = ResilientToolset(
+            prefixed.filtered(lambda ctx, td: td.name not in
+                              {"tv_tune_channel", "tv_tune_number", "tv_play_url"}),
+            svc="tv")
+    else:
+        tv = ResilientToolset(
+            MCPToolset(os.environ["TV_MCP_URL"],
+                       cache_tools=True,
+                       init_timeout=5.0,
+                       read_timeout=5.0,
+                       tool_error_behavior="failed")
+            .prefixed("tv"),
+            svc="tv")
 
     if backend == "minny":
         # Minny MCP (stdio) from mcp.json — one toolset per server, already
@@ -208,7 +230,7 @@ def build_agent() -> Agent:
 
     agent = Agent(
         model,
-        instructions=load_static_instructions(backend),
+        instructions=load_static_instructions(backend, player=player),
         toolsets=[*tv_search, tv],
         model_settings=settings,
         deps_type=TurnDeps,
@@ -237,6 +259,61 @@ def build_agent() -> Agent:
             is X on now / what's on at 9" question."""
             from epg_now import whats_on as _whats_on
             return await _whats_on(at_time=at_time, channel=channel, query=query)
+
+    if ytvn is not None:
+        import player_resolve as pr
+
+        async def _control(name: str, args: dict) -> str:
+            try:
+                return _compact(await ytvn.direct_call_tool(name, args))
+            except Exception as e:  # noqa: BLE001 — no_shell, unknown_channel, …
+                return f"{name} failed: {e}"
+
+        @agent.tool_plain
+        async def tv_watch_channel(channel: str) -> str:
+            """Put a live channel on the TV. channel: what the viewer said —
+            a name, call sign, network or number ("KTVU", "Fox", "Gusto TV",
+            "channel 9"). Resolves it against this TV's own lineup and tunes
+            in one call; returns the resulting viewer state, or the closest
+            lineup channels when it is ambiguous or not found."""
+            hit, cands = await pr.find_channel(channel)
+            if hit:
+                return await _control("tune_channel",
+                                      {"channel_id": hit.channel_id})
+            if cands:
+                return ("Not tuned — several channels match; ask which: "
+                        + "; ".join(f"{c.name} ({c.number})" for c in cands))
+            if not await pr.lineup():
+                return "The TV's lineup is unavailable — the TV is not connected."
+            # "Play Love Nature": the viewer may have named a title.
+            titles = await pr.search_titles(channel)
+            if titles:
+                return (f"{channel!r} is not a channel on this TV, but it is an "
+                        "on-demand title — " + await tv_watch_title(channel))
+            return f"{channel!r} is not a channel on this TV."
+
+        @agent.tool_plain
+        async def tv_watch_title(title: str, year: int | None = None) -> str:
+            """Play an on-demand title (film, show) on the TV. title: the
+            title's essential words; year: release year if known. Searches
+            this TV's on-demand catalogue and plays the match in one call;
+            when several titles match it returns them with asset ids —
+            ask the viewer, then call tv_play_asset(asset_id)."""
+            titles = await pr.search_titles(title, year)
+            pick = pr.pick_title(title, titles)
+            if pick:
+                return await _control("play_asset", {"asset_id": pick.asset_id})
+            if titles:
+                return ("Not playing — several titles match; ask which: "
+                        + "; ".join(f"{t.title} ({t.year or 'year ?'}) "
+                                    f"asset_id={t.asset_id}" for t in titles))
+            if not year:
+                # "Put on Trace": the viewer may have named a channel.
+                hit, cands = await pr.find_channel(title)
+                if hit or cands:
+                    return (f"No on-demand title {title!r}, but it is a live "
+                            "channel — " + await tv_watch_channel(title))
+            return f"No on-demand title matching {title!r} on this TV."
 
     @agent.tool_plain
     async def web_lookup(query: str) -> str:
@@ -325,6 +402,21 @@ def _trim(history: list[ModelMessage]) -> list[ModelMessage]:
         else:
             out.append(msg)
     return out
+
+
+def _compact(result) -> str:
+    """A control tool's result as one JSON line without empty fields — the
+    model reads it, and the viewer state is otherwise mostly nulls."""
+    def strip(v):
+        if isinstance(v, dict):
+            return {k: strip(x) for k, x in v.items()
+                    if x not in (None, "", [], {})}
+        if isinstance(v, list):
+            return [strip(x) for x in v]
+        return v
+    if isinstance(result, str):
+        return result
+    return json.dumps(strip(result), ensure_ascii=False, default=str)
 
 
 def _replace(obj, **changes):

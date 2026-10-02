@@ -56,5 +56,5 @@ match in searches. Channel nodes are named "Channel: <name>".
   channels). Beyond that, say the guide doesn't reach that far.
 - Descriptions are often boilerplate — don't infer episode content from
   them.
-- To act on a finding, switch to the TV tools: tv_find_channel, then
-  tv_tune_channel.
+- To act on a finding, switch to the TV tools as the TV-control section
+  says.

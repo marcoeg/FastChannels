@@ -24,3 +24,5 @@
   (playing, paused, muted, volume). Ignore any programme title or time it
   returns — the programme on that channel comes from the guide's on-now
   lookup.
+- This TV plays live channels only. For on-demand and catch-up titles, tell
+  the viewer what's available, but don't offer to play them.

@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "tv": {
+      "command": "uv",
+      "args": ["run", "--quiet", "--no-project", "--with", "mcp>=2",
+               "python", "/home/marco/Development/ytvn-epg/mcp_server.py"],
+      "env": {
+        "YTVN_PROXY": "http://127.0.0.1:8787",
+        "YTVN_ACTOR": "minny",
+        "PATH": "/home/marco/.local/bin:/usr/local/bin:/usr/bin:/bin"
+      }
+    }
+  }
+}
