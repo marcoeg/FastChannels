@@ -14,12 +14,12 @@ ExecStart=/home/marco/Development/FastChannels/dev/voice/voice_agent.py start
 # rooms survive, and LiveKit never re-dispatches an agent to an existing
 # room — the always-connected ESP32 satellite would stay agent-less until
 # its room is deleted (the device's reconnect loop then recreates it and a
-# fresh agent is dispatched). Sleep lets the new worker register first.
-# Two passes, detached (activation isn't delayed): the first must run
-# AFTER the dead job's zombie participant has left the room (server
-# departure timeout ~20-60 s), or the room still "has" an agent and is
-# skipped — observed live on 2026-09-14.
-ExecStartPost=/bin/sh -c '(sleep 75; /home/marco/Development/FastChannels/dev/voice/heal_agentless_rooms.py; sleep 60; /home/marco/Development/FastChannels/dev/voice/heal_agentless_rooms.py) >>/tmp/voice-room-healer.log 2>&1 &'
+# fresh agent is dispatched). --after-restart waits for the new worker's
+# health port, then deletes rooms whose clients and agents all joined before
+# this restart — no fixed sleep, so the satellite is back in seconds (the
+# dead job's agent lingering 20-60 s no longer matters). Detached, so
+# activation isn't delayed.
+ExecStartPost=/bin/sh -c '/home/marco/Development/FastChannels/dev/voice/heal_agentless_rooms.py --after-restart >>/tmp/voice-room-healer.log 2>&1 &'
 Restart=on-failure
 RestartSec=10
 
