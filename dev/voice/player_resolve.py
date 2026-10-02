@@ -2,13 +2,18 @@
 
 The guide (Minny MCP) answers with the catalogue's own ids, which the ytvn
 player does not know; the player only takes edge content ids. Rather than
-trust a crosswalk, resolve against the player's own catalogue, through the
-same ytvn-epg proxy the player uses (serve.py adds the session Bearer):
+trust a crosswalk, resolve against the player's own catalogue:
 
-  channel   name / call sign / network / number → the live lineup
-            (/api/content/list/live_tv/2, 53 channels, cached)
-  title     on-demand title (+ year) → the edge VOD search
-            (/api/content/search/vod) → ASSET contentId
+  channel   name / call sign / network / number → the player's lineup, the
+            ytvn MCP server's viewer://lineup resource (53 channels, cached)
+  title     on-demand title (+ year) → the edge VOD search → ASSET contentId.
+            TEMPORARY: over HTTP on the ytvn proxy until the MCP server
+            offers a viewer://titles resource; then that replaces _get.
+
+The MCP server is meant to be the agent's only path to the player (its
+remote-control WebSocket carries the commands; the proxy's /api relay has
+no remote-control auth). Matching stays here: it is about understanding
+speech, not about the player.
 
 Catch-up and restart (an airing id = channel contentId + start epoch) wait
 for a play_airing command in the player.
@@ -20,12 +25,14 @@ calling tool can answer honestly instead of breaking the turn.
 from __future__ import annotations
 
 import difflib
+import json
 import logging
 import os
 import re
 import time
 import unicodedata
 from dataclasses import dataclass
+from typing import Awaitable, Callable
 from urllib.parse import urlencode
 
 import aiohttp
@@ -95,18 +102,32 @@ async def _get(path: str, params: dict) -> dict | None:
 
 
 _lineup: dict = {"at": 0.0, "channels": []}
+# async (uri) -> resource contents; set by the agent to the ytvn MCP
+# toolset's read_resource.
+_read_resource: Callable[[str], Awaitable[object]] | None = None
+
+
+def use_mcp(read_resource: Callable[[str], Awaitable[object]]) -> None:
+    global _read_resource
+    _read_resource = read_resource
 
 
 async def lineup() -> list[Channel]:
     if time.monotonic() - _lineup["at"] < LINEUP_TTL_S and _lineup["channels"]:
         return _lineup["channels"]
-    d = await _get("/api/content/list/live_tv/2",
-                   {"page": 0, "size": 200, "channelTypes": "LIVE,LIVE_LINK"})
-    rows = ((d or {}).get("contents") or {}).get("content") or []
-    chans = [Channel(str(c["contentId"]), c.get("number"),
-                     c.get("callSign") or c.get("title") or "",
-                     c.get("title") or "")
-             for c in rows if c.get("contentId")]
+    rows: list = []
+    if _read_resource is None:
+        logger.warning("ytvn lineup: no MCP server configured")
+    else:
+        try:
+            raw = await _read_resource("viewer://lineup")
+            rows = json.loads(raw if isinstance(raw, str) else str(raw))
+        except Exception as e:  # noqa: BLE001 — server down / proxy down
+            logger.warning("ytvn lineup unavailable: %s", e)
+    chans = [Channel(str(r["channel_id"]), r.get("number"),
+                     r.get("name") or r.get("title") or "",
+                     r.get("title") or "")
+             for r in rows if isinstance(r, dict) and r.get("channel_id")]
     if chans:
         _lineup.update(at=time.monotonic(), channels=chans)
     return chans or _lineup["channels"]   # stale beats nothing

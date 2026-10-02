@@ -208,8 +208,14 @@ def build_agent() -> Agent:
         # prefixed "minny_". Wrap for the same dead-server resilience as the
         # others. The server needs the Minerva VPN up (see VPN-CONNECT.md).
         minny_cfg = str(Path(__file__).parent / "mcp.json")
-        tv_search = [ResilientToolset(ts, svc="minny")
-                     for ts in load_mcp_toolsets(minny_cfg)]
+        tv_search = load_mcp_toolsets(minny_cfg)
+        if player == "ytvn":
+            # The guide covers the operator's whole catalogue; the ytvn TV
+            # carries one lineup. Keep guide answers to the TV's channels.
+            from lineup_scope import LineupScope, LineupScopedToolset
+            tv_search = [LineupScopedToolset(ts, scope=LineupScope(ts.wrapped))
+                         for ts in tv_search]
+        tv_search = [ResilientToolset(ts, svc="minny") for ts in tv_search]
     else:
         tv_search = [ResilientToolset(
             MCPToolset(os.environ["EPG_MCP_URL"],
@@ -262,6 +268,7 @@ def build_agent() -> Agent:
 
     if ytvn is not None:
         import player_resolve as pr
+        pr.use_mcp(ytvn.read_resource)
 
         async def _control(name: str, args: dict) -> str:
             try:
