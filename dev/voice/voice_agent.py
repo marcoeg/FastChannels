@@ -190,7 +190,8 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         from memory import VoiceMemory
         memory = await VoiceMemory.create(
             port=int(os.environ.get("VOICE_FALKORDB_PORT", "6390")),
-            password=os.environ.get("VOICE_FALKORDB_PASSWORD"))
+            password=os.environ.get("VOICE_FALKORDB_PASSWORD"),
+            maintain=True)
         logger.info("voice memory online (graph voice_memory)")
     except Exception as e:  # noqa: BLE001 — memory is optional, voice is not
         logger.warning("voice memory unavailable, running without it: %s", e)

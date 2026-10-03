@@ -15,6 +15,9 @@
   ./memory_cli.py facts "query" [-n 10]  deep_search results
   ./memory_cli.py episodes [-n 10]       recent raw episodes
   ./memory_cli.py profile                EXACTLY the block injected per turn
+  ./memory_cli.py prune [--days 14] [--dry-run]
+                                         retention: drop old episodes except those
+                                         that created a current household fact
   ./memory_cli.py wipe --yes             dev reset: drop graph, rebuild indices
 """
 
@@ -42,6 +45,9 @@ async def main() -> None:
     p_eps = sub.add_parser("episodes")
     p_eps.add_argument("-n", type=int, default=10)
     sub.add_parser("profile")
+    p_prune = sub.add_parser("prune")
+    p_prune.add_argument("--days", type=float, default=14)
+    p_prune.add_argument("--dry-run", action="store_true")
     p_wipe = sub.add_parser("wipe")
     p_wipe.add_argument("--yes", action="store_true")
     args = ap.parse_args()
@@ -81,6 +87,8 @@ async def main() -> None:
             r = await mem.recall("")
             block = format_memory_context(r.profile, r.recent)
             print(block or "(empty — nothing would be injected)")
+        elif args.cmd == "prune":
+            print(await mem.prune(args.days, dry_run=args.dry_run))
         elif args.cmd == "wipe":
             if not args.yes:
                 sys.exit("refusing without --yes")

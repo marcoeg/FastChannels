@@ -5,25 +5,32 @@ graphiti-core IN-PROCESS against the falkordb-voice container (loopback
 database and the group_id on every call, so graphiti's add_episode
 driver-clone mutation can never re-bind us to another graph.
 
-Hot path contract (see the plan):
-- recall() is awaited every turn under a 0.25 s cap in the worker: profile
-  facts come from an in-process cache (zero I/O), recent episodes from one
-  small DB read capped at 0.2 s. No embedding calls.
-- remember() only enqueues; a single background consumer runs add_episode
-  (the expensive LLM-extraction path) one at a time, per upstream guidance.
-  Memory failures degrade to dropped writes — the voice path never blocks.
+Hot path contract:
+- recall() is awaited every turn under a 0.25 s cap in the worker and does
+  no I/O: profile facts come from an in-process cache, earlier-session
+  exchanges were read from the transcript log once at session start.
+- remember() only enqueues, and only statements of preference, habit or
+  standing instruction (wants_memory) — questions, tuning and small talk
+  never reach graphiti. A single background consumer runs add_episode (the
+  expensive LLM-extraction path) one at a time, with extraction
+  instructions that keep household facts only. Failures degrade to dropped
+  writes — the voice path never blocks.
 - deep_search() backs the agent's search_memory tool: RRF recipe (no LLM
   rerank), ~0.7 s, paid only when the model asks for it.
+- prune() (retention) runs in the background once per session.
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import re
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from pathlib import Path
+from types import SimpleNamespace
+from datetime import datetime, timedelta, timezone
 
 # Importing installs FalkorDriver.search_interface as a CLASS attribute
 # (reaches per-group driver clones too). Without it, similarity search is
@@ -44,36 +51,130 @@ from graphiti_core.search.search_filters import (
 logger = logging.getLogger("voice.memory")
 
 VOICE_MEMORY_GROUP = "voice_memory"
+# Episodes older than this are pruned unless they hold a lasting household
+# fact (VoiceMemory.prune). VOICE_MEMORY_RETENTION_DAYS=0 disables pruning.
+TRANSCRIPT_LOG = Path(os.environ.get(
+    "VOICE_TRANSCRIPT_LOG", Path.home() / "news" / "voice-conversations.jsonl"))
+RETENTION_DAYS = float(os.environ.get("VOICE_MEMORY_RETENTION_DAYS", "14"))
 PROFILE_QUERY = ("user preferences favorite channels shows genres "
                  "household routine standing instructions")
 
-_SKIP_ACK = re.compile(
-    r"^(ok(ay)?|thanks?( a lot)?|thank you|yes|no|yeah|nope|sure|"
-    r"stop|cancel|never ?mind|got it)[.!]?$", re.I)
-_SKIP_CONTROL = re.compile(
-    r"^(turn (it|the tv) (up|down|off)|volume\b|mute\b|unmute\b|"
-    r"pause\b|play\b|resume\b|louder|quieter|"
-    r"(turn )?captions?\b|open the guide|close the guide)", re.I)
-_KEEP = re.compile(
-    r"\b(always|never|remember|forget|favou?rite|prefer|"
-    r"i (like|love|hate|watch)|my |our |we |usually|"
-    r"every (night|morning|day|week(end)?))\b", re.I)
+# Only statements ABOUT the household reach graphiti. Its extraction turns
+# whatever it is given into facts — schedule data, suggestions, what the
+# assistant did — and custom instructions only partly hold it back (tested:
+# gpt-5-mini still filed "Assistant suggested Frasier", "Jojo Rabbit is on
+# FX at 4:15"). So the gate is here, before any LLM cost: questions, tuning
+# and small talk are not memory; the transcript log keeps them for context.
+_PREFERENCE = re.compile(
+    r"\b(remember|forget|favou?rite|prefer(red)?|"
+    r"i (really |just |also )?(like|love|hate|enjoy|adore|can'?t stand|don'?t like)|"
+    r"we (really |all )?(like|love|hate|enjoy|usually|always|never|watch)|"
+    r"(i|we) (usually|always|never|normally)|my usual|our usual|"
+    r"usually|every (night|morning|day|evening|weekend|week)|"
+    r"(don'?t|never) (ever )?(suggest|show|recommend|play) me|"
+    r"(always|never) (set|put|play|suggest|show|turn)|"
+    r"when i say)\b", re.I)
+_QUESTION = re.compile(
+    r"^(what|which|when|where|who|how|is|are|do|does|did|can|could|should|"
+    r"will|would)\b.*\?*$", re.I)
 
 
-def _worth_remembering(user_text: str, assistant_text: str,
-                       interrupted: bool) -> bool:
+def wants_memory(user_text: str) -> bool:
+    """True for a statement of preference, habit or standing instruction.
+    A question that merely mentions a favourite ("what's my favorite news
+    channel?") asks memory; it doesn't add to it."""
     t = user_text.strip()
-    if len(t) < 8 or _SKIP_ACK.match(t):
+    if len(t) < 8 or not _PREFERENCE.search(t):
         return False
-    if not assistant_text.strip():
-        return False                       # nothing was spoken back
-    if interrupted and len(assistant_text) < 40:
-        return False                       # barge-in fragment
-    if _KEEP.search(t):
-        return True                        # standing instructions always kept
-    if _SKIP_CONTROL.match(t):
-        return False                       # transient device twiddling
-    return True                            # incl. tune-by-name: repetition IS the signal
+    return not (_QUESTION.match(t) and not re.search(r"\b(remember|forget)\b", t, re.I))
+
+
+# An assistant line that declined or failed. Replaying those as "earlier
+# sessions" taught the model to repeat them after the capability arrived
+# ("There isn't a BBC News catch-up recording available on this TV").
+_REFUSAL = re.compile(
+    r"\b(can'?t|cannot|couldn'?t|unable|isn'?t|aren'?t|wasn'?t|"
+    r"there'?s no|there (is|are) no|not (available|in|on|supported|possible)|"
+    r"no longer|sorry|doesn'?t have|don'?t have)\b", re.I)
+
+# Profile facts must be about the household. Graphiti extracts facts from
+# every exchange, so the store also holds facts about the assistant ("can
+# tune channels"), about what was once on screen ("UEFA.tv is showing …"),
+# about the guide's data, and meta chatter ("user asks what they would like
+# to do") — the profile query ranks those in when real preferences are few.
+_NOT_HOUSEHOLD = re.compile(
+    r"^(the )?(assistant|minny|tv|guide|catalogue|channel|uefa|programme)\b|"
+    r"^(the )?assistant \(|"
+    r"\b(is|are) (showing|airing|on now)\b|"
+    r"^(the )?lineup\b|"
+    # one-off requests and actions are history, not who the household is
+    r"^user (asks?|asked|requests?|requested|tuned|switched|is on|was on)\b", re.I)
+
+
+# Passed to graphiti's entity AND fact extraction for every new episode:
+# remember the household, not the session. Without it, every exchange
+# became facts like "assistant can tune channels" or "UEFA.tv is showing
+# the draw" — true for a minute, then noise in search and the profile.
+EXTRACTION_INSTRUCTIONS = """\
+This is one exchange between a household and its TV voice assistant. The
+memory exists to know the HOUSEHOLD over weeks and months. Extract ONLY:
+- the household's preferences and dislikes: favourite shows, channels,
+  genres, people (actors, hosts, teams), languages;
+- habits and routines ("we watch the news at six", "the kids watch cartoons
+  after school");
+- standing instructions to the assistant ("when I say turn it up, set the
+  volume to twenty", "never suggest horror");
+- people in the household and facts they state about themselves;
+- explicit requests to remember or forget something.
+Do NOT extract:
+- what the assistant did, can do, or failed to do (tuning, volume, searches,
+  "could not find", "is loading");
+- what is on air, on screen, or in the guide or lineup right now, or any
+  schedule data (programmes, airings, channel numbers);
+- one-off requests ("put on KTVU", "what's on now", "pause") — a single
+  request is not a preference;
+- small talk and greetings.
+Entities are the household member (as "User") and what the preference is
+about: a show, channel, genre, person, language, or a TV setting such as
+"Volume" or "Captions" — so a standing instruction like "when I say turn it
+up, set the volume to twenty" is a fact between User and Volume.
+If the exchange contains none of the above, extract nothing."""
+
+
+_PREF_FACT = re.compile(
+    r"\b(favou?rite|prefers?|preferred|preference|likes?|loves?|enjoys?|hates?|"
+    r"dislikes?|usual(ly)?|always|never|routine|habit|every (night|morning|day|"
+    r"evening|weekend|week)|instructs?|standing|no longer|wants the assistant|"
+    r"when (the )?user says|when they say)\b", re.I)
+_OFFERED = re.compile(r"\b(offered|suggest\w*|recommend\w*|scheduled|airing|"
+                      r"is on (channel|[A-Z])|called the assistant)\b", re.I)
+
+
+def is_household_fact(fact: str) -> bool:
+    """A lasting fact about the household: says what they like, do or want
+    (positive test), and is not an offer, a schedule, or about the
+    assistant / screen / guide."""
+    text = re.sub(r" \(as of [^)]*\)$", "", fact)
+    return bool(_PREF_FACT.search(text)) and not _OFFERED.search(text) \
+        and not _NOT_HOUSEHOLD.search(text)
+
+
+def _profile_facts(facts: list[str]) -> list[str]:
+    """Household facts only, near-duplicates collapsed (the first, i.e.
+    highest-ranked, phrasing wins)."""
+    out: list[str] = []
+    seen: list[set[str]] = []
+    for f in facts:
+        text = re.sub(r" \(as of [^)]*\)$", "", f)
+        if not is_household_fact(text):
+            continue
+        words = {w for w in re.findall(r"[a-z0-9]+", text.lower())
+                 if len(w) > 2 and w not in {"the", "user", "their", "and", "for"}}
+        if any(len(words & s) / max(1, len(words | s)) >= 0.6 for s in seen):
+            continue
+        seen.append(words)
+        out.append(f)
+    return out
 
 
 @dataclass
@@ -91,11 +192,19 @@ class VoiceMemory:
         self.profile_ready: asyncio.Task | None = None
         self._consumer: asyncio.Task | None = None
         self._closing = False
+        self._maintenance: asyncio.Task | None = None
         self._last_enqueued_user = ""
+        # One VoiceMemory per LiveKit job = per session.
+        self._session_start = datetime.now(timezone.utc)
+        self._earlier = self._load_earlier()
 
     @classmethod
     async def create(cls, *, host: str = "127.0.0.1", port: int = 6390,
-                     password: str | None = None) -> "VoiceMemory":
+                     password: str | None = None,
+                     maintain: bool = False) -> "VoiceMemory":
+        """maintain=True (the voice worker): prune old episodes in the
+        background once the profile is warm — at most once per session,
+        never on the voice path."""
         os.environ.setdefault("GRAPHITI_TELEMETRY_ENABLED", "false")
         driver = FalkorDriver(host=host, port=port, password=password,
                               database=VOICE_MEMORY_GROUP)
@@ -115,26 +224,53 @@ class VoiceMemory:
         self._consumer = asyncio.create_task(self._consume(), name="memory-writer")
         self.profile_ready = asyncio.create_task(
             self._refresh_profile(), name="memory-profile-warmup")
+        if maintain and RETENTION_DAYS > 0:
+            async def _maintain() -> None:
+                await self.profile_ready
+                await self.prune()
+            self._maintenance = asyncio.create_task(_maintain(), name="memory-prune")
         return self
 
     # ── hot path ──────────────────────────────────────────────────────
 
-    async def recall(self, user_text: str) -> RecallResult:
-        """<50 ms typical. user_text deliberately unused (no embedding on
-        the hot path); query-specific lookups are deep_search's job."""
-        recent: list[str] = []
+    def _load_earlier(self, n: int = 4) -> list[str]:
+        """The last n exchanges of EARLIER sessions, from the transcript log
+        (voice_agent.py writes it), newest first, refusals left out. Read
+        once per session — earlier sessions don't change during this one."""
         try:
-            episodes = await asyncio.wait_for(
-                self._graphiti.retrieve_episodes(
-                    reference_time=datetime.now(timezone.utc),
-                    last_n=4, group_ids=[VOICE_MEMORY_GROUP]),
-                timeout=0.2)
-            for ep in reversed(episodes):   # most recent first
-                body = " / ".join(str(ep.content or "").split("\n"))
-                recent.append(body)
-        except (asyncio.TimeoutError, Exception) as e:  # noqa: BLE001
-            if not isinstance(e, asyncio.TimeoutError):
-                logger.debug("recent-episode fetch failed: %s", e)
+            with open(TRANSCRIPT_LOG, "rb") as fh:
+                fh.seek(0, 2)
+                fh.seek(max(0, fh.tell() - 256_000))
+                lines = fh.read().decode("utf-8", "replace").splitlines()[1:]
+        except OSError:
+            return []
+        rows = []
+        for line in lines:
+            try:
+                r = json.loads(line)
+            except ValueError:
+                continue
+            try:
+                ts = datetime.fromisoformat(r["ts"])
+            except (KeyError, ValueError):
+                continue
+            if ts < self._session_start:
+                rows.append(r)
+        out: list[str] = []
+        for user, asst in zip(rows, rows[1:]):
+            if user.get("role") != "user" or asst.get("role") != "assistant":
+                continue
+            said = str(asst.get("text", "")).replace("\u2019", "'")
+            if asst.get("interrupted") or _REFUSAL.search(said):
+                continue
+            out.append(f"user: {user.get('text', '')} / assistant: {said}")
+        return out[-n:][::-1]
+
+    async def recall(self, user_text: str) -> RecallResult:
+        """Zero I/O: the profile is cached, earlier sessions were read at
+        session start. user_text deliberately unused (no embedding on the hot
+        path); query-specific lookups are deep_search's job."""
+        recent = self._earlier                # zero I/O on the hot path
         return RecallResult(profile=list(self._profile), recent=recent)
 
     def remember(self, user_text: str, assistant_text: str, *,
@@ -142,8 +278,10 @@ class VoiceMemory:
                  ts: datetime | None = None) -> None:
         if self._closing:
             return
-        if not _worth_remembering(user_text, assistant_text, interrupted):
+        if not wants_memory(user_text) or not assistant_text.strip():
             return
+        if interrupted and len(assistant_text) < 40:
+            return                           # barge-in fragment
         if user_text.strip() == self._last_enqueued_user:
             return                           # STT repeats
         self._last_enqueued_user = user_text.strip()
@@ -178,7 +316,8 @@ class VoiceMemory:
                         source=EpisodeType.message,
                         source_description="TV voice assistant conversation",
                         reference_time=ts,
-                        group_id=VOICE_MEMORY_GROUP),
+                        group_id=VOICE_MEMORY_GROUP,
+                        custom_extraction_instructions=EXTRACTION_INSTRUCTIONS),
                     timeout=180)
                 await self._refresh_profile()
             except asyncio.CancelledError:
@@ -189,15 +328,73 @@ class VoiceMemory:
             finally:
                 self._queue.task_done()
 
+    async def prune(self, max_age_days: float = RETENTION_DAYS,
+                    dry_run: bool = False) -> dict:
+        """Retention: remove episodes older than max_age_days unless one
+        created a fact that is still current AND about the household.
+
+        Graphiti never expires episodes by itself. remove_episode() deletes
+        the episode, the facts it FIRST created and the entities only it
+        mentioned — so an old episode that created a lasting preference
+        ("Columbo is my favourite", Aug 31) must be kept, or the preference
+        goes with it. Everything else old (device control, what's-on chatter,
+        test sessions) is removed. Never raises."""
+        stats = {"checked": 0, "kept": 0, "removed": 0, "failed": 0}
+        cutoff = (datetime.now(timezone.utc)
+                  - timedelta(days=max_age_days)).isoformat()
+        try:
+            rows, _, _ = await self._driver.execute_query(
+                "MATCH (e:Episodic) WHERE e.group_id = $g AND e.valid_at < $cutoff "
+                "RETURN e.uuid AS uuid, e.entity_edges AS edges",
+                g=VOICE_MEMORY_GROUP, cutoff=cutoff)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("memory prune: listing failed: %s", e)
+            return stats
+        now = datetime.now(timezone.utc)
+        for row in rows:
+            stats["checked"] += 1
+            ep, edge_ids = row["uuid"], list(row["edges"] or [])
+            keep = False
+            if edge_ids:
+                erows, _, _ = await self._driver.execute_query(
+                    "MATCH ()-[r:RELATES_TO]->() WHERE r.uuid IN $ids "
+                    "RETURN r.fact AS fact, r.episodes AS episodes, "
+                    "r.invalid_at AS invalid_at, r.expired_at AS expired_at",
+                    ids=edge_ids)
+                for r in erows:
+                    created_here = (r["episodes"] or [None])[0] == ep
+                    current = _is_current(SimpleNamespace(
+                        invalid_at=r["invalid_at"], expired_at=r["expired_at"]), now)
+                    if created_here and current and is_household_fact(r["fact"] or ""):
+                        keep = True
+                        break
+            if keep:
+                stats["kept"] += 1
+                continue
+            if dry_run:
+                stats["removed"] += 1
+                continue
+            try:
+                await self._graphiti.remove_episode(ep)
+                stats["removed"] += 1
+            except Exception as e:  # noqa: BLE001
+                stats["failed"] += 1
+                logger.debug("memory prune: %s: %s", ep, e)
+        logger.info("memory prune (>%gd%s): %s", max_age_days,
+                    ", dry run" if dry_run else "", stats)
+        if stats["removed"] and not dry_run:
+            await self._refresh_profile()
+        return stats
+
     async def _refresh_profile(self) -> None:
         try:
             cfg = EDGE_HYBRID_SEARCH_RRF.model_copy(deep=True)
-            cfg.limit = 12
+            cfg.limit = 30                 # over-fetch: most get filtered out
             results = await self._graphiti.search_(
                 query=PROFILE_QUERY, config=cfg,
                 group_ids=[VOICE_MEMORY_GROUP],
                 search_filter=_current_facts_filter())
-            self._profile = _format_edges(results.edges)
+            self._profile = _profile_facts(_format_edges(results.edges))[:12]
         except Exception as e:  # noqa: BLE001
             logger.debug("profile refresh failed (keeping old cache): %s", e)
 
@@ -210,6 +407,8 @@ class VoiceMemory:
                            self._queue.qsize())
         if self._consumer:
             self._consumer.cancel()
+        if self._maintenance and not self._maintenance.done():
+            self._maintenance.cancel()
         await self._graphiti.close()
 
 
