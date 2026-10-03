@@ -19,6 +19,7 @@
                                          retention: drop old episodes except those
                                          that created a current household fact
   ./memory_cli.py wipe --yes             dev reset: drop graph, rebuild indices
+  ./memory_cli.py --test <command>       the same on the test-room graph (voice_memory_test)
 """
 
 import argparse
@@ -37,6 +38,8 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 async def main() -> None:
     ap = argparse.ArgumentParser()
+    ap.add_argument("--test", action="store_true",
+                    help="the test-room graph (voice_memory_test) instead of the household's")
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("stats")
     p_facts = sub.add_parser("facts")
@@ -52,10 +55,11 @@ async def main() -> None:
     p_wipe.add_argument("--yes", action="store_true")
     args = ap.parse_args()
 
-    from memory import VOICE_MEMORY_GROUP, VoiceMemory  # noqa: E402
+    from memory import VoiceMemory  # noqa: E402
     mem = await VoiceMemory.create(
         port=int(os.environ.get("VOICE_FALKORDB_PORT", "6390")),
-        password=os.environ.get("VOICE_FALKORDB_PASSWORD"))
+        password=os.environ.get("VOICE_FALKORDB_PASSWORD"),
+        test=args.test)
     driver = mem._driver
     g = mem._graphiti
 
@@ -74,7 +78,7 @@ async def main() -> None:
             from datetime import datetime, timezone
             eps = await g.retrieve_episodes(
                 reference_time=datetime.now(timezone.utc),
-                last_n=args.n, group_ids=[VOICE_MEMORY_GROUP])
+                last_n=args.n, group_ids=[mem._group])
             for ep in eps:
                 print(f"[{ep.valid_at}] {ep.name}\n  "
                       + str(ep.content).replace("\n", "\n  "))
@@ -94,7 +98,12 @@ async def main() -> None:
                 sys.exit("refusing without --yes")
             await driver.execute_query("MATCH (n) DETACH DELETE n")
             await driver.build_indices_and_constraints()
-            print("voice_memory wiped, indices rebuilt")
+            print(f"{mem._group} wiped, indices rebuilt")
+            if args.test:
+                from datetime import datetime, timezone
+                from memory import TEST_RESET_MARKER
+                TEST_RESET_MARKER.write_text(datetime.now(timezone.utc).isoformat())
+                print("test sessions start without earlier-session history from now")
     finally:
         await mem.aclose(flush_timeout=1)
 

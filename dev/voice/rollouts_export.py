@@ -80,6 +80,8 @@ def main() -> None:
     ap.add_argument("--room", help="voice | speaker | …")
     ap.add_argument("--llm", help="openai | local")
     ap.add_argument("--include-interrupted", action="store_true")
+    ap.add_argument("--include-test", action="store_true",
+                    help="keep test-room turns (marked \"test\": true; dropped by default)")
     args = ap.parse_args()
 
     recs = load(args.since, args.until)
@@ -89,6 +91,8 @@ def main() -> None:
     for r in recs:
         stats["read"] += 1
         sig = r.get("signals", {})
+        if r.get("test") and not args.include_test:
+            stats["dropped: test room"] += 1; continue
         if args.room and r.get("room") != args.room:
             stats["filtered: room"] += 1; continue
         if args.llm and r.get("brain", {}).get("llm") != args.llm:

@@ -45,8 +45,10 @@ logger = logging.getLogger("voice.llm")
 class PydanticLLM(llm.LLM):
     def __init__(self, brain: VoiceBrain, *, session_id: str = "",
                  room: str = "", is_satellite: bool = False,
-                 tracer: RolloutWriter | None = None) -> None:
+                 tracer: RolloutWriter | None = None,
+                 is_test: bool = False) -> None:
         super().__init__()
+        self.is_test = is_test              # test room: traces get "test": true
         self.brain = brain
         self.turn_lock = asyncio.Lock()
         self.pending_recall = None          # set per turn by on_user_turn_completed
@@ -102,6 +104,7 @@ class PydanticLLMStream(llm.LLMStream):
             brain.commit_exchange(user_text, ack)
             log_turn({"type": "turn_timing", "session_id": self._pai.session_id,
                       "turn_id": self._turn_id, "closing_ack": True,
+                      "test": self._pai.is_test,
                       "user_chars": len(user_text), "ttfd_ms": 0, "total_ms": 0})
             return
         recall = self._pai.pending_recall
@@ -190,7 +193,7 @@ class PydanticLLMStream(llm.LLMStream):
             finally:
                 if trace is not None:
                     try:
-                        self._pai.tracer.enqueue(build_record(
+                        rec = build_record(
                             session_id=self._pai.session_id,
                             turn_index=turn_index, turn_id=self._turn_id,
                             room=self._pai.room,
@@ -200,7 +203,10 @@ class PydanticLLMStream(llm.LLMStream):
                             spoken="".join(spoken), interrupted=interrupted,
                             error=error, ts_start=wall0, ttfd_ms=ttfd_ms,
                             total_ms=(time.monotonic() - t0) * 1000,
-                            recall_used=recall is not None))
+                            recall_used=recall is not None)
+                        if rec is not None and self._pai.is_test:
+                            rec["test"] = True
+                        self._pai.tracer.enqueue(rec)
                     except Exception:  # noqa: BLE001 — never break a turn
                         logger.debug("rollout build failed", exc_info=True)
                 log_turn({

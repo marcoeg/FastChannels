@@ -185,14 +185,20 @@ async def _stt_recycle_loop(stt) -> None:
 async def entrypoint(ctx: agents.JobContext) -> None:
     await ctx.connect()
 
+    # Test mode (rooms test-… / voice-probe…): same agent, but traces are
+    # marked, memory is a separate graph and real sessions never see test
+    # exchanges — see memory.is_test_room.
+    from memory import is_test_room
+    is_test = is_test_room(ctx.room.name)
     memory = None
     try:
         from memory import VoiceMemory
         memory = await VoiceMemory.create(
             port=int(os.environ.get("VOICE_FALKORDB_PORT", "6390")),
             password=os.environ.get("VOICE_FALKORDB_PASSWORD"),
-            maintain=True)
-        logger.info("voice memory online (graph voice_memory)")
+            maintain=True, test=is_test)
+        logger.info("voice memory online (graph %s)%s", memory._group,
+                    " — TEST room" if is_test else "")
     except Exception as e:  # noqa: BLE001 — memory is optional, voice is not
         logger.warning("voice memory unavailable, running without it: %s", e)
 
@@ -202,7 +208,8 @@ async def entrypoint(ctx: agents.JobContext) -> None:
     session_id = f"{ctx.room.name}:{ctx.job.id}"
     tracer = RolloutWriter() if tracing_enabled() else None
     pai = PydanticLLM(brain, session_id=session_id, room=ctx.room.name,
-                      is_satellite=ctx.room.name == "speaker", tracer=tracer)
+                      is_satellite=ctx.room.name == "speaker", tracer=tracer,
+                      is_test=is_test)
 
     # Keep MCP sessions warm for the whole job (otherwise per-run setup).
     await brain.agent.__aenter__()

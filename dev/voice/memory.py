@@ -51,6 +51,19 @@ from graphiti_core.search.search_filters import (
 logger = logging.getLogger("voice.memory")
 
 VOICE_MEMORY_GROUP = "voice_memory"
+TEST_MEMORY_GROUP = "voice_memory_test"
+# Written by `memory_cli.py --test wipe`: test sessions ignore transcript rows
+# older than it, so a reset test run starts with no "earlier sessions" too.
+TEST_RESET_MARKER = Path.home() / "news" / "voice-test-reset"
+
+
+def is_test_room(room: str | None) -> bool:
+    """Test traffic: rooms named test-… (the phone client opened with ?test)
+    and voice_probe.py's voice-probe… rooms. Their turns are traced but
+    marked, their memory is a separate graph, and their exchanges never
+    reach a real session's "earlier sessions" (nor the reverse)."""
+    room = room or ""
+    return room.startswith("test-") or room.startswith("voice-probe")
 # Episodes older than this are pruned unless they hold a lasting household
 # fact (VoiceMemory.prune). VOICE_MEMORY_RETENTION_DAYS=0 disables pruning.
 TRANSCRIPT_LOG = Path(os.environ.get(
@@ -184,7 +197,10 @@ class RecallResult:
 
 
 class VoiceMemory:
-    def __init__(self, graphiti: Graphiti, driver: FalkorDriver) -> None:
+    def __init__(self, graphiti: Graphiti, driver: FalkorDriver,
+                 group: str = VOICE_MEMORY_GROUP, test: bool = False) -> None:
+        self._group = group
+        self.test = test
         self._graphiti = graphiti
         self._driver = driver
         self._profile: list[str] = []
@@ -201,13 +217,15 @@ class VoiceMemory:
     @classmethod
     async def create(cls, *, host: str = "127.0.0.1", port: int = 6390,
                      password: str | None = None,
-                     maintain: bool = False) -> "VoiceMemory":
+                     maintain: bool = False,
+                     test: bool = False) -> "VoiceMemory":
         """maintain=True (the voice worker): prune old episodes in the
         background once the profile is warm — at most once per session,
         never on the voice path."""
         os.environ.setdefault("GRAPHITI_TELEMETRY_ENABLED", "false")
+        group = TEST_MEMORY_GROUP if test else VOICE_MEMORY_GROUP
         driver = FalkorDriver(host=host, port=port, password=password,
-                              database=VOICE_MEMORY_GROUP)
+                              database=group)
         # graphiti's defaults (gpt-5.5 + small gpt-4.1-nano) assume model
         # access this OpenAI project may not have — pin both explicitly.
         from graphiti_core.llm_client.config import LLMConfig
@@ -220,7 +238,7 @@ class VoiceMemory:
         # The driver only schedules index creation when built inside a
         # running loop, and silently skips it otherwise — be explicit.
         await driver.build_indices_and_constraints()
-        self = cls(graphiti, driver)
+        self = cls(graphiti, driver, group=group, test=test)
         self._consumer = asyncio.create_task(self._consume(), name="memory-writer")
         self.profile_ready = asyncio.create_task(
             self._refresh_profile(), name="memory-profile-warmup")
@@ -244,6 +262,12 @@ class VoiceMemory:
                 lines = fh.read().decode("utf-8", "replace").splitlines()[1:]
         except OSError:
             return []
+        floor = None
+        if self.test:
+            try:
+                floor = datetime.fromisoformat(TEST_RESET_MARKER.read_text().strip())
+            except (OSError, ValueError):
+                floor = None
         rows = []
         for line in lines:
             try:
@@ -254,7 +278,10 @@ class VoiceMemory:
                 ts = datetime.fromisoformat(r["ts"])
             except (KeyError, ValueError):
                 continue
-            if ts < self._session_start:
+            # real sessions never see test exchanges, and the reverse
+            if floor is not None and ts < floor:
+                continue                    # before the last test reset
+            if ts < self._session_start and is_test_room(r.get("room")) == self.test:
                 rows.append(r)
         out: list[str] = []
         for user, asst in zip(rows, rows[1:]):
@@ -298,7 +325,7 @@ class VoiceMemory:
         cfg = EDGE_HYBRID_SEARCH_RRF.model_copy(deep=True)
         cfg.limit = limit
         results = await self._graphiti.search_(
-            query=query, config=cfg, group_ids=[VOICE_MEMORY_GROUP],
+            query=query, config=cfg, group_ids=[self._group],
             search_filter=_current_facts_filter())
         return _format_edges(results.edges)
 
@@ -316,7 +343,7 @@ class VoiceMemory:
                         source=EpisodeType.message,
                         source_description="TV voice assistant conversation",
                         reference_time=ts,
-                        group_id=VOICE_MEMORY_GROUP,
+                        group_id=self._group,
                         custom_extraction_instructions=EXTRACTION_INSTRUCTIONS),
                     timeout=180)
                 await self._refresh_profile()
@@ -346,7 +373,7 @@ class VoiceMemory:
             rows, _, _ = await self._driver.execute_query(
                 "MATCH (e:Episodic) WHERE e.group_id = $g AND e.valid_at < $cutoff "
                 "RETURN e.uuid AS uuid, e.entity_edges AS edges",
-                g=VOICE_MEMORY_GROUP, cutoff=cutoff)
+                g=self._group, cutoff=cutoff)
         except Exception as e:  # noqa: BLE001
             logger.warning("memory prune: listing failed: %s", e)
             return stats
@@ -392,7 +419,7 @@ class VoiceMemory:
             cfg.limit = 30                 # over-fetch: most get filtered out
             results = await self._graphiti.search_(
                 query=PROFILE_QUERY, config=cfg,
-                group_ids=[VOICE_MEMORY_GROUP],
+                group_ids=[self._group],
                 search_filter=_current_facts_filter())
             self._profile = _profile_facts(_format_edges(results.edges))[:12]
         except Exception as e:  # noqa: BLE001

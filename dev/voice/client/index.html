@@ -39,9 +39,22 @@ let room = null;
 
 function setStatus(t) { status.textContent = t; }
 
+// ?test → room "test-plan": the agent's test mode (traces marked "test",
+// a separate memory graph, no mixing with real sessions).
+const TEST = new URLSearchParams(location.search).has('test');
+if (TEST) {
+  const b = document.createElement('div');
+  b.textContent = 'TEST MODE — room test-plan';
+  b.style.cssText = 'position:fixed;top:0;left:0;right:0;padding:6px;text-align:center;' +
+                    'background:#b45309;color:#fff;font:600 14px system-ui;z-index:10';
+  document.body.appendChild(b);
+}
+
 btn.onclick = async () => {
   if (room) { await room.disconnect(); return; }
   const url = window.VOICE_CONFIG.url.replace('{HOST}', location.hostname);
+  const token = TEST ? window.VOICE_CONFIG.testToken : window.VOICE_CONFIG.token;
+  if (TEST && !token) { setStatus('no test token — re-run mint_token.py'); return; }
   room = new Room();
 
   room.on(RoomEvent.TrackSubscribed, (track) => {
@@ -62,7 +75,7 @@ btn.onclick = async () => {
 
   try {
     setStatus('connecting…');
-    await room.connect(url, window.VOICE_CONFIG.token);
+    await room.connect(url, token);
     await room.localParticipant.setMicrophoneEnabled(true);
     btn.textContent = 'Disconnect';
     setStatus('connected — just talk');

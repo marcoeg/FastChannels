@@ -6,7 +6,9 @@
 """Mint a LiveKit room token and write the browser client config.
 
 Usage: ./mint_token.py [days]   (default 30)
-Writes dev/voice/client/config.js (git-excluded) with the wss URL and token.
+Writes dev/voice/client/config.js (git-excluded) with the wss URL and two
+tokens: room "voice" (normal use) and room "test-plan" (the page opened
+with ?test — the agent's test mode).
 """
 
 import json
@@ -25,28 +27,33 @@ env = dict(
 
 days = int(sys.argv[1]) if len(sys.argv) > 1 else 30
 now = int(time.time())
-token = jwt.encode(
-    {
-        "iss": env["LIVEKIT_API_KEY"].strip(),
-        "sub": "marco",
-        "name": "Marco",
-        "nbf": now - 60,
-        "exp": now + days * 86400,
-        "video": {
-            "room": "voice",
-            "roomJoin": True,
-            "canPublish": True,
-            "canSubscribe": True,
+def mint(room: str) -> str:
+    return jwt.encode(
+        {
+            "iss": env["LIVEKIT_API_KEY"].strip(),
+            "sub": "marco",
+            "name": "Marco",
+            "nbf": now - 60,
+            "exp": now + days * 86400,
+            "video": {
+                "room": room,
+                "roomJoin": True,
+                "canPublish": True,
+                "canSubscribe": True,
+            },
         },
-    },
-    env["LIVEKIT_API_SECRET"].strip(),
-    algorithm="HS256",
-)
+        env["LIVEKIT_API_SECRET"].strip(),
+        algorithm="HS256",
+    )
+
 
 config = {
     # The browser reaches LiveKit through caddy's TLS proxy on 8443.
     "url": "wss://" + "{HOST}" + ":8443",
-    "token": token,
+    "token": mint("voice"),
+    # Opened with ?test the page joins room "test-plan": the agent's test
+    # mode (marked traces, separate memory graph) — see TEST-SCRIPT.md.
+    "testToken": mint("test-plan"),
 }
 out = HERE / "client" / "config.js"
 out.write_text(
