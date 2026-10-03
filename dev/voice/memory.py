@@ -69,7 +69,7 @@ _PREFERENCE = re.compile(
     r"\b(remember|forget|favou?rite|prefer(red)?|"
     r"i (really |just |also )?(like|love|hate|enjoy|adore|can'?t stand|don'?t like)|"
     r"we (really |all )?(like|love|hate|enjoy|usually|always|never|watch)|"
-    r"(i|we) (usually|always|never|normally)|my usual|our usual|"
+    r"(i|we) (usually|always|never|normally)|(my|our) (usual|normal|default|regular)|"
     r"usually|every (night|morning|day|evening|weekend|week)|"
     r"(don'?t|never) (ever )?(suggest|show|recommend|play) me|"
     r"(always|never) (set|put|play|suggest|show|turn)|"
@@ -143,7 +143,7 @@ If the exchange contains none of the above, extract nothing."""
 
 _PREF_FACT = re.compile(
     r"\b(favou?rite|prefers?|preferred|preference|likes?|loves?|enjoys?|hates?|"
-    r"dislikes?|usual(ly)?|always|never|routine|habit|every (night|morning|day|"
+    r"dislikes?|usual(ly)?|normal(ly)?|default|regular|always|never|routine|habit|every (night|morning|day|"
     r"evening|weekend|week)|instructs?|standing|no longer|wants the assistant|"
     r"when (the )?user says|when they say)\b", re.I)
 _OFFERED = re.compile(r"\b(offered|suggest\w*|recommend\w*|scheduled|airing|"
