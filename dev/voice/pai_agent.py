@@ -186,6 +186,7 @@ def build_agent(primers: list | None = None) -> Agent:
     #     open in a browser; otherwise its tools report the TV as not connected.
     player = os.environ.get("VOICE_TV", "tvshell")
     ytvn = None
+    scopes: list = []                        # LineupScopes (ytvn + Minny guide)
     if player == "ytvn":
         # The model never sees the raw-id tune (guide ids are the catalogue's,
         # not the player's) nor play_url: it watches by name through the
@@ -311,6 +312,17 @@ def build_agent(primers: list | None = None) -> Agent:
                         + "; ".join(f"{c.name} ({c.number})" for c in cands))
             if not await pr.lineup():
                 return "The TV's lineup is unavailable — the TV is not connected."
+            # "Put on College Football": a programme on air, not a channel.
+            live = await _airing_now(channel)
+            if len(live) == 1:
+                r = live[0]
+                return (f"{channel!r} is not a channel, but {r['title']!r} is on now on "
+                        f"{r['channel_name']} until {r.get('end_local', '?')} — "
+                        + await tv_watch_channel(r["channel_name"]))
+            if live:
+                return (f"{channel!r} is on now on several channels; ask which: "
+                        + "; ".join(f"{r['channel_name']} ({r.get('channel_number')}) "
+                                    f"until {r.get('end_local', '?')}" for r in live))
             # "Play Love Nature": the viewer may have named a title.
             titles = await pr.search_titles(channel)
             if titles:
@@ -334,12 +346,47 @@ def build_agent(primers: list | None = None) -> Agent:
                         + "; ".join(f"{t.title} ({t.year or 'year ?'}) "
                                     f"asset_id={t.asset_id}" for t in titles))
             if not year:
+                # "Put on Columbo": a show airing now on one of this TV's
+                # channels. Asked as a title, it used to end in "not on
+                # demand — shall I check live?" and two more turns.
+                live = await _airing_now(title)
+                if len(live) == 1:
+                    r = live[0]
+                    return (f"Not on demand, but {r['title']!r} is on live now on "
+                            f"{r['channel_name']} until {r.get('end_local', '?')} — "
+                            + await tv_watch_channel(r["channel_name"]))
+                if live:
+                    return ("Not on demand, but it is on live now on several channels; "
+                            "ask which: " + "; ".join(
+                                f"{r['channel_name']} ({r.get('channel_number')}) until "
+                                f"{r.get('end_local', '?')}" for r in live))
                 # "Put on Trace": the viewer may have named a channel.
                 hit, cands = await pr.find_channel(title)
                 if hit or cands:
                     return (f"No on-demand title {title!r}, but it is a live "
                             "channel — " + await tv_watch_channel(title))
-            return f"No on-demand title matching {title!r} on this TV."
+            return (f"No on-demand title matching {title!r} on this TV, and it "
+                    "isn't on live right now.")
+
+        async def _airing_now(title: str) -> list[dict]:
+            """Rows on air now on the TV's channels whose title or series
+            matches every word of `title`; one per channel."""
+            if not scopes:
+                return []
+            try:
+                rows = await scopes[0].whats_on_now()
+            except Exception:  # noqa: BLE001
+                return []
+            if not isinstance(rows, list):
+                return []
+            words = [w for w in pr._norm(title).split() if len(w) > 1]
+            out, seen = [], set()
+            for r in rows:
+                names = pr._norm(f"{r.get('title', '')} {r.get('series_title') or ''}").split()
+                if words and all(w in names for w in words) and r.get("channel_name") not in seen:
+                    seen.add(r.get("channel_name"))
+                    out.append(r)
+            return out
 
     if ytvn is not None:
         @agent.tool_plain

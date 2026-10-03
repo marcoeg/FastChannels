@@ -7,9 +7,11 @@
   - a live channel → ONE tv_watch_channel(channel) with the name, call sign,
     network or number the viewer said (or the channel name the guide gave).
     It resolves and tunes in one call.
-  - an on-demand title → ONE tv_watch_title(title, year) with the title's
-    essential words. It plays the match in one call. If it lists several
-    titles, ask which one, then tv_play_asset(asset_id) with that asset_id.
+  - a show, film or series by name ("put on Columbo") → ONE
+    tv_watch_title(title, year) with its essential words: it plays the
+    on-demand title, or — if it isn't on demand — tunes the channel airing it
+    now. Don't ask "on demand or live?" first. If it lists several titles,
+    ask which one, then tv_play_asset(asset_id) with that asset_id.
     If playback fails as not entitled, say the title isn't in their package.
   - an earlier airing (catch-up) or the programme on now from its beginning
     (restart, "start it over") → ONE tv_play_airing(airing_id, mode) with the
