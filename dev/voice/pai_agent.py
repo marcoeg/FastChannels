@@ -301,8 +301,11 @@ def build_agent(primers: list | None = None) -> Agent:
             lineup channels when it is ambiguous or not found."""
             hit, cands = await pr.find_channel(channel)
             if hit:
-                return await _control("tune_channel",
-                                      {"channel_id": hit.channel_id})
+                state = await _control("tune_channel", {"channel_id": hit.channel_id})
+                # Say what was tuned: from "KTBU" the model read the state
+                # and told the viewer "KTBU isn't in this TV's lineup".
+                return (f"Tuned {hit.name}, channel {hit.number} (matched from "
+                        f"{channel!r}). Resulting state: {state}")
             if cands:
                 return ("Not tuned — several channels match; ask which: "
                         + "; ".join(f"{c.name} ({c.number})" for c in cands))
@@ -462,7 +465,7 @@ def closing_ack_reply(user_text: str, last_reply: str) -> str | None:
         return None
     if re.search(r"\bthank", t, re.I):
         return "You're welcome."
-    if re.search(r"\b(loading|playing|restarting|on now|tuned|starting)\b", last_reply, re.I):
+    if re.search(r"\b(loading|playing|restarting|on now|is on|tuned|starting|watching)\b", last_reply, re.I):
         return "Enjoy."
     return "Okay."
 
