@@ -196,6 +196,38 @@ async def search_titles(query: str, year: int | None = None,
     return titles[:limit]
 
 
+async def browse(category: str | None = None, limit: int = 12) -> tuple[list[Title], list[str]]:
+    """(titles, categories): the first titles of an on-demand category
+    (default New Releases) from viewer://titles?category=…, and — when the
+    category is unknown or the viewer may want a choice — the category names
+    from viewer://categories. Never raises."""
+    cats: list[str] = []
+    if _read_resource is None:
+        return [], []
+    try:
+        raw = await _read_resource("viewer://categories")
+        cats = [c["name"] for c in json.loads(raw if isinstance(raw, str) else str(raw))
+                if isinstance(c, dict) and c.get("name") and c["name"].isascii()]
+    except Exception as e:  # noqa: BLE001
+        logger.warning("ytvn categories unavailable: %s", e)
+    name = None
+    if category:
+        want = _norm(category).rstrip("s")
+        name = next((c for c in cats if _norm(c).rstrip("s") == want), None) \
+            or next((c for c in cats if want and want in _norm(c)), None)
+        if name is None:
+            return [], cats
+    uri = "viewer://titles" + (f"?{urlencode({'category': name}, quote_via=quote)}" if name else "")
+    try:
+        raw = await _read_resource(uri)
+        rows = json.loads(raw if isinstance(raw, str) else str(raw))
+    except Exception as e:  # noqa: BLE001
+        logger.warning("ytvn browse %s unavailable: %s", uri, e)
+        return [], cats
+    return [Title(str(r["asset_id"]), r.get("title") or "", r.get("year"))
+            for r in rows if isinstance(r, dict) and r.get("asset_id")][:limit], cats
+
+
 def pick_title(query: str, titles: list[Title]) -> Title | None:
     """One title to play without asking: the only result, or the only one
     whose title is exactly what was asked for (with a single id)."""

@@ -34,7 +34,7 @@ from pydantic_ai import (
 from pydantic_ai.exceptions import RunCancelled
 from pydantic_ai.messages import TextPart
 
-from pai_agent import VoiceBrain
+from pai_agent import VoiceBrain, closing_ack_reply
 from rollouts import RolloutWriter, TraceCapability, build_record
 from telemetry import log_turn
 from textnorm import sanitize
@@ -95,6 +95,15 @@ class PydanticLLMStream(llm.LLMStream):
         if not user_text:
             return
         brain = self._pai.brain
+        ack = closing_ack_reply(user_text, brain.last_reply())
+        if ack:
+            self._pai.pending_recall = None
+            self._emit(ack)
+            brain.commit_exchange(user_text, ack)
+            log_turn({"type": "turn_timing", "session_id": self._pai.session_id,
+                      "turn_id": self._turn_id, "closing_ack": True,
+                      "user_chars": len(user_text), "ttfd_ms": 0, "total_ms": 0})
+            return
         recall = self._pai.pending_recall
         self._pai.pending_recall = None
         if recall is None and brain.memory is not None:

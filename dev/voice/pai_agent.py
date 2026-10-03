@@ -18,6 +18,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -224,7 +225,11 @@ def build_agent(primers: list | None = None) -> Agent:
             from lineup_scope import LineupScope, LineupScopedToolset
             scopes = [LineupScope(ts.wrapped) for ts in tv_search]
             primers.extend(sc.channels for sc in scopes)
-            tv_search = [LineupScopedToolset(ts, scope=sc)
+            # On-demand titles come from the TV's own catalogue (tv_on_demand,
+            # tv_watch_title): the guide's VOD index is the operator's, with
+            # ids and titles this TV may not have.
+            tv_search = [LineupScopedToolset(ts, scope=sc).filtered(
+                             lambda ctx, td: td.name != "minny_search_vod")
                          for ts, sc in zip(tv_search, scopes)]
         tv_search = [ResilientToolset(ts, svc="minny") for ts in tv_search]
     else:
@@ -333,6 +338,38 @@ def build_agent(primers: list | None = None) -> Agent:
                             "channel — " + await tv_watch_channel(title))
             return f"No on-demand title matching {title!r} on this TV."
 
+    if ytvn is not None:
+        @agent.tool_plain
+        async def tv_on_demand(category: str | None = None) -> str:
+            """What this TV offers on demand. category: a genre or collection
+            the viewer named ("comedy", "action", "family", "popular series");
+            leave it out for the newest releases. Returns titles with asset
+            ids (play one with tv_play_asset) and the category names."""
+            titles, cats = await pr.browse(category)
+            if not titles and not cats:
+                return "The on-demand catalogue is unavailable right now."
+            if not titles:
+                return (f"No on-demand category like {category!r}. Categories: "
+                        + ", ".join(cats))
+            head = f"On demand — {category or 'New Releases'}: "
+            return (head + "; ".join(f"{t.title} ({t.year or 'year ?'}) asset_id={t.asset_id}"
+                                     for t in titles)
+                    + ". Other categories: " + ", ".join(c for c in cats[:20]))
+
+        @agent.instructions
+        async def screen_context(ctx: RunContext[TurnDeps]) -> str:
+            """What the TV shows, fresh per model request from the MCP
+            server's cached viewer state (no round trip to the page). It
+            carries the airing_id of the programme on screen, so "restart
+            this" or "what am I watching" need no lookup — older tool results
+            are blanked from the history after two exchanges."""
+            try:
+                raw = await asyncio.wait_for(ytvn.read_resource("viewer://state"), 0.3)
+                st = json.loads(raw if isinstance(raw, str) else str(raw))
+            except Exception:  # noqa: BLE001 — no page / slow: just omit the line
+                return ""
+            return format_screen(st)
+
     @agent.tool_plain
     async def web_lookup(query: str) -> str:
         """Look up background about a programme, film, person, or event on
@@ -384,6 +421,19 @@ class VoiceBrain:
         self.history.extend(new_messages)
         self.history = _trim(self.history)
 
+    def commit_exchange(self, user_text: str, reply: str) -> None:
+        """An exchange answered without the model (closing acknowledgements),
+        recorded so the next turn still sees it."""
+        self.history.append(ModelRequest(parts=[UserPromptPart(content=user_text)]))
+        self.history.append(ModelResponse(parts=[TextPart(content=reply)]))
+        self.history = _trim(self.history)
+
+    def last_reply(self) -> str:
+        for msg in reversed(self.history):
+            if isinstance(msg, ModelResponse):
+                return " ".join(p.content for p in msg.parts if isinstance(p, TextPart))
+        return ""
+
     def commit_interrupted(self, user_text: str, partial_text: str) -> None:
         """Barge-in: the run was cancelled, new_messages() is unavailable.
         Record what we actually emitted so the next turn has context."""
@@ -391,6 +441,30 @@ class VoiceBrain:
         spoken = (partial_text.strip() + " …") if partial_text.strip() else "…"
         self.history.append(ModelResponse(parts=[TextPart(content=spoken)]))
         self.history = _trim(self.history)
+
+
+# A closing acknowledgement ends an exchange; it asks for nothing. The model
+# answered these with an EMPTY first response (gpt-5.6-terra, 18 times in two
+# days), which pydantic-ai rejects and re-requests — 1-3 s for "Great." So
+# they are answered here. Not "yes"/"no"/"sure": those can answer a question,
+# and only when the last reply wasn't a question.
+_CLOSING_ACK = re.compile(
+    r"^(oh |ah |well )?(ok(ay)?|great|perfect|cool|nice|awesome|excellent|wonderful|"
+    r"good|very good|that'?s (great|good|perfect)|got it|ok(ay)?,? (great|thanks|thank you|cool|perfect)|"
+    r"thanks?( a lot| so much| very much)?|thank you( very much| so much)?)"
+    r"( minny)?[.!]*$", re.I)
+
+
+def closing_ack_reply(user_text: str, last_reply: str) -> str | None:
+    """The reply to a closing acknowledgement, or None to let the model answer."""
+    t = " ".join(user_text.replace("\u2019", "'").split())
+    if not _CLOSING_ACK.match(t) or last_reply.rstrip().endswith("?"):
+        return None
+    if re.search(r"\bthank", t, re.I):
+        return "You're welcome."
+    if re.search(r"\b(loading|playing|restarting|on now|tuned|starting)\b", last_reply, re.I):
+        return "Enjoy."
+    return "Okay."
 
 
 def _is_user_request(msg: ModelMessage) -> bool:
@@ -430,6 +504,33 @@ def _trim(history: list[ModelMessage]) -> list[ModelMessage]:
         else:
             out.append(msg)
     return out
+
+
+def format_screen(st: dict) -> str:
+    """One line on what the TV shows, for the instructions."""
+    from lineup_scope import local_time
+    pl, player, tuned = st.get("playing") or {}, st.get("player") or {}, st.get("tuned") or {}
+    if not pl or player.get("state") == "idle":
+        return "On screen now: the programme grid (nothing playing)."
+    what = {"live": "live", "catch-up": "catch-up", "restart": "restarted",
+            "vod": "on demand", "url": "a stream"}.get(pl.get("kind"), pl.get("kind") or "")
+    parts = [f"On screen now ({what}):"]
+    if tuned:
+        parts.append(f"{tuned.get('name')} channel {tuned.get('number')}")
+        a = tuned.get("airing") or {}
+        if a:
+            when = ""
+            if a.get("start_utc") and a.get("end_utc"):
+                when = (f", {local_time(a['start_utc'].replace('Z', ':00Z'))}"
+                        f" to {local_time(a['end_utc'].replace('Z', ':00Z'))}")
+            parts.append(f"— {a.get('title')}{when} (airing_id {a.get('airing_id')})")
+    elif pl.get("title"):
+        parts.append(str(pl["title"]))
+    vol = player.get("volume")
+    parts.append(f"| player {player.get('state')}"
+                 + (f", volume {round(vol * 100)}%" if isinstance(vol, (int, float)) else "")
+                 + (", MUTED" if player.get("muted") else ""))
+    return " ".join(parts)
 
 
 def _compact(result) -> str:
