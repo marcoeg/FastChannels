@@ -453,6 +453,13 @@ async def entrypoint(ctx: agents.JobContext) -> None:
                 logger.warning("warmup run failed: %s", e)
         asyncio.create_task(_warmup())
 
+    async def _prime() -> None:
+        t0 = time.monotonic()
+        await brain.prime()
+        log_turn({"type": "prime",
+                  "ms": round((time.monotonic() - t0) * 1000)})
+    asyncio.create_task(_prime())
+
     # Phones drop their WebRTC connection constantly (screen lock, network
     # hop). Keep the session alive across disconnects so a reconnect
     # resumes with history intact — the default close_on_disconnect=True

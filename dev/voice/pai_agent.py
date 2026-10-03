@@ -14,6 +14,7 @@ recent exchanges (EPG results are bulky and stale within a session).
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -159,7 +160,10 @@ def _brain_model():
     return OpenAIResponsesModel(os.environ.get("VOICE_MODEL", "gpt-5.6-luna")), settings
 
 
-def build_agent() -> Agent:
+def build_agent(primers: list | None = None) -> Agent:
+    """primers collects async callables to run once at session start, off
+    the voice path (VoiceBrain.prime), so no turn pays for them."""
+    primers = primers if primers is not None else []
     # Two TV-search backends, selected at startup and never mixed (alternatives,
     # not summative): "minny" (default) = the Minny MCP over the operator's
     # OpenSearch catalogue; "falkordb" = the local Graphiti guide graph via the
@@ -209,12 +213,19 @@ def build_agent() -> Agent:
         # others. The server needs the Minerva VPN up (see VPN-CONNECT.md).
         minny_cfg = str(Path(__file__).parent / "mcp.json")
         tv_search = load_mcp_toolsets(minny_cfg)
+        for ts in tv_search:
+            # Starts the server and its catalogue client, and checks the
+            # catalogue answers — what the model used to spend a round trip on.
+            primers.append(lambda raw=ts.wrapped:
+                           raw.direct_call_tool("cluster_status", {}))
         if player == "ytvn":
             # The guide covers the operator's whole catalogue; the ytvn TV
             # carries one lineup. Keep guide answers to the TV's channels.
             from lineup_scope import LineupScope, LineupScopedToolset
-            tv_search = [LineupScopedToolset(ts, scope=LineupScope(ts.wrapped))
-                         for ts in tv_search]
+            scopes = [LineupScope(ts.wrapped) for ts in tv_search]
+            primers.extend(sc.channels for sc in scopes)
+            tv_search = [LineupScopedToolset(ts, scope=sc)
+                         for ts, sc in zip(tv_search, scopes)]
         tv_search = [ResilientToolset(ts, svc="minny") for ts in tv_search]
     else:
         tv_search = [ResilientToolset(
@@ -348,9 +359,19 @@ class VoiceBrain:
     """Agent + rolling history + memory handle, shared across turns."""
 
     def __init__(self, memory: "VoiceMemory | None" = None) -> None:
-        self.agent = build_agent()
+        self._primers: list = []
+        self.agent = build_agent(self._primers)
         self.memory = memory
         self.history: list[ModelMessage] = []
+
+    async def prime(self) -> None:
+        """Session-start work (catalogue check, lineup map) in parallel.
+        Never raises: a failed primer just leaves that work to the first turn."""
+        results = await asyncio.gather(*(p() for p in self._primers),
+                                       return_exceptions=True)
+        for r in results:
+            if isinstance(r, Exception):
+                logger.warning("primer failed: %s", r)
 
     def make_deps(self, recall: "RecallResult | None") -> TurnDeps:
         if recall is None:
