@@ -84,7 +84,9 @@ QUESTIONS: list[tuple[str, list[list[str]]]] = [
     ("Put on Dune Part 2.", [["tv_watch_title"]]),
     ("Play Inside Out 2.", [["tv_watch_title"]]),
     ("Put on Trace.", [["tv_watch_channel"], ["tv_watch_title"]]),
-    ("Turn the volume down a bit.", [["tv_set_volume"]]),
+    ("Turn the volume down a bit.", [["tv_volume"]]),
+    ("Turn it up.", [["tv_volume"]]),
+    ("Set the volume to fifty percent.", [["tv_volume"]]),
     ("Mute the TV.", [["tv_mute"]]),
     ("Pause it.", [["tv_pause"]]),
     ("Who directed Dune Part Two?", [["web_lookup"], []]),
@@ -98,7 +100,7 @@ QUESTIONS: list[tuple[str, list[list[str]]]] = [
 # ---- TV dry run ---------------------------------------------------------------------
 _real_direct, _real_call = MCPToolset.direct_call_tool, MCPToolset.call_tool
 DRY = {"tune_channel", "tune_number", "play_asset", "play_airing", "play_url",
-       "stop", "play", "pause", "mute", "unmute", "set_volume"}
+       "stop", "play", "pause", "mute", "unmute", "volume"}
 
 
 _PLAYER = {"state": "playing", "muted": False, "volume": 0.6}
@@ -117,8 +119,14 @@ def _fake(name: str, args: dict) -> dict:
         p["state"] = "playing"
     elif name == "stop":
         p["state"] = "idle"
-    elif name == "set_volume":
-        p["volume"] = args.get("level", p["volume"])
+    elif name == "volume":                     # as the page does: step 0.1, up unmutes
+        ch = args.get("change", "set")
+        if ch == "up":
+            p["volume"], p["muted"] = min(1.0, round(p["volume"] + 0.1, 3)), False
+        elif ch == "down":
+            p["volume"] = max(0.0, round(p["volume"] - 0.1, 3))
+        else:
+            p["volume"] = args.get("level", p["volume"])
     return {"ok": True, "dry_run": True, "command": name, "args": args, "player": dict(p)}
 
 
