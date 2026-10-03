@@ -52,6 +52,8 @@ logger = logging.getLogger("voice.memory")
 
 VOICE_MEMORY_GROUP = "voice_memory"
 TEST_MEMORY_GROUP = "voice_memory_test"
+# TV settings with one value at a time (VoiceMemory._supersede_settings).
+SINGLE_VALUE_SETTINGS = ("volume", "caption", "subtitle", "language")
 # Written by `memory_cli.py --test wipe`: test sessions ignore transcript rows
 # older than it, so a reset test run starts with no "earlier sessions" too.
 TEST_RESET_MARKER = Path.home() / "news" / "voice-test-reset"
@@ -92,6 +94,10 @@ _QUESTION = re.compile(
     r"will|would)\b.*\?*$", re.I)
 
 
+_ASKING = re.compile(
+    r"^((do )?you (know|remember)|tell me|can you tell|i wonder|any idea)\b", re.I)
+
+
 def wants_memory(user_text: str) -> bool:
     """True for a statement of preference, habit or standing instruction.
     A question that merely mentions a favourite ("what's my favorite news
@@ -99,7 +105,11 @@ def wants_memory(user_text: str) -> bool:
     t = user_text.strip()
     if len(t) < 8 or not _PREFERENCE.search(t):
         return False
-    return not (_QUESTION.match(t) and not re.search(r"\b(remember|forget)\b", t, re.I))
+    if re.search(r"\b(remember|forget)\b", t, re.I) and not t.endswith("?"):
+        return True
+    # A question is never a statement to store — whether it starts with a
+    # question word or not ("You know what my preferred volume is?").
+    return not (t.endswith("?") or _QUESTION.match(t) or _ASKING.match(t))
 
 
 # An assistant line that declined or failed. Replaying those as "earlier
@@ -151,6 +161,11 @@ Entities are the household member (as "User") and what the preference is
 about: a show, channel, genre, person, language, or a TV setting such as
 "Volume" or "Captions" — so a standing instruction like "when I say turn it
 up, set the volume to twenty" is a fact between User and Volume.
+Entity names NEVER contain a value or an opinion: the entity is "Volume",
+not "preferred volume: 20%"; "KQED", not "favourite channel KQED". The value
+belongs in the fact ("User's preferred volume is 20%"). A later statement
+about the same thing must land on the same entity so it can replace the
+earlier one.
 If the exchange contains none of the above, extract nothing."""
 
 
@@ -335,7 +350,7 @@ class VoiceMemory:
         while True:
             user_text, assistant_text, ts = await self._queue.get()
             try:
-                await asyncio.wait_for(
+                result = await asyncio.wait_for(
                     self._graphiti.add_episode(
                         name=f"voice {ts.isoformat(timespec='seconds')}",
                         episode_body=(f"user: {user_text}\n"
@@ -346,6 +361,7 @@ class VoiceMemory:
                         group_id=self._group,
                         custom_extraction_instructions=EXTRACTION_INSTRUCTIONS),
                     timeout=180)
+                await self._supersede_settings(result)
                 await self._refresh_profile()
             except asyncio.CancelledError:
                 raise
@@ -412,6 +428,41 @@ class VoiceMemory:
         if stats["removed"] and not dry_run:
             await self._refresh_profile()
         return stats
+
+    async def _supersede_settings(self, result) -> None:
+        """A TV setting has one value at a time: a new household fact about
+        Volume (or Captions, Language …) ends every older current fact from
+        the same person about that setting. Graphiti only compares facts on
+        the SAME pair of entities and lets its model judge the contradiction;
+        "preferred volume is 20%" landed on a new entity "preferred volume:
+        20%" and left "normal volume is 0.6" (on "Volume") current beside it.
+        The setting is matched by name, so a value glued into an entity name
+        still counts. Never raises."""
+        try:
+            ep = getattr(getattr(result, "episode", None), "uuid", None)
+            names = {n.uuid: n.name for n in (getattr(result, "nodes", None) or [])}
+            # The result also lists OLD facts this episode just ended — only
+            # facts it created, and that are still current, can supersede.
+            edges = [e for e in (getattr(result, "edges", None) or [])
+                     if (e.episodes or [None])[0] == ep
+                     and e.invalid_at is None and e.expired_at is None]
+            for e in edges:
+                target = (names.get(e.target_node_uuid) or "").lower()
+                key = next((k for k in SINGLE_VALUE_SETTINGS if k in target), None)
+                if key is None or not is_household_fact(e.fact or ""):
+                    continue
+                when = (e.valid_at or datetime.now(timezone.utc)).isoformat()
+                rows, _, _ = await self._driver.execute_query(
+                    "MATCH (a:Entity {uuid: $src})-[r:RELATES_TO]->(b:Entity) "
+                    "WHERE toLower(b.name) CONTAINS $key AND r.uuid <> $new "
+                    "AND r.expired_at IS NULL AND r.invalid_at IS NULL "
+                    "SET r.invalid_at = $when, r.expired_at = $now RETURN r.fact AS fact",
+                    src=e.source_node_uuid, key=key, new=e.uuid, when=when,
+                    now=datetime.now(timezone.utc).isoformat())
+                for r in rows:
+                    logger.info("memory: %r superseded by %r", r["fact"], e.fact)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("memory supersede failed: %s", e)
 
     async def _refresh_profile(self) -> None:
         try:
