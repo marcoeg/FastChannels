@@ -6,17 +6,17 @@ trust a crosswalk, resolve against the player's own catalogue:
 
   channel   name / call sign / network / number → the player's lineup, the
             ytvn MCP server's viewer://lineup resource (53 channels, cached)
-  title     on-demand title (+ year) → the edge VOD search → ASSET contentId.
-            TEMPORARY: over HTTP on the ytvn proxy until the MCP server
-            offers a viewer://titles resource; then that replaces _get.
+  title     on-demand title (+ year) → the server's viewer://titles resource
+            (the edge's VOD search) → asset_id
 
-The MCP server is meant to be the agent's only path to the player (its
-remote-control WebSocket carries the commands; the proxy's /api relay has
-no remote-control auth). Matching stays here: it is about understanding
+The MCP server is the agent's only path to the player: its tools carry
+commands over the remote-control WebSocket, its read-only resources answer
+lookups (the proxy's /api relay, which has no remote-control auth, is never
+called from here). Matching stays here: it is about understanding
 speech, not about the player.
 
-Catch-up and restart (an airing id = channel contentId + start epoch) wait
-for a play_airing command in the player.
+Catch-up and restart need no lookup here: guide rows carry the player's
+airing_id (lineup_scope.py) for play_airing.
 
 Never raises: failures come back as None / [] with a logged reason, so the
 calling tool can answer honestly instead of breaking the turn.
@@ -27,20 +27,15 @@ from __future__ import annotations
 import difflib
 import json
 import logging
-import os
 import re
 import time
 import unicodedata
 from dataclasses import dataclass
 from typing import Awaitable, Callable
-from urllib.parse import urlencode
-
-import aiohttp
+from urllib.parse import quote, urlencode
 
 logger = logging.getLogger("voice.resolve")
 
-PROXY = os.environ.get("YTVN_PROXY", "http://127.0.0.1:8787").rstrip("/")
-TIMEOUT_S = 4.0
 LINEUP_TTL_S = 300
 
 # Network names viewers say for the Bay Area OTA stations in this lineup
@@ -84,21 +79,6 @@ def _key(text: str) -> str:
     """Compact form for call signs: 'K T V U', 'ktvu-dt' → 'ktvu'."""
     words = [w for w in _norm(text).split() if w not in _NOISE]
     return "".join(words)
-
-
-async def _get(path: str, params: dict) -> dict | None:
-    url = f"{PROXY}{path}?{urlencode(params)}"
-    try:
-        timeout = aiohttp.ClientTimeout(total=TIMEOUT_S)
-        async with aiohttp.ClientSession(timeout=timeout) as http:
-            async with http.get(url, headers={"Accept": "application/json"}) as r:
-                if r.status != 200:
-                    logger.warning("ytvn proxy %s → HTTP %s", path, r.status)
-                    return None
-                return await r.json(content_type=None)
-    except Exception as e:  # noqa: BLE001 — proxy down / VPN / timeout
-        logger.warning("ytvn proxy %s unreachable: %s", path, e)
-        return None
 
 
 _lineup: dict = {"at": 0.0, "channels": []}
@@ -148,6 +128,13 @@ async def find_channel(query: str) -> tuple[Channel | None, list[Channel]]:
         hit = [c for c in chans if c.number == n]
         return (hit[0], []) if hit else (None, [])
 
+    # "Fox, channel 2": a channel number said alongside a name decides.
+    said_number = re.search(r"\b(?:channel|number)\s*(\d{1,4})\b", q, re.I)
+    if said_number:
+        hit = [c for c in chans if c.number == int(said_number.group(1))]
+        if hit:
+            return hit[0], []
+
     k, nq = _key(q), _norm(q)
     if nq in NETWORKS or k in NETWORKS:
         cid = NETWORKS.get(nq) or NETWORKS[k]
@@ -172,6 +159,14 @@ async def find_channel(query: str) -> tuple[Channel | None, list[Channel]]:
     if contains:
         return None, contains[:6]
 
+    # A call sign heard one letter off ("KTBU" → KTVU): same length, one
+    # letter different, and only one such call sign in the lineup.
+    if re.fullmatch(r"[kw][a-z]{2,3}", k):
+        near = [c for c in chans if len(_key(c.name)) == len(k)
+                and sum(a != b for a, b in zip(_key(c.name), k)) == 1]
+        if len(near) == 1:
+            return near[0], []
+
     # Mis-heard names ("Drone TV" → DroneTV is exact; "Surfing Cinema" → Surf Cinema).
     by_key = {_key(c.name): c for c in chans}
     close = difflib.get_close_matches(k, list(by_key), n=3, cutoff=0.82)
@@ -182,20 +177,22 @@ async def find_channel(query: str) -> tuple[Channel | None, list[Channel]]:
 
 async def search_titles(query: str, year: int | None = None,
                         limit: int = 8) -> list[Title]:
-    d = await _get("/api/content/search/vod",
-                   {"searchText": query, "page": 0, "size": 20})
-    rows = ((d or {}).get("contents") or {}).get("content") or []
-    titles = [Title(str(r["contentId"]), r.get("title") or "",
-                    r.get("releasedYear"))
-              for r in rows
-              if r.get("contentId") and r.get("contentType", "ASSET") == "ASSET"]
+    if _read_resource is None or not query.strip():
+        return []
+    params = {"q": query} | ({"year": year} if year else {})
+    try:
+        raw = await _read_resource("viewer://titles?" + urlencode(params, quote_via=quote))
+        rows = json.loads(raw if isinstance(raw, str) else str(raw))
+    except Exception as e:  # noqa: BLE001 — server / proxy down
+        logger.warning("ytvn titles unavailable: %s", e)
+        return []
+    titles = [Title(str(r["asset_id"]), r.get("title") or "", r.get("year"))
+              for r in rows if isinstance(r, dict) and r.get("asset_id")]
     # The edge search also matches descriptions and credits ("trace" finds
     # Onward); a viewer asking for a title says words of the title.
     words = [w for w in _norm(query).split() if len(w) > 1]
     titles = [t for t in titles
               if all(w in _norm(t.title).split() for w in words)]
-    if year:
-        titles = [t for t in titles if t.year in (year - 1, year, year + 1)]
     return titles[:limit]
 
 

@@ -51,12 +51,12 @@ catalogue directly by other means.
   words. Keep it to a couple of extra lookups so the reply stays quick.
 - When nothing matches exactly, don't stop at "not found": briefly offer the
   closest thing you did find (a related title, or the same title another day).
-- Result times are UTC (ISO-8601). ALWAYS convert them to the viewer's LOCAL
-  zone — Pacific, the zone on the Clock line — and speak them in 12-hour form
-  ("seven thirty tonight"). The catalogue is an Eastern operator, so its
-  listings run three hours ahead of the viewer; do that conversion and speak the
-  Pacific time, never the Eastern one. Never say "UTC" and never read a Z-time
-  aloud.
+- Times: when a result row has `start_local` / `end_local`, those are already
+  the viewer's Pacific time ("4:00 PM today") — speak them as given, in
+  natural 12-hour words ("four this afternoon"), and never convert `start` /
+  `end` yourself. Only rows without them need converting: their `start` /
+  `end` are UTC; convert to Pacific (the Clock line has the offset). Never say
+  "UTC" and never read a Z-time aloud.
 - What you can do: find what's on live, what's on later, on-demand titles,
   catch-up, and which channel carries something. What the TV can PLAY is set
   out in the TV-control section — don't promise playback its tools can't do.
