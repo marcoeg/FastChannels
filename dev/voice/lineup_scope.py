@@ -80,6 +80,14 @@ def local_time(iso: str, now: datetime | None = None) -> str | None:
     return f"{t.strftime('%-I:%M %p')} {day}"
 
 
+def _pacific_iso(iso: str) -> str:
+    try:
+        t = datetime.fromisoformat(iso.replace("Z", "+00:00")).astimezone(_TZ)
+        return t.isoformat(timespec="seconds")
+    except (TypeError, ValueError):
+        return iso
+
+
 def _same_airing(a: dict, b: dict) -> bool:
     return all(a.get(k) == b.get(k)
                for k in ("title", "episode_title", "start", "end"))
@@ -169,9 +177,25 @@ class LineupScope:
         start = row.get("start")
         if isinstance(start, str) and len(start) >= 16:
             row["airing_id"] = f"{ch.channel_id}@{start[:16]}Z"
+        # One time convention for the model: start/end/expiration become
+        # Pacific-offset ISO ("2026-10-05T00:00:00-07:00"), the same form the
+        # prompt tells it to build windows in — so "after that" can pass a
+        # row's `end` straight back as a window `start`. With UTC "…Z" rows
+        # the model re-labelled 07:00Z as 07:00-07:00 and searched 7 am.
         for k in ("start", "end", "expiration"):
             if isinstance(row.get(k), str) and (lt := local_time(row[k])):
                 row[f"{k}_local"] = lt
+                row[k] = _pacific_iso(row[k])
+        # "What's next on KQED?" took a what's-on lookup before the schedule
+        # search just to know which row was current: mark it.
+        try:
+            now = datetime.now(_TZ)
+            st = datetime.fromisoformat(str(row.get("start")).replace("Z", "+00:00"))
+            en = datetime.fromisoformat(str(row.get("end")).replace("Z", "+00:00"))
+            if st <= now < en:
+                row["on_now"] = True
+        except (TypeError, ValueError):
+            pass
         return row
 
     async def whats_on_now(self) -> list | str:
@@ -194,8 +218,51 @@ class LineupScope:
         rows.sort(key=lambda r: r.get("channel_number") or 0)
         return rows
 
+    async def search_lineup(self, args: dict) -> list | str:
+        """A broad schedule search (no channel, no title words) per lineup
+        station, in parallel. The catalogue-wide search returns ~a dozen rows
+        ranked across 544 channels and the lineup filter keeps a few:
+        "cooking shows tonight" came back as 3 Gusto Español rows while Gusto
+        TV had cooking shows all evening. The guide's genre filter is also
+        exact and tags vary ("Cooking" vs "Cooking Show"), so the genre is
+        matched here as a word in any genre tag."""
+        chans = await self.channels()
+        if not chans:
+            return "This TV's lineup is unavailable right now."
+        genre = (args.get("genre") or "").strip().lower()
+        base = {k: v for k, v in args.items() if k not in ("genre", "channel")}
+
+        async def one(gid: str) -> list:
+            try:
+                rows = _rows(await self.minny.direct_call_tool(
+                    "search_live_schedule", {**base, "channel": self._names[gid]})) or []
+            except Exception as e:  # noqa: BLE001
+                logger.warning("search_live_schedule %s: %s", self._names[gid], e)
+                return []
+            out = []
+            for r in rows:
+                if r.get("channel_id") != gid:
+                    continue
+                if genre and not any(genre in str(g).lower() for g in (r.get("genres") or [])):
+                    continue
+                out.append(self._label(r, chans[gid]))
+            return out
+
+        per = await asyncio.gather(*(one(g) for g in self._names))
+        rows = [r for rs in per for r in rs]
+        if not rows:
+            return ("The guide was searched on every channel of this TV and found "
+                    "nothing matching — the guide is reachable; this is a real 'none'.")
+        rows.sort(key=lambda r: (r.get("start") or "", r.get("channel_number") or 0))
+        return rows[:40]
+
     async def filter(self, name: str, result: Any) -> Any:
         rows = _rows(result)
+        if rows == []:
+            # A bare [] was read by the model as "couldn't check the guide"
+            # (it said so on an empty Columbo search with the guide up).
+            return ("The guide was searched and found nothing matching — the "
+                    "guide is reachable; this is a real 'none'.")
         chans = await self.channels()
         if rows is None or not chans:
             return result
@@ -232,6 +299,9 @@ class LineupScopedToolset(WrapperToolset):
     async def call_tool(self, name, tool_args, ctx, tool):
         if name == "minny_whats_on_now" and not tool_args.get("channel"):
             return await self.scope.whats_on_now()
+        if name == "minny_search_live_schedule" and not tool_args.get("channel") \
+                and not tool_args.get("query"):
+            return await self.scope.search_lineup(tool_args)
         if name in SCOPED and tool_args.get("channel"):
             guide = await self.scope.guide_channel(str(tool_args["channel"]))
             if guide:
