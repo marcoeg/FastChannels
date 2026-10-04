@@ -157,14 +157,16 @@ class LineupScope:
                 self._at = time.monotonic()
             return self._map
 
-    async def guide_channel(self, said: str) -> str | None:
-        """The TV's number or channel name → the name the guide matches for
-        all of that station's feeds; None if it isn't a lineup channel."""
+    async def guide_channel(self, said: str) -> tuple[str, str] | None:
+        """The TV's number or channel name → (the name the guide matches for
+        all of that station's feeds, the lineup channel_id); None if it isn't
+        a lineup channel."""
         hit, _ = await pr.find_channel(said)
         if hit is None:
             return None
         await self.channels()
-        return self._query.get(hit.channel_id)
+        q = self._query.get(hit.channel_id)
+        return (q, hit.channel_id) if q else None
 
     def _label(self, row: dict, ch: pr.Channel) -> dict:
         """Speak the TV's channel name and number, and give the airing the
@@ -232,12 +234,15 @@ class LineupScope:
         genre = (args.get("genre") or "").strip().lower()
         base = {k: v for k, v in args.items() if k not in ("genre", "channel")}
 
+        failures: list[str] = []
+
         async def one(gid: str) -> list:
             try:
                 rows = _rows(await self.minny.direct_call_tool(
                     "search_live_schedule", {**base, "channel": self._names[gid]})) or []
             except Exception as e:  # noqa: BLE001
                 logger.warning("search_live_schedule %s: %s", self._names[gid], e)
+                failures.append(str(e)[:200])
                 return []
             out = []
             for r in rows:
@@ -250,13 +255,22 @@ class LineupScope:
 
         per = await asyncio.gather(*(one(g) for g in self._names))
         rows = [r for rs in per for r in rs]
+        # A VPN outage made all 53 calls fail and the empty result used to be
+        # announced as "the guide is reachable; this is a real 'none'".
+        if failures and len(failures) * 2 >= len(self._names):
+            return (f"The guide could not be checked ({len(failures)} of "
+                    f"{len(self._names)} channels failed: {failures[0]}). Say the TV "
+                    "guide is unavailable right now — don't say nothing is on.")
         if not rows:
             return ("The guide was searched on every channel of this TV and found "
                     "nothing matching — the guide is reachable; this is a real 'none'.")
         rows.sort(key=lambda r: (r.get("start") or "", r.get("channel_number") or 0))
         return rows[:40]
 
-    async def filter(self, name: str, result: Any) -> Any:
+    async def filter(self, name: str, result: Any, only: str | None = None) -> Any:
+        """`only`: the lineup channel_id the viewer asked about — the guide's
+        name match for "KQED" also returns KQED2's feeds, and "what's next on
+        KQED" answered with channel 10's schedule."""
         rows = _rows(result)
         if rows == []:
             # A bare [] was read by the model as "couldn't check the guide"
@@ -272,6 +286,8 @@ class LineupScope:
             if not isinstance(r, dict) or r.get(key) not in chans:
                 continue
             ch = chans[r[key]]
+            if only and ch.channel_id != only:
+                continue
             # One station, several feeds: keep each airing / channel once.
             dup = ((ch.channel_id, r.get("title"), r.get("start"))
                    if key == "channel_id" else ch.channel_id)
@@ -302,11 +318,13 @@ class LineupScopedToolset(WrapperToolset):
         if name == "minny_search_live_schedule" and not tool_args.get("channel") \
                 and not tool_args.get("query"):
             return await self.scope.search_lineup(tool_args)
+        only = None
         if name in SCOPED and tool_args.get("channel"):
             guide = await self.scope.guide_channel(str(tool_args["channel"]))
             if guide:
-                tool_args = {**tool_args, "channel": guide}
+                tool_args = {**tool_args, "channel": guide[0]}
+                only = guide[1]
         result = await super().call_tool(name, tool_args, ctx, tool)
         if name in SCOPED:
-            return await self.scope.filter(name, result)
+            return await self.scope.filter(name, result, only=only)
         return result

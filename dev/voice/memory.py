@@ -408,7 +408,11 @@ class VoiceMemory:
                     created_here = (r["episodes"] or [None])[0] == ep
                     current = _is_current(SimpleNamespace(
                         invalid_at=r["invalid_at"], expired_at=r["expired_at"]), now)
-                    if created_here and current and is_household_fact(r["fact"] or ""):
+                    # Retention must not depend on wording: is_household_fact
+                    # is a profile-ranking heuristic and rejected "never
+                    # suggest horror", habits and identity facts, which
+                    # remove_episode would then delete for good.
+                    if created_here and current:
                         keep = True
                         break
             if keep:
@@ -420,6 +424,7 @@ class VoiceMemory:
             try:
                 await self._graphiti.remove_episode(ep)
                 stats["removed"] += 1
+                logger.info("memory prune: removed episode %s (no current fact)", ep)
             except Exception as e:  # noqa: BLE001
                 stats["failed"] += 1
                 logger.debug("memory prune: %s: %s", ep, e)

@@ -304,6 +304,12 @@ def build_agent(primers: list | None = None) -> Agent:
             except Exception as e:  # noqa: BLE001 — no_shell, unknown_channel, …
                 return f"{name} failed: {e}"
 
+        async def _control_ok(name: str, args: dict) -> tuple[bool, str]:
+            """(ok, text): callers that prefix a success sentence must not do
+            so on failure ("Tuned KQED … tune_channel failed: no_shell")."""
+            text = await _control(name, args)
+            return not text.startswith(f"{name} failed:"), text
+
         @agent.tool_plain
         async def tv_watch_channel(channel: str) -> str:
             """Put a live channel on the TV. channel: what the viewer said —
@@ -313,7 +319,9 @@ def build_agent(primers: list | None = None) -> Agent:
             lineup channels when it is ambiguous or not found."""
             hit, cands = await pr.find_channel(channel)
             if hit:
-                state = await _control("tune_channel", {"channel_id": hit.channel_id})
+                ok, state = await _control_ok("tune_channel", {"channel_id": hit.channel_id})
+                if not ok:
+                    return f"Could not tune {hit.name} (channel {hit.number}): {state}"
                 # Say what was tuned: from "KTBU" the model read the state
                 # and told the viewer "KTBU isn't in this TV's lineup".
                 # No mention of what the viewer said: "matched from 'KTBU'"
@@ -402,11 +410,13 @@ def build_agent(primers: list | None = None) -> Agent:
                 # the channel's 24 h window by its airing_id.
                 if len(recent) == 1:
                     r = recent[0]
-                    played = await _control("play_airing",
-                                            {"airing_id": r["airing_id"], "mode": "catchup"})
-                    return (f"Not on demand or live now, but {r['title']!r} aired on "
-                            f"{r['channel_name']} at {r.get('start_local', '?')} — playing "
-                            f"it as catch-up: {played}")
+                    ok, played = await _control_ok("play_airing",
+                                                   {"airing_id": r["airing_id"], "mode": "catchup"})
+                    what = (f"Not on demand or live now, but {r['title']!r} aired on "
+                            f"{r['channel_name']} at {r.get('start_local', '?')}")
+                    if not ok:
+                        return f"{what}, and catch-up did not start: {played}"
+                    return f"{what} — playing it as catch-up: {played}"
                 if recent:
                     return ("Not on demand or live now, but it aired earlier on this TV; "
                             "ask which to play as catch-up: " + "; ".join(
@@ -606,6 +616,19 @@ _CLOSING_ACK = re.compile(
     r"good|very good|that'?s (great|good|perfect)|got it|ok(ay)?,? (great|thanks|thank you|cool|perfect)|"
     r"thanks?( a lot| so much| very much)?|thank you( very much| so much)?)"
     r"( minny)?[.!]*$", re.I)
+
+
+# A bare greeting heard right after Minny spoke is her own echo (a phantom
+# "Hi Minny." was transcribed 42 times within 4 s of a reply). Shared by the
+# LiveKit hook (which stops the reply) and the model adapter (which must not
+# run, commit or trace the preemptive turn LiveKit already started for it).
+BARE_GREETING = re.compile(
+    r"^(hi|hey|hello|hei|ok|okay)?[, ]*(minny|minnie|mini|minni|winnie|wanda)[.!?]*$", re.I)
+GREETING_ECHO_S = 4.0
+
+
+def is_echo_greeting(text: str, last_reply_at: float, now: float) -> bool:
+    return bool(BARE_GREETING.match(text.strip())) and now - last_reply_at < GREETING_ECHO_S
 
 
 def closing_ack_reply(user_text: str, last_reply: str) -> str | None:

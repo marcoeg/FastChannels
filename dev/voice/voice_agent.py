@@ -75,9 +75,7 @@ def _log_transcript(role: str, text: str, **extra) -> None:
         fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
 
-_BARE_GREETING = re.compile(
-    r"^(hi|hey|hello|hei|ok|okay)?[, ]*(minny|minnie|mini|minni|winnie|wanda)[.!?]*$", re.I)
-GREETING_ECHO_S = 4.0
+from pai_agent import BARE_GREETING as _BARE_GREETING, GREETING_ECHO_S  # noqa: E402
 
 
 class TvAssistant(Agent):
@@ -419,9 +417,11 @@ async def entrypoint(ctx: agents.JobContext) -> None:
                 last_user["text"] = text
                 sleep_state["last_activity"] = time.monotonic()
                 sleep_state["slept"] = False
-            elif role == "assistant":
+            elif role == "assistant" and last_user["text"]:
+                # Only replies to the viewer arm the echo filter: a "Hey
+                # Minny" said after the scripted welcome must be answered.
                 pai.last_reply_at = time.monotonic()
-                if memory is not None and last_user["text"]:
+                if memory is not None:
                     memory.remember(last_user["text"], text, interrupted=interrupted)
         except Exception:  # noqa: BLE001 — logging must never break the pipeline
             logger.debug("conversation_item handler failed", exc_info=True)
@@ -530,10 +530,14 @@ async def entrypoint(ctx: agents.JobContext) -> None:
     # instant, deterministic, and immune to model latency. The short sleep
     # lets the phone's audio playback attach so the first words aren't
     # clipped. Reconnects reuse the live session, so no repeat greeting.
-    # Room-gated to "voice" (phone/browser) only: the ESP32 satellite (room
+    # Every phone/browser room (voice, test-…): the ESP32 satellite (room
     # "speaker") stays asleep until its on-device wake word fires and signals
-    # readiness with a local chime, so it must not greet on connect.
-    if os.environ.get("VOICE_WELCOME", "1") == "1" and ctx.room.name == "voice":
+    # readiness with a local chime, so it must not greet on connect; and
+    # voice_probe.py measures the reply to its own question, which a welcome
+    # would drown.
+    greet = (ctx.room.name != "speaker"
+             and not ctx.room.name.startswith("voice-probe"))
+    if os.environ.get("VOICE_WELCOME", "1") == "1" and greet:
         from datetime import datetime
         from zoneinfo import ZoneInfo
         hour = datetime.now(ZoneInfo("America/Los_Angeles")).hour

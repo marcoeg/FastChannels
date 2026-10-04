@@ -76,11 +76,12 @@ QUESTIONS: list[tuple[str, list[list[str]]]] = [
     ("What's on next on KQED?", [["minny_search_live_schedule"]]),
     ("Any movie I can watch at around 5 o'clock today?", [["minny_search_live_schedule"]]),
     ("Play TMZ on KTBU.", [["tv_watch_channel"]]),
-    ("Play the BBC World News America catch-up on Channel 9.",
-     [["minny_search_catchup", "tv_play_airing"]]),
-    ("I want to watch a catch-up of BBC News.", [["minny_search_catchup"]]),
+    ("Play the BBC World News America catch-up on Channel 9.",   # named catch-up: one call
+     [["tv_watch_title"], ["minny_search_catchup", "tv_play_airing"]]),
+    ("I want to watch a catch-up of BBC News.", [["tv_watch_title"], ["minny_search_catchup"]]),
     ("Start PBS NewsHour over from the beginning.",       # may not be on air: any guide check
-     [["minny_whats_on_now"], ["minny_search_live_schedule"], ["minny_search_catchup"]]),
+     [["tv_watch_title"], ["minny_whats_on_now"], ["minny_search_live_schedule"],
+      ["minny_search_catchup"], ["tv_play_airing"]]),
     ("Put on Dune Part 2.", [["tv_watch_title"]]),
     ("Play Inside Out 2.", [["tv_watch_title"]]),
     ("Put on Trace.", [["tv_watch_channel"], ["tv_watch_title"]]),
@@ -100,10 +101,11 @@ QUESTIONS: list[tuple[str, list[list[str]]]] = [
 # ---- TV dry run ---------------------------------------------------------------------
 _real_direct, _real_call = MCPToolset.direct_call_tool, MCPToolset.call_tool
 DRY = {"tune_channel", "tune_number", "play_asset", "play_airing", "play_url",
-       "stop", "play", "pause", "mute", "unmute", "volume"}
+       "stop", "play", "pause", "mute", "unmute", "volume", "get_state"}
 
 
-_PLAYER = {"state": "playing", "muted": False, "volume": 0.6}
+_PLAYER0 = {"state": "playing", "muted": False, "volume": 0.6}
+_PLAYER = dict(_PLAYER0)
 
 
 def _fake(name: str, args: dict) -> dict:
@@ -188,6 +190,7 @@ def make_model(name: str):
 
 
 async def run_turn(brain: VoiceBrain, model, settings, q: str) -> dict:
+    _PLAYER.clear(); _PLAYER.update(_PLAYER0)   # every turn starts from the same TV
     trace = TraceCapability()
     t0 = time.monotonic()
     first = None

@@ -34,7 +34,7 @@ from pydantic_ai import (
 from pydantic_ai.exceptions import RunCancelled
 from pydantic_ai.messages import TextPart
 
-from pai_agent import VoiceBrain, closing_ack_reply
+from pai_agent import VoiceBrain, closing_ack_reply, is_echo_greeting
 from rollouts import RolloutWriter, TraceCapability, build_record
 from telemetry import log_turn
 from textnorm import sanitize
@@ -98,6 +98,11 @@ class PydanticLLMStream(llm.LLMStream):
         if not user_text:
             return
         brain = self._pai.brain
+        if is_echo_greeting(user_text, self._pai.last_reply_at, time.monotonic()):
+            # LiveKit started this (preemptive) run for an echo; its hook will
+            # drop the turn — don't call the model, commit or trace it.
+            logger.info("echo greeting, no model run: %r", user_text)
+            return
         ack = closing_ack_reply(user_text, brain.last_reply())
         if ack:
             self._pai.pending_recall = None

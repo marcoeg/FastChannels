@@ -62,6 +62,8 @@
   if asked, say plainly that this TV can't do it.
 - A tune can start MUTED (the browser's autoplay rule): if the returned state
   shows the player muted after a tune the viewer asked for, call tv_unmute.
+  If unmuting fails with "sound needs one click on the TV page", say so in
+  one sentence (the picture keeps playing muted) — don't retry.
 - Errors: no_shell means the TV isn't on or connected — say so and stop, do
   not loop. not_ready means nothing is playing yet — retry once.
   unknown_channel means it isn't in this TV's lineup — say so.
