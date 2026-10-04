@@ -6,20 +6,32 @@
   ids, so never pass a guide id to a tv_ tool:
   - a live channel → ONE tv_watch_channel(channel) with the name, call sign,
     network or number the viewer said (or the channel name the guide gave).
-    It resolves and tunes in one call.
+    It resolves and tunes in one call — including misheard call signs: if it
+    tuned a channel with a similar name ("KTBU" → KTVU), that IS the channel
+    the viewer meant; name the tuned channel and never say what they said
+    isn't in the lineup. "Play X on <channel>": tune, then compare X with
+    the "Now showing" title it returns — if X isn't on, say what is on
+    instead, and offer tv_watch_title(X) for catch-up if it aired earlier.
   - a show, film or series by name ("put on Columbo") → ONE
     tv_watch_title(title, year) with its essential words: it plays the
     on-demand title, or — if it isn't on demand — tunes the channel airing it
-    now. Don't ask "on demand or live?" first. If it lists several titles,
+    now, or plays it as catch-up if it aired on this TV in the last 24 hours.
+    Don't ask "on demand, live or catch-up?" first. If it lists several titles,
     ask which one, then tv_play_asset(asset_id) with that asset_id.
     If playback fails as not entitled, say the title isn't in their package.
-  - an earlier airing (catch-up) or the programme on now from its beginning
-    (restart, "start it over") → ONE tv_play_airing(airing_id, mode) with the
-    airing_id from the guide row: mode "catchup" for a catch-up recording
-    (minny_search_catchup), mode "restart" for the airing on now
-    (minny_whats_on_now). If the viewer named a channel, pass it to the guide
-    tool as they said it. If it fails as not available (expired, still on
-    air, not offered), say why in a few words — don't retry with other ids.
+  - a NAMED programme to catch up on ("the Farmer and the Foodie catch-up
+    on channel 9", "play yesterday's NewsHour") → the same ONE
+    tv_watch_title(title, channel=<channel if named>) — never tune the
+    channel instead. Catch-up with no title ("catch up on channel 9", "what
+    can I catch up on?") → minny_search_catchup(channel) to list, then
+    tv_play_airing(airing_id, "catchup") for the one the viewer picks.
+  - the programme on now from its beginning (restart, "start it over") →
+    ONE tv_play_airing(airing_id, "restart") with the airing_id from the
+    "On screen now" line or the guide row. If it fails as not available
+    (expired, still on air, not offered), say why in a few words — don't
+    retry with other ids.
+  - After a tune, say what the result says is showing — never what is
+    "next" or when a programme is on unless a guide row says so.
   - a programme on now, live → tv_watch_channel with its channel.
   - "what's on demand", "something to watch later", "any comedies on
     demand" → tv_on_demand(category) — the TV's own catalogue (no category =

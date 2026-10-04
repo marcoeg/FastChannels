@@ -287,6 +287,17 @@ def build_agent(primers: list | None = None) -> Agent:
         import player_resolve as pr
         pr.use_mcp(ytvn.read_resource)
 
+        def _now_showing(state: str) -> str:
+            try:
+                a = (json.loads(state).get("tuned") or {}).get("airing") or {}
+            except (ValueError, AttributeError):
+                return ""
+            if not a.get("title"):
+                return ""
+            from lineup_scope import local_time
+            end = local_time(str(a.get("end_utc", "")).replace("Z", ":00Z")) if a.get("end_utc") else None
+            return f" Now showing: {a['title']}" + (f" until {end}." if end else ".")
+
         async def _control(name: str, args: dict) -> str:
             try:
                 return _compact(await ytvn.direct_call_tool(name, args))
@@ -305,8 +316,12 @@ def build_agent(primers: list | None = None) -> Agent:
                 state = await _control("tune_channel", {"channel_id": hit.channel_id})
                 # Say what was tuned: from "KTBU" the model read the state
                 # and told the viewer "KTBU isn't in this TV's lineup".
-                return (f"Tuned {hit.name}, channel {hit.number} (matched from "
-                        f"{channel!r}). Resulting state: {state}")
+                # No mention of what the viewer said: "matched from 'KTBU'"
+                # made the model repeat the misheard name back. What the
+                # channel is showing comes first, so "play TMZ on KTVU" is
+                # answered against it ("TMZ isn't on; Fox NFL Sunday is").
+                return (f"Tuned {hit.name}, channel {hit.number}.{_now_showing(state)} "
+                        f"Resulting state: {state}")
             if cands:
                 return ("Not tuned — several channels match; ask which: "
                         + "; ".join(f"{c.name} ({c.number})" for c in cands))
@@ -331,13 +346,32 @@ def build_agent(primers: list | None = None) -> Agent:
             return f"{channel!r} is not a channel on this TV."
 
         @agent.tool_plain
-        async def tv_watch_title(title: str, year: int | None = None) -> str:
-            """Play an on-demand title (film, show) on the TV. title: the
-            title's essential words; year: release year if known. Searches
-            this TV's on-demand catalogue and plays the match in one call;
-            when several titles match it returns them with asset ids —
+        async def tv_watch_title(title: str, year: int | None = None,
+                                 channel: str | None = None) -> str:
+            """Play, watch or catch up on a show, film or series BY NAME — the
+            one call for any named programme, even when a channel is named
+            too ("catch up on Face the Nation on channel 5" → title="Face the
+            Nation", channel="channel 5"). title: its essential words; year:
+            release year if known; channel: the channel the viewer named, if
+            any (name or number). In one call it plays the on-demand title,
+            or tunes the channel airing it now, or plays it as catch-up if it
+            aired on this TV (on that channel, if given) in the last 24
+            hours. When several titles match it lists them with asset ids —
             ask the viewer, then call tv_play_asset(asset_id)."""
-            titles = await pr.search_titles(title, year)
+            return await _watch_title(title, year, channel, retry=True)
+
+        async def _watch_title(title: str, year: int | None, channel: str | None,
+                               retry: bool) -> str:
+            only = None
+            if channel:
+                hit, _ = await pr.find_channel(channel)
+                only = hit.name if hit else None
+            # The three lookups are independent: run them together (they
+            # took ~4 s in sequence, and viewers spoke again before an answer).
+            titles, live, recent = await asyncio.gather(
+                pr.search_titles(title, year),
+                _airing_now(title, only) if not year else _none(),
+                _aired_recently(title, only) if not year else _none())
             pick = pr.pick_title(title, titles)
             if pick:
                 return await _control("play_asset", {"asset_id": pick.asset_id})
@@ -346,10 +380,7 @@ def build_agent(primers: list | None = None) -> Agent:
                         + "; ".join(f"{t.title} ({t.year or 'year ?'}) "
                                     f"asset_id={t.asset_id}" for t in titles))
             if not year:
-                # "Put on Columbo": a show airing now on one of this TV's
-                # channels. Asked as a title, it used to end in "not on
-                # demand — shall I check live?" and two more turns.
-                live = await _airing_now(title)
+                # "Put on Columbo": a show airing now on one of this TV's channels.
                 if len(live) == 1:
                     r = live[0]
                     return (f"Not on demand, but {r['title']!r} is on live now on "
@@ -365,10 +396,82 @@ def build_agent(primers: list | None = None) -> Agent:
                 if hit or cands:
                     return (f"No on-demand title {title!r}, but it is a live "
                             "channel — " + await tv_watch_channel(title))
+                # Aired earlier on one of this TV's channels → catch-up, from
+                # the schedule, not the catch-up index: the index lags ~30 min
+                # behind an airing's end, while the player plays any airing in
+                # the channel's 24 h window by its airing_id.
+                if len(recent) == 1:
+                    r = recent[0]
+                    played = await _control("play_airing",
+                                            {"airing_id": r["airing_id"], "mode": "catchup"})
+                    return (f"Not on demand or live now, but {r['title']!r} aired on "
+                            f"{r['channel_name']} at {r.get('start_local', '?')} — playing "
+                            f"it as catch-up: {played}")
+                if recent:
+                    return ("Not on demand or live now, but it aired earlier on this TV; "
+                            "ask which to play as catch-up: " + "; ".join(
+                                f"{r['title']} on {r['channel_name']} at {r.get('start_local', '?')} "
+                                f"(airing_id {r['airing_id']})" for r in recent))
+                # Speech often prepends a misheard verb ("Clay, the Farmer and
+                # the Foodie" for "Play The Farmer…"): retry without it once.
+                words = title.replace(",", " ").split()
+                if retry and len(words) >= 3:
+                    rest = " ".join(words[1:])
+                    return (f"(nothing matched {title!r}; tried {rest!r}) "
+                            + await _watch_title(rest, year, channel, retry=False))
+            where = f" on {only}" if only else ""
             return (f"No on-demand title matching {title!r} on this TV, and it "
-                    "isn't on live right now.")
+                    f"isn't on live right now or in the last 24 hours{where}. "
+                    "Say so; don't guess when it is on.")
 
-        async def _airing_now(title: str) -> list[dict]:
+        async def _none() -> list:
+            return []
+
+        def _title_matches(title: str, row: dict) -> bool:
+            """Every spoken word is in the row's title/series — compared
+            without spaces, so 'PBS NewsHour' matches 'PBS News Hour'."""
+            words = [w for w in pr._norm(pr.split_caps(title)).split() if len(w) > 1]
+            hay = pr.squash(f"{row.get('title', '')} {row.get('series_title') or ''}")
+            spoken = pr.squash(title)
+            if not words:
+                return False
+            names = pr._norm(f"{row.get('title', '')} {row.get('series_title') or ''}").split()
+            return all(w in names for w in words) or (len(spoken) >= 6 and spoken in hay)
+
+        async def _aired_recently(title: str, only: str | None = None) -> list[dict]:
+            """Airings of `title` on the TV's channels that ENDED in the last
+            24 hours (the catch-up window), newest first, one per channel."""
+            if not scopes:
+                return []
+            from datetime import datetime, timedelta, timezone
+            now = datetime.now(timezone.utc)
+            try:
+                raw = await scopes[0].minny.direct_call_tool("search_live_schedule", {
+                    "query": pr.split_caps(title), "window": "range",
+                    "start": (now - timedelta(hours=24)).isoformat(timespec="seconds"),
+                    "end": now.isoformat(timespec="seconds")})
+                rows = await scopes[0].filter("minny_search_live_schedule", raw)
+            except Exception:  # noqa: BLE001
+                return []
+            if not isinstance(rows, list):
+                return []
+            out, seen = [], set()
+            for r in sorted(rows, key=lambda r: r.get("start") or "", reverse=True):
+                if not (_title_matches(title, r) and r.get("airing_id")):
+                    continue
+                try:
+                    end = datetime.fromisoformat(str(r.get("end")))
+                except ValueError:
+                    continue
+                if end > now or r.get("channel_name") in seen:
+                    continue           # still on air (handled as live) / duplicate feed
+                if only and r.get("channel_name") != only:
+                    continue
+                seen.add(r.get("channel_name"))
+                out.append(r)
+            return out
+
+        async def _airing_now(title: str, only: str | None = None) -> list[dict]:
             """Rows on air now on the TV's channels whose title or series
             matches every word of `title`; one per channel."""
             if not scopes:
@@ -379,11 +482,11 @@ def build_agent(primers: list | None = None) -> Agent:
                 return []
             if not isinstance(rows, list):
                 return []
-            words = [w for w in pr._norm(title).split() if len(w) > 1]
             out, seen = [], set()
             for r in rows:
-                names = pr._norm(f"{r.get('title', '')} {r.get('series_title') or ''}").split()
-                if words and all(w in names for w in words) and r.get("channel_name") not in seen:
+                if only and r.get("channel_name") != only:
+                    continue
+                if _title_matches(title, r) and r.get("channel_name") not in seen:
                     seen.add(r.get("channel_name"))
                     out.append(r)
             return out

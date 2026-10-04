@@ -70,6 +70,51 @@ class Title:
                 "year": self.year}
 
 
+_ONES = {w: i for i, w in enumerate(
+    "zero one two three four five six seven eight nine ten eleven twelve thirteen "
+    "fourteen fifteen sixteen seventeen eighteen nineteen".split())}
+_TENS = {"twenty": 20, "thirty": 30, "forty": 40, "fifty": 50, "sixty": 60,
+         "seventy": 70, "eighty": 80, "ninety": 90}
+
+
+def _number_words(text: str) -> str:
+    """'channel nine' → 'channel 9', 'forty five' → '45', 'ten oh one' →
+    '1001' (speech gives channel numbers as words)."""
+    words = re.split(r"[\s-]+", text.strip())
+    out, i = [], 0
+    while i < len(words):
+        w = words[i].lower().rstrip(".,!?")
+        if w in _TENS or w in _ONES:
+            n = _TENS.get(w, _ONES.get(w))
+            j = i + 1
+            if w in _TENS and j < len(words) and words[j].lower() in _ONES and _ONES[words[j].lower()] < 10:
+                n += _ONES[words[j].lower()]; j += 1
+            # "ten oh one" / "ten o one" → 1001
+            while j + 1 < len(words) and words[j].lower() in ("oh", "o", "zero") \
+                    and words[j + 1].lower() in _ONES:
+                n = n * 100 + _ONES[words[j + 1].lower()]; j += 2
+            for unit, mult in (("hundred", 100), ("thousand", 1000)):
+                if j < len(words) and words[j].lower() == unit:
+                    n *= mult; j += 1
+                    if j < len(words) and words[j].lower() in _ONES:
+                        n += _ONES[words[j].lower()]; j += 1
+            out.append(str(n)); i = j
+        else:
+            out.append(words[i]); i += 1
+    return " ".join(out)
+
+
+def split_caps(text: str) -> str:
+    """'PBS NewsHour' → 'PBS News Hour': run-together names as the guide
+    spells them (its search needs every word to match)."""
+    return re.sub(r"(?<=[a-z])(?=[A-Z][a-z])", " ", text)
+
+
+def squash(text: str) -> str:
+    """Letters and digits only: 'News Hour' and 'NewsHour' compare equal."""
+    return re.sub(r"[^a-z0-9]", "", _norm(text))
+
+
 def _norm(text: str) -> str:
     text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode()
     return re.sub(r"[^a-z0-9]+", " ", text.lower()).strip()
@@ -122,6 +167,7 @@ async def find_channel(query: str) -> tuple[Channel | None, list[Channel]]:
     if not chans or not q:
         return None, []
 
+    q = _number_words(q)
     digits = re.fullmatch(r"(?:channel\s*)?(\d{1,4})", q, re.I)
     if digits:
         n = int(digits.group(1))
