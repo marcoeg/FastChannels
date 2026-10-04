@@ -92,7 +92,7 @@ QUESTIONS: list[tuple[str, list[list[str]]]] = [
     ("Who directed Dune Part Two?", [["web_lookup"], []]),
     ("Is there any news on right now?", [["minny_whats_on_now"], ["minny_search_live_schedule"]]),
     ("What's on ESPN?", [["minny_whats_on_now"], ["tv_watch_channel"], []]),
-    ("What am I watching right now?", [["tv_get_state"]]),
+    ("What am I watching right now?", [["tv_get_state"], ["minny_whats_on_now"], []]),   # the on-screen line answers it
     ("Any cooking shows on tonight?", [["minny_search_live_schedule"]]),
     ("Put on CBS.", [["tv_watch_channel"]]),
 ]
@@ -142,7 +142,21 @@ async def _call(self, name, tool_args, ctx, tool):
     return await _real_call(self, name, tool_args, ctx, tool)
 
 
+_real_read = MCPToolset.read_resource
+
+
+async def _read(self, uri):
+    # The on-screen line must describe the DRY-RUN player, not the real TV
+    # (the judge faulted "turned it up" against the real TV's 100%).
+    if getattr(self, "id", None) == "tv" and str(uri) == "viewer://state":
+        return json.dumps({"tuned": {"channel_id": "2581", "number": 2, "name": "KTVU", "airing": None},
+                           "player": dict(_PLAYER),
+                           "playing": {"kind": "live", "title": "2 KTVU · live"}})
+    return await _real_read(self, uri)
+
+
 MCPToolset.direct_call_tool, MCPToolset.call_tool = _direct, _call
+MCPToolset.read_resource = _read
 
 
 # ---- models -------------------------------------------------------------------------
@@ -196,6 +210,11 @@ async def run_turn(brain: VoiceBrain, model, settings, q: str) -> dict:
     except Exception as e:  # noqa: BLE001
         msgs, err = [], f"{type(e).__name__}: {e}"[:300]
     items = to_items(msgs)
+    # What the model was told about the screen and the clock (its instructions):
+    # the judge can't grade "what am I watching" or "what's next" without them.
+    instr = str(getattr((trace.first_messages or [None])[0], "instructions", "") or "")
+    screen = next((ln for ln in instr.splitlines() if ln.startswith("On screen now")), "")
+    clock = next((ln for ln in instr.splitlines() if ln.startswith("Clock:")), "")
     calls = [i for i in items if i.get("type") == "function_call"]
     outs = {i.get("call_id"): i.get("output") for i in items
             if i.get("type") == "function_call_output"}
@@ -208,11 +227,13 @@ async def run_turn(brain: VoiceBrain, model, settings, q: str) -> dict:
                    "output": _compact(outs.get(c.get("call_id")))} for c in calls],
         "answer": "".join(text).strip(),
         "error": err,
+        "on_screen": screen,
+        "clock": clock,
     }
 
 
 KEEP = ("title", "episode_title", "channel_name", "channel_number", "start", "end",
-        "start_local", "end_local",
+        "start_local", "end_local", "on_now", "description",
         "airing_id", "kind", "name", "number", "asset_id", "year", "program_type")
 
 
@@ -229,7 +250,8 @@ def _compact(out) -> str:
     if isinstance(data, dict) and isinstance(data.get("result"), list):
         data = data["result"]
     if isinstance(data, list):
-        data = [{k: r[k] for k in KEEP if isinstance(r, dict) and r.get(k) not in (None, "")}
+        data = [{k: (str(r[k])[:240] if k == "description" else r[k])
+                 for k in KEEP if isinstance(r, dict) and r.get(k) not in (None, "")}
                 if isinstance(r, dict) else r for r in data]
     return json.dumps(data, ensure_ascii=False)[:30000]
 
@@ -254,13 +276,17 @@ JUDGE_PROMPT = """You grade a TV voice assistant's single turn. The viewer is in
 Francisco Bay Area (Pacific time); the TV is a 53-channel lineup (local stations KTVU=Fox 2,
 KPIX=CBS 5, KQED=PBS 9, KNTV=NBC 11 and FAST channels numbered 1001+). TV control commands
 ran in DRY RUN and returned a fake success — treat them as having worked. Catch-up and
-restart are supported via tv_play_airing. Grade only what is in the record."""
+restart are supported via tv_play_airing. `clock` is the time the question was asked and
+`on_screen` is what the assistant was told about the TV (channel, programme, player state)
+— both count as evidence; a row marked on_now is on air at that time, so "next" is the
+row after it. Grade only what is in the record."""
 
 
 async def judge(agent: Agent, q: str, r: dict) -> dict | None:
     if r["error"]:
         return None
-    rec = {"request": q, "tool_calls": r["calls"], "spoken_answer": r["answer"]}
+    rec = {"request": q, "clock": r.get("clock", ""), "on_screen": r.get("on_screen", ""),
+           "tool_calls": r["calls"], "spoken_answer": r["answer"]}
     try:
         res = await agent.run(json.dumps(rec, ensure_ascii=False))
         return res.output.model_dump()

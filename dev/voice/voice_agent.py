@@ -274,8 +274,9 @@ async def entrypoint(ctx: agents.JobContext) -> None:
     # satellite's echo), pre-empting her answer. Transcription models are
     # known to echo hint text on noise (documented for Whisper; the default
     # here is gpt-4o-mini-transcribe), so the hint gives it nothing to echo.
-    _stt_prompt = ("English. A TV assistant named Minny; channels KTVU, KPIX, "
-                   "KQED, KNTV, COZI, KSTS; programme and film titles.")
+    _stt_prompt = ("English conversation with Minny, a TV-viewing assistant, "
+                   "about TV channels such as KTVU, KPIX, KQED, KNTV and COZI, "
+                   "and the names of programmes and films.")
     # Realtime STT both rooms: finalizes ~0.2 s after speech (vs ~1 s batch)
     # and emits interim transcripts that feed preemptive generation. It holds
     # ONE OpenAI websocket open continuously, and OpenAI hard-caps a realtime
