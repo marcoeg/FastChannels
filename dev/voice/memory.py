@@ -27,6 +27,7 @@ import json
 import logging
 import os
 import re
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import SimpleNamespace
@@ -70,6 +71,7 @@ def is_test_room(room: str | None) -> bool:
 # fact (VoiceMemory.prune). VOICE_MEMORY_RETENTION_DAYS=0 disables pruning.
 TRANSCRIPT_LOG = Path(os.environ.get(
     "VOICE_TRANSCRIPT_LOG", Path.home() / "news" / "voice-conversations.jsonl"))
+PROFILE_TTL_S = 90.0
 RETENTION_DAYS = float(os.environ.get("VOICE_MEMORY_RETENTION_DAYS", "14"))
 PROFILE_QUERY = ("user preferences favorite channels shows genres "
                  "household routine standing instructions")
@@ -226,6 +228,8 @@ class VoiceMemory:
         self._maintenance: asyncio.Task | None = None
         self._last_enqueued_user = ""
         # One VoiceMemory per LiveKit job = per session.
+        self._profile_at = 0.0
+        self._profile_task: asyncio.Task | None = None
         self._session_start = datetime.now(timezone.utc)
         self._earlier = self._load_earlier()
 
@@ -313,6 +317,13 @@ class VoiceMemory:
         session start. user_text deliberately unused (no embedding on the hot
         path); query-specific lookups are deep_search's job."""
         recent = self._earlier                # zero I/O on the hot path
+        # Another job (phone vs the days-long satellite job, memory_cli) may
+        # have written since: refresh in the background when the cache is
+        # older than PROFILE_TTL_S — this turn uses the cache, the next sees
+        # the new facts.
+        if (time.monotonic() - self._profile_at > PROFILE_TTL_S
+                and (self._profile_task is None or self._profile_task.done())):
+            self._profile_task = asyncio.create_task(self._refresh_profile())
         return RecallResult(profile=list(self._profile), recent=recent)
 
     def remember(self, user_text: str, assistant_text: str, *,
@@ -486,6 +497,7 @@ class VoiceMemory:
                 group_ids=[self._group],
                 search_filter=_current_facts_filter())
             self._profile = _profile_facts(_format_edges(results.edges))[:12]
+            self._profile_at = time.monotonic()
         except Exception as e:  # noqa: BLE001
             logger.debug("profile refresh failed (keeping old cache): %s", e)
 

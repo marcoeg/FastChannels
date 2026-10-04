@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import sys
 import time
 import uuid
 
@@ -34,12 +35,16 @@ from pydantic_ai import (
 from pydantic_ai.exceptions import RunCancelled
 from pydantic_ai.messages import TextPart
 
-from pai_agent import VoiceBrain, closing_ack_reply, is_echo_greeting
+from pai_agent import RUN_GATE, VoiceBrain, closing_ack_reply, is_echo_greeting
 from rollouts import RolloutWriter, TraceCapability, build_record
 from telemetry import log_turn
 from textnorm import sanitize
 
 logger = logging.getLogger("voice.llm")
+
+
+def _norm_turn(text: str) -> str:
+    return " ".join("".join(c for c in text.lower() if c.isalnum() or c.isspace()).split())
 
 
 class PydanticLLM(llm.LLM):
@@ -50,6 +55,10 @@ class PydanticLLM(llm.LLM):
         super().__init__()
         self.is_test = is_test              # test room: traces get "test": true
         self.last_reply_at = 0.0            # monotonic, when Minny last finished a reply
+        # `voice_agent.py console --text` has no audio turns to commit.
+        self.text_mode = "console" in sys.argv
+        self.committed_text = ""            # the last user turn LiveKit committed
+        self.committed_at = 0.0
         self.brain = brain
         self.turn_lock = asyncio.Lock()
         self.pending_recall = None          # set per turn by on_user_turn_completed
@@ -59,6 +68,26 @@ class PydanticLLM(llm.LLM):
         self.is_satellite = is_satellite
         self.tracer = tracer
         self.turn_index = 0
+
+    def mark_committed(self, text: str) -> None:
+        self.committed_text = _norm_turn(text)
+        self.committed_at = time.monotonic()
+
+    def gate_for(self, user_text: str, timeout: float = 10.0):
+        """A RUN_GATE for a run on `user_text`: TV commands wait until LiveKit
+        commits that same turn. A preemptive run whose transcript was then
+        replaced is cancelled by LiveKit while it waits here."""
+        want, started = _norm_turn(user_text), time.monotonic()
+
+        async def gate() -> bool:
+            deadline = time.monotonic() + timeout
+            while time.monotonic() < deadline:
+                if self.committed_at >= started - 30 and self.committed_text == want:
+                    return True
+                await asyncio.sleep(0.05)
+            logger.info("TV command gated out: turn %r never committed", user_text)
+            return False
+        return gate
 
     def chat(self, *, chat_ctx: llm.ChatContext, tools=None,
              conn_options=DEFAULT_API_CONNECT_OPTIONS,
@@ -137,6 +166,11 @@ class PydanticLLMStream(llm.LLMStream):
         self._pai.turn_index += 1
         turn_index = self._pai.turn_index
 
+        # Text-console turns never go through on_user_turn_completed: commit
+        # them here so their TV commands aren't held back.
+        if self._pai.text_mode:
+            self._pai.mark_committed(user_text)
+        RUN_GATE.set(self._pai.gate_for(user_text))
         async with self._pai.turn_lock:
             try:
                 async with brain.agent.run_stream_events(

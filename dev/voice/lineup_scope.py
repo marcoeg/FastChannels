@@ -88,6 +88,22 @@ def _pacific_iso(iso: str) -> str:
         return iso
 
 
+_NOT_FILM = {"sport", "sports", "music", "reality", "competition", "rodeo",
+             "talk", "news", "newscast", "game show", "shopping", "infomercial",
+             "cooking", "cooking show", "food", "travel", "magazine", "series"}
+
+
+def _looks_like_film(row: dict) -> bool:
+    """FAST channels tag nearly every block programType=Movie, so kind=movie
+    let 4 h music blocks, slap-fight cards and rodeo through as films. A
+    film here has a release year or a film genre, and not only
+    sport/music/reality-type tags."""
+    genres = {str(g).lower() for g in (row.get("genres") or [])}
+    if genres and genres <= _NOT_FILM:
+        return False
+    return bool(row.get("year")) or bool(genres - _NOT_FILM - {"movie"})
+
+
 def _same_airing(a: dict, b: dict) -> bool:
     return all(a.get(k) == b.get(k)
                for k in ("title", "episode_title", "start", "end"))
@@ -249,6 +265,8 @@ class LineupScope:
                 if r.get("channel_id") != gid:
                     continue
                 if genre and not any(genre in str(g).lower() for g in (r.get("genres") or [])):
+                    continue
+                if base.get("kind") == "movie" and not _looks_like_film(r):
                     continue
                 out.append(self._label(r, chans[gid]))
             return out

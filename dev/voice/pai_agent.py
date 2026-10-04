@@ -15,6 +15,7 @@ recent exchanges (EPG results are bulky and stale within a session).
 from __future__ import annotations
 
 import asyncio
+import contextvars
 import json
 import logging
 import os
@@ -161,6 +162,29 @@ def _brain_model():
     return OpenAIResponsesModel(os.environ.get("VOICE_MODEL", "gpt-5.6-luna")), settings
 
 
+# Set by the LiveKit adapter for each run: an async callable that waits until
+# the viewer's turn is committed (True) or gives up (False). LiveKit's
+# preemptive generation starts the model on a partial transcript; a tune or
+# play made then cannot be undone if the transcript changes. Unset (brain
+# checks, benchmark, warmup) → commands run at once.
+RUN_GATE: contextvars.ContextVar = contextvars.ContextVar("RUN_GATE", default=None)
+
+
+async def _turn_committed() -> bool:
+    gate = RUN_GATE.get()
+    return True if gate is None else await gate()
+
+
+@dataclass
+class GatedToolset(WrapperToolset):
+    """TV commands wait for the committed turn; lookups (get_state) don't."""
+
+    async def call_tool(self, name, tool_args, ctx, tool):
+        if not name.endswith("get_state") and not await _turn_committed():
+            return f"{name} not run: the request changed before it was confirmed."
+        return await super().call_tool(name, tool_args, ctx, tool)
+
+
 def _stdio_toolsets(cfg_path: str, read_timeout: float) -> list:
     """load_mcp_toolsets() with a request timeout: its default is 5 minutes,
     so a stalled guide or TV server froze a voice turn (and its fan-outs)
@@ -213,8 +237,8 @@ def build_agent(primers: list | None = None) -> Agent:
             str(Path(__file__).parent / "mcp-tv-ytvn.json"), read_timeout=20.0)[0]
         ytvn = prefixed.wrapped
         tv = ResilientToolset(
-            prefixed.filtered(lambda ctx, td: td.name not in
-                              {"tv_tune_channel", "tv_tune_number", "tv_play_url"}),
+            GatedToolset(prefixed.filtered(lambda ctx, td: td.name not in
+                                           {"tv_tune_channel", "tv_tune_number", "tv_play_url"})),
             svc="tv")
     else:
         tv = ResilientToolset(
@@ -317,6 +341,8 @@ def build_agent(primers: list | None = None) -> Agent:
             return f" Now showing: {a['title']}" + (f" until {end}." if end else ".")
 
         async def _control(name: str, args: dict) -> str:
+            if not await _turn_committed():
+                return f"{name} failed: the request changed before it was confirmed"
             try:
                 return _compact(await ytvn.direct_call_tool(name, args))
             except Exception as e:  # noqa: BLE001 — no_shell, unknown_channel, …

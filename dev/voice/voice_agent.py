@@ -98,6 +98,7 @@ class TvAssistant(Agent):
             logger.info("ignored a greeting %.1f s after Minny spoke (echo): %r",
                         time.monotonic() - self._pai.last_reply_at, text)
             raise StopResponse()
+        self._pai.mark_committed(str(text))
         memory = self._pai.brain.memory
         if memory is None:
             return
@@ -460,7 +461,13 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         async def _sleep_watchdog() -> None:
             while True:
                 await asyncio.sleep(5)
-                idle = time.monotonic() - sleep_state["last_activity"]
+                # Minny thinking or speaking is activity too: counting only
+                # the viewer's items put the device to sleep in the middle of
+                # a long answer or a slow tool turn.
+                if getattr(session, "agent_state", "") in ("thinking", "speaking"):
+                    continue
+                idle = time.monotonic() - max(sleep_state["last_activity"],
+                                              pai.last_reply_at)
                 if idle >= SLEEP_AFTER_S and not sleep_state["slept"]:
                     try:
                         await ctx.room.local_participant.publish_data(

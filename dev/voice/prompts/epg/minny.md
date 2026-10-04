@@ -14,8 +14,8 @@ catalogue directly by other means.
   - On now / right now → `minny_whats_on_now` (optional `channel`). This
     includes "what's on TV right now" and the programme on the channel the
     TV is tuned to: `minny_whats_on_now(channel=<that channel's name>)`.
-    Live programme data comes ONLY from `minny_whats_on_now` and
-    `minny_search_live_schedule` — never from the tv_ tools.
+    Schedules and programme details come from `minny_whats_on_now` and
+    `minny_search_live_schedule`; the tv_ tools only say what is on screen.
   - What's next after what's ON NOW on a channel ("what's next on KQED",
     "what's after this") → ONE `minny_search_live_schedule(channel=…,
     window="upcoming")` — don't look up what's on now first. A row with
