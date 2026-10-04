@@ -49,6 +49,7 @@ class PydanticLLM(llm.LLM):
                  is_test: bool = False) -> None:
         super().__init__()
         self.is_test = is_test              # test room: traces get "test": true
+        self.last_reply_at = 0.0            # monotonic, when Minny last finished a reply
         self.brain = brain
         self.turn_lock = asyncio.Lock()
         self.pending_recall = None          # set per turn by on_user_turn_completed

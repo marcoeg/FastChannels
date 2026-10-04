@@ -28,6 +28,7 @@ import contextlib
 import json
 import logging
 import os
+import re
 import sys
 import time
 from pathlib import Path
@@ -46,6 +47,7 @@ from livekit.agents import (  # noqa: E402
     AgentSession,
     JobProcess,
     RoomInputOptions,
+    StopResponse,
     WorkerOptions,
     cli,
 )
@@ -73,6 +75,11 @@ def _log_transcript(role: str, text: str, **extra) -> None:
         fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
 
+_BARE_GREETING = re.compile(
+    r"^(hi|hey|hello|hei|ok|okay)?[, ]*(minny|minnie|mini|minni|winnie|wanda)[.!?]*$", re.I)
+GREETING_ECHO_S = 4.0
+
+
 class TvAssistant(Agent):
     """LiveKit-side shell; all real instructions live in the pydantic-ai
     brain. This subclass only hooks the recall seam."""
@@ -82,10 +89,20 @@ class TvAssistant(Agent):
         self._pai = pai
 
     async def on_user_turn_completed(self, turn_ctx, new_message) -> None:
+        text = getattr(new_message, "text_content", None) or ""
+        # A bare "hi Minny" right after Minny spoke is the recognizer
+        # hearing her echo, not the viewer — answering it ("Hi. What would
+        # you like to watch?") replaced real answers. A greeting at the start
+        # of a session or after a pause still gets one.
+        if _BARE_GREETING.match(str(text).strip()) and (
+                time.monotonic() - self._pai.last_reply_at < GREETING_ECHO_S
+                or getattr(self.session, "agent_state", "") == "speaking"):
+            logger.info("ignored a greeting %.1f s after Minny spoke (echo): %r",
+                        time.monotonic() - self._pai.last_reply_at, text)
+            raise StopResponse()
         memory = self._pai.brain.memory
         if memory is None:
             return
-        text = getattr(new_message, "text_content", None) or ""
         try:
             self._pai.pending_recall = await asyncio.wait_for(
                 memory.recall(str(text)), RECALL_CAP_S)
@@ -251,9 +268,14 @@ async def entrypoint(ctx: agents.JobContext) -> None:
     # satellite's mic still code-switched ("hi Minny" became Norwegian "Hei,
     # Minni" and Thai "ไอมินนี่", and the session then missed English
     # follow-ups). The prompt anchors the model (both STT modes support it).
-    _stt_prompt = ("English conversation with Minny, a TV-viewing assistant. "
-                   "Expect greetings like 'hi Minny' and TV, channel, and "
-                   "programme names.")
+    # Vocabulary only, no example sentence: the old hint said "Expect
+    # greetings like 'hi Minny'", and a phantom "Hi Minny." was transcribed
+    # 42 times within 4 s after Minny spoke (Sep 14 – Oct 4, mostly from the
+    # satellite's echo), pre-empting her answer. Transcription models are
+    # known to echo hint text on noise (documented for Whisper; the default
+    # here is gpt-4o-mini-transcribe), so the hint gives it nothing to echo.
+    _stt_prompt = ("English. A TV assistant named Minny; channels KTVU, KPIX, "
+                   "KQED, KNTV, COZI, KSTS; programme and film titles.")
     # Realtime STT both rooms: finalizes ~0.2 s after speech (vs ~1 s batch)
     # and emits interim transcripts that feed preemptive generation. It holds
     # ONE OpenAI websocket open continuously, and OpenAI hard-caps a realtime
@@ -396,8 +418,10 @@ async def entrypoint(ctx: agents.JobContext) -> None:
                 last_user["text"] = text
                 sleep_state["last_activity"] = time.monotonic()
                 sleep_state["slept"] = False
-            elif role == "assistant" and memory is not None and last_user["text"]:
-                memory.remember(last_user["text"], text, interrupted=interrupted)
+            elif role == "assistant":
+                pai.last_reply_at = time.monotonic()
+                if memory is not None and last_user["text"]:
+                    memory.remember(last_user["text"], text, interrupted=interrupted)
         except Exception:  # noqa: BLE001 — logging must never break the pipeline
             logger.debug("conversation_item handler failed", exc_info=True)
 
