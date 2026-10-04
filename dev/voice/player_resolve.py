@@ -87,12 +87,23 @@ def _number_words(text: str) -> str:
         if w in _TENS or w in _ONES:
             n = _TENS.get(w, _ONES.get(w))
             j = i + 1
-            if w in _TENS and j < len(words) and words[j].lower() in _ONES and _ONES[words[j].lower()] < 10:
-                n += _ONES[words[j].lower()]; j += 1
+            if w in _TENS and j < len(words) and words[j].lower().rstrip(".,!?") in _ONES \
+                    and _ONES[words[j].lower().rstrip(".,!?")] < 10:
+                n += _ONES[words[j].lower().rstrip(".,!?")]; j += 1
             # "ten oh one" / "ten o one" → 1001
             while j + 1 < len(words) and words[j].lower() in ("oh", "o", "zero") \
                     and words[j + 1].lower() in _ONES:
                 n = n * 100 + _ONES[words[j + 1].lower()]; j += 2
+            # "ten eleven" / "ten thirty-one" / "ten twenty five" → 1011 / 1031 / 1025:
+            # four-digit channels said as two pairs.
+            if 10 <= n <= 99 and j < len(words):
+                nxt = words[j].lower().rstrip(".,!?")
+                if nxt in _TENS or (nxt in _ONES and _ONES[nxt] >= 10):
+                    m = _TENS.get(nxt, _ONES.get(nxt)); k = j + 1
+                    if nxt in _TENS and k < len(words) and words[k].lower().rstrip(".,!?") in _ONES \
+                            and _ONES[words[k].lower().rstrip(".,!?")] < 10:
+                        m += _ONES[words[k].lower().rstrip(".,!?")]; k += 1
+                    n = n * 100 + m; j = k
             for unit, mult in (("hundred", 100), ("thousand", 1000)):
                 if j < len(words) and words[j].lower() == unit:
                     n *= mult; j += 1

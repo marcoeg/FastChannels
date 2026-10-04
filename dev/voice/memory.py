@@ -451,18 +451,26 @@ class VoiceMemory:
             edges = [e for e in (getattr(result, "edges", None) or [])
                      if (e.episodes or [None])[0] == ep
                      and e.invalid_at is None and e.expired_at is None]
+            new_ids = [x.uuid for x in edges]
             for e in edges:
                 target = (names.get(e.target_node_uuid) or "").lower()
-                key = next((k for k in SINGLE_VALUE_SETTINGS if k in target), None)
-                if key is None or not is_household_fact(e.fact or ""):
+                # The setting must be the entity, not a word inside it
+                # ("language" matched "Spanish language films").
+                key = next((k for k in SINGLE_VALUE_SETTINGS
+                            if re.search(rf"\b{k}s?\b", target)), None)
+                if key is None:
                     continue
                 when = (e.valid_at or datetime.now(timezone.utc)).isoformat()
+                # Never end a fact this episode created (two facts about one
+                # setting ended each other), nor one stated LATER than this
+                # one (another job's extraction can finish out of order).
                 rows, _, _ = await self._driver.execute_query(
                     "MATCH (a:Entity {uuid: $src})-[r:RELATES_TO]->(b:Entity) "
-                    "WHERE toLower(b.name) CONTAINS $key AND r.uuid <> $new "
+                    "WHERE toLower(b.name) CONTAINS $key AND NOT r.uuid IN $new_ids "
                     "AND r.expired_at IS NULL AND r.invalid_at IS NULL "
+                    "AND (r.valid_at IS NULL OR r.valid_at < $when) "
                     "SET r.invalid_at = $when, r.expired_at = $now RETURN r.fact AS fact",
-                    src=e.source_node_uuid, key=key, new=e.uuid, when=when,
+                    src=e.source_node_uuid, key=key, new_ids=new_ids, when=when,
                     now=datetime.now(timezone.utc).isoformat())
                 for r in rows:
                     logger.info("memory: %r superseded by %r", r["fact"], e.fact)

@@ -161,6 +161,22 @@ def _brain_model():
     return OpenAIResponsesModel(os.environ.get("VOICE_MODEL", "gpt-5.6-luna")), settings
 
 
+def _stdio_toolsets(cfg_path: str, read_timeout: float) -> list:
+    """load_mcp_toolsets() with a request timeout: its default is 5 minutes,
+    so a stalled guide or TV server froze a voice turn (and its fan-outs)
+    for that long. One prefixed MCPToolset per server, as load_mcp_toolsets."""
+    from pydantic_ai.mcp import StdioTransport
+    servers = json.loads(Path(cfg_path).read_text())["mcpServers"]
+    out = []
+    for name, cfg in servers.items():
+        env = {k: os.path.expandvars(v) for k, v in (cfg.get("env") or {}).items()}
+        transport = StdioTransport(command=cfg["command"], args=list(cfg.get("args") or []),
+                                   env=env or None, cwd=cfg.get("cwd"))
+        out.append(MCPToolset(transport, id=name, init_timeout=10.0,
+                              read_timeout=read_timeout).prefixed(name))
+    return out
+
+
 def build_agent(primers: list | None = None) -> Agent:
     """primers collects async callables to run once at session start, off
     the voice path (VoiceBrain.prime), so no turn pays for them."""
@@ -192,8 +208,9 @@ def build_agent(primers: list | None = None) -> Agent:
         # not the player's) nor play_url: it watches by name through the
         # resolver tools below, which call the server directly. play_asset
         # stays for picking one of several titles the resolver listed.
-        prefixed = load_mcp_toolsets(
-            str(Path(__file__).parent / "mcp-tv-ytvn.json"))[0]
+        # 20 s: play_airing waits on the page (relay pre-flight, one retry).
+        prefixed = _stdio_toolsets(
+            str(Path(__file__).parent / "mcp-tv-ytvn.json"), read_timeout=20.0)[0]
         ytvn = prefixed.wrapped
         tv = ResilientToolset(
             prefixed.filtered(lambda ctx, td: td.name not in
@@ -214,7 +231,8 @@ def build_agent(primers: list | None = None) -> Agent:
         # prefixed "minny_". Wrap for the same dead-server resilience as the
         # others. The server needs the Minerva VPN up (see VPN-CONNECT.md).
         minny_cfg = str(Path(__file__).parent / "mcp.json")
-        tv_search = load_mcp_toolsets(minny_cfg)
+        # 10 s: ranked guide searches measure up to ~6 s.
+        tv_search = _stdio_toolsets(minny_cfg, read_timeout=10.0)
         for ts in tv_search:
             # Starts the server and its catalogue client, and checks the
             # catalogue answers — what the model used to spend a round trip on.
@@ -424,8 +442,10 @@ def build_agent(primers: list | None = None) -> Agent:
                                 f"(airing_id {r['airing_id']})" for r in recent))
                 # Speech often prepends a misheard verb ("Clay, the Farmer and
                 # the Foodie" for "Play The Farmer…"): retry without it once.
+                # Only when the first word sounds like a misheard "play" — a
+                # looser retry could otherwise play an unrelated programme.
                 words = title.replace(",", " ").split()
-                if retry and len(words) >= 3:
+                if retry and len(words) >= 3 and _MISHEARD_PLAY.match(words[0]):
                     rest = " ".join(words[1:])
                     return (f"(nothing matched {title!r}; tried {rest!r}) "
                             + await _watch_title(rest, year, channel, retry=False))
@@ -629,6 +649,11 @@ GREETING_ECHO_S = 4.0
 
 def is_echo_greeting(text: str, last_reply_at: float, now: float) -> bool:
     return bool(BARE_GREETING.match(text.strip())) and now - last_reply_at < GREETING_ECHO_S
+
+
+# Words the recognizer has produced for a leading "play" ("Clay, the
+# Farmer and the Foodie").
+_MISHEARD_PLAY = re.compile(r"^(play|clay|plate?|played|lay|pay|pray|blay|place|put|please)[,.]?$", re.I)
 
 
 def closing_ack_reply(user_text: str, last_reply: str) -> str | None:
