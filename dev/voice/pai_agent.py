@@ -623,8 +623,9 @@ def build_agent(primers: list | None = None) -> Agent:
     async def web_lookup(query: str) -> str:
         """Look up background about a programme, film, person, or event on
         the web: plot, cast, year, series context, reviews, real-world
-        facts. Use when guide descriptions are thin or the viewer asks
-        about content rather than scheduling. NOT for what is on TV, when
+        facts. For a specific airing, read its guide row first and use
+        this only for what the row lacks (or when its description is
+        thin). NOT for what is on TV, when
         something airs, or the viewer's own preferences."""
         from websearch import search
         return await search(query)

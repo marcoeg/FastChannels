@@ -1,12 +1,14 @@
 # Looking things up on the web (web_lookup)
 
-The guide carries times and a thin, often boilerplate description — not
-plot, cast, year, or context. `web_lookup(query)` fills that in.
+A guide row carries times, the episode title, season/episode and a short
+description, which is sometimes missing or boilerplate. It has no cast,
+background or reviews. `web_lookup(query)` fills those in.
 
 - Use it when the viewer asks ABOUT a programme rather than about the
-  schedule: "what's this one about", "who's in it", "is it any good",
-  "what year is this", "is this the one where…", or background on a
-  person, team, or event you're discussing.
+  schedule: "who's in it", "is it any good", "what year is this", "is
+  this the one where…", or background on a person, team, or event you're
+  discussing. For "what's this one / this episode about", read the
+  airing's guide row first (see routing) and look up only what it lacks.
 - Do NOT use it for what's on, when something airs, channel numbers, or
   the household's own preferences — the guide, TV, and memory tools own
   those and are far faster.
