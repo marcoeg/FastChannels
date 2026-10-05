@@ -1211,6 +1211,21 @@ Writes `eval.jsonl` (prompt + tools, with the OpenAI brain's answer as
 Preemptive cancels, errors and (by default) barge-ins are dropped; invalid
 lines are reported rather than silently skipped. Standard library only.
 
+### Replay
+
+```bash
+cd dev/voice
+./replay.py SPEC.json [--runs N] [--only ID,ID]
+```
+
+Re-sends recorded turns to the brain model with production settings and
+find-and-replace edits to their instructions, then tallies the model's first
+response per variant: its tool calls with arguments, or the text it would
+speak. No tool runs, so the TV is never touched. It reproduces turn-level
+bugs and gives the old-vs-new diff on real inputs that a prompt change needs;
+`"cases": {"dates": [...]}` replays every recorded turn of those days. The
+spec format is in the script's docstring; results go to `~/news/replays/`.
+
 ---
 
 ## Repository
