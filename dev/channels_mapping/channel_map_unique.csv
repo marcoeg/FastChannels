@@ -1,0 +1,729 @@
+channelId,callSign,title,channelType,hd,adult,status,logoUrl
+21,CARSTVH STG,CARSTVH - STAGING - ENC,LIVE,false,false,A,http://cps-static.rovicorp.com/2/open/Rovi%20Images/Logo/10559/source_10559_400_400_white.png
+22,AWEHD STG,AWEHD - STAGING - ENC,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Source/74565/awe_122x66_white.png
+23,BETHD STG,BET - STAGING - ENC,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/31059/bet_2400_color_dark_white.png
+24,BIG10HD Staging,Big Ten - STAGING,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/20009/big10network_2400_color_dark.png
+25,BETSOUL STG,BET SOUL - STAGING - ENC,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/4334/betsoultv_2400_color_dark_white.png
+41,3ANGELS,3 Angels Broadcasting Network,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/74916/3abn_2400_color_dark_light.png
+42,A&E,A&E Network (East),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/15377/aande_2400_color_dark_white.png
+43,AWEHD,AWE - A Wealth of Entertainment HD,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Source/74565/awe_122x66_white.png
+44,BBCAPH,BBC America HD (Pacific),LIVE,false,false,A,http://cps-static.rovicorp.com/2/open/Rovi%20Images/Logo/34842/source_34842_400_400_white.png
+45,CMTVP,CMT (West) HD,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/27/cmtusa_2400_color_dark_white.png
+46,COMEDYP,Comedy Central (West) HD,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/32807/comedycentral_2400_white.png
+47,CSPAN,CSPAN (East) HD,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/93136/cspan_2400_color_dark.png
+48,CSPAN2,CSPAN 2 (East) HD,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/1160/cablesatellitepublicaffairsnetwork2_2400_color_dark.png
+49,FYIHD,FYI (East) HD,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/SourceLogos/400x400/FYI.png
+50,GFAMPHD,Great American Family West HD,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/97203/gafamily_2400_color_dark_white.png
+51,HALLHDP,Hallmark Channel (West) HD,LIVE,false,false,A,/images/vod/original/421.png
+52,HFM,Hallmark Family,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/89259/hallmarkfamily_2400_color_dark.png
+53,HMYSHDP,Hallmark Mystery HD (Pacific),LIVE,false,false,A,http://cps-static.rovicorp.com/2/open/Rovi%20Images/Logo/24400/source_24400_400_400_white.png
+54,IFCPHD,IFC HD (Pacific),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/82635/ifc_2400_color_dark_white.png
+55,INSP,INSP,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/1193/insp_2400_color_dark.png
+56,LIFEH,Lifetime Television HDTV (East),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/21822/lifetime_2400_color_dark_light.png
+57,LMNHD,Lifetime Movie Network (East) HD,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/19296/lmn_2400_color_dark_white.png
+58,LRW,Lifetime Real Women,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/10338/lifetimerealwomen_2400_color_dark_light.png
+59,MTVP,MTV (West) HD,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/48952/mtvhd_color_2400_color_dark.png
+60,MTVLIVE,MTV Live HD,LIVE,false,false,A,http://192.0.2.20:7780/xtv-ws-client/images/Channel_Logo_Large.png
+61,NEWSMXH,Newsmax TV HD,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/64869/newsmax_2400_color_dark_light.png
+62,NFLHD,NFL Network HD,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/89215/nflnetwork_2400_color_dark_light.png
+63,NICJR,Nick Jr. (East) HD,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/61582/nickelodeonjuniorHD_2400_color_dark.png
+64,NIKP,Nickelodeon (West) HD,LIVE,false,false,A,http://cps-static.rovicorp.com/2/open/Rovi%20Images/Logo/23187/source_23187_400_400_white.png
+65,OUTHD,Outdoor Channel HD,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/29867/outdoorchannel_2400_color_dark.png
+66,PARPHD,Paramount Network (West) HD,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/89212/paramountnetworkhd_2400_color_dark_light.png
+67,RFDTV,RFD TV HD,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Source/20903/rfdtv_122x66_white.png
+68,SPRTMAN,Sportsman Channel (East) HD,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/12286/sc_2400_color_dark_white.png
+82,SUNDANP,Sundance Channel (West) HD,LIVE,false,false,A,http://cps-static.rovicorp.com/2/open/Rovi%20Images/Logo/30883/source_30883_400_400_white.png
+83,TBN,TBN HD,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/146/tbn_2400_color_dark_light.png
+84,COWBOY,The Cowboy Channel HD,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Source/1169/cowboychannel_122x66_white.png
+85,HISHD,History HDTV (East),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/1254/history_2400_color_dark_light.png
+86,TVLDPHD,TV Land HD (Pacific),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/1269/tvland_2400_color_dark_light.png
+87,VH1PHD,VH1 (West) HD,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/35293/VH1HD_2400_color_darklight.png
+88,VICEHD,Vice TV (East) HD,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/43148/vice_2400_color_dark_white.png
+89,WEHD-W,Women's Entertainment Network HDTV (West),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/29283/wetv_2400_color_dark_light.png
+91,CARSTVH STG CLR,CARSTVH - STAGING - CLR,LIVE,false,false,A,http://cps-static.rovicorp.com/2/open/Rovi%20Images/Logo/16174/source_16174_400_400_white.png
+143,FAMZHDP,Showtime Familyzone HD (Pacific),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/SonyTV%20Logos/Showtime/SHOWTIMEFAMILY.png
+144,FLIXHDP,Flix HD (Pacific),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/2520/flix_2400_color_dark_light.png
+145,FOODP,Food Network (West) HD,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/2006/fn_2400_color_dark_light.png
+146,HGTVP,HGTV (West) HD,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/86421/hgtelevision_2400_color_dark_light.png
+147,MTV2P,MTV2 (West) HD,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/18053/mtv2_2400_color_dark_white.png
+148,MTVCL,MTV Classic (East),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/5834/mtvclassic_2400_color_dark_white.png
+149,NEXTP,SHO Next (West) HD,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/9679/showtimenext_2400_color_dark.png
+150,NIKTON,Nicktoons (Pacific),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/87406/nicktoons_2400_color_dark_light.png
+151,NMZK,NickMusic,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/87548/nickmusic_2400_color_dark_light.png
+152,SHO2PHD,SHO 2 (West) HD,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Misc/showtime2_122x66_white.png
+153,SHOBETP,SHO x BET (West) HD,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/6069/shobet_2400_color_dark_white.png
+154,SHOCPHD,Showtime Showcase HD (Pacific),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/21582/showcasehd_2400_color_dark_light.png
+155,SHOWP,SHO (West) HD,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/87360/ppwshowtimew_2400_color_dark.png
+156,SHWXPHD,Showtime Extreme HD (Pacific),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/87368/showtimeextreme_2400_color_dark.png
+157,TMCP,The Movie Channel (West) HD,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/Comcast%20Logos/Comcast%20Source%20Logos/TMCHD_2400_color_dark.png
+158,TMCXP,The Movie Channel XTRA (West) HD,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/21587/tmcxtrahdtv_2400_color_dark.png
+159,TNCK,TeenNick (East) HD,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Misc/teennick_122x66_white.png
+160,TRAVPHD,Travel Channel (West) HD,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/42205/travelchannel_2400_color_dark_light.png
+161,WOMENP,SHO Women (West) HD,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/9671/showtimewomen_2400_color_dark.png
+162,MAGNPHD,Magnolia Network HD (Pacific),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/26971/magnolia_2400_color_dark_white.png
+181,KBGSDT,KBGSDT (KBGS-DT),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/168/pbs_2400_color_dark_light.png
+182,BYUTVHD,BYU-TV HD,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/15987/byutv_2400_color_dark_white.png
+185,KCWC,KCWC,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/168/pbs_2400_color_dark_light.png
+186,PBS Create,PBS Create,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/9857/Create_2400_color_dark.png
+187,KCWC,KCWC-DT3,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/12728/pbskids_2400_color_dark_light.png
+201,COURT,Court TV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Misc/courttv_122x66_white.png
+202,KSVIDT4,KSVIDT4 (KSVI-DT4),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/8528/antennatv_2400_color_dark_light.png.png
+203,KTVQDT2,KTVQ-DT2,LIVE,false,false,A,http://cps-static.rovicorp.com/2/open/Rovi%20Images/Logo/42405/source_42405_400_400_white.png
+204,IMYS,ION Mystery,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/52900/ionmystery_2400_color_dark.png
+205,KSVIDT2,KSVI-DT2,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/17761/cw_2400_color_dark_light.png
+206,K14RF-D4,KTVQ Ion+,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/18581/ionplus_2400_color_dark_light.png
+207,GRIT,Grit,LIVE,false,false,A,http://cps-static.rovicorp.com/2/open/Rovi%20Images/Logo/87539/source_87539_400_400_white.png
+208,KINVLD,KINV-LD,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/1075/metv_2400_color_dark_light.png
+209,THMAXHD,ThrillerMAX HD,LIVE,false,false,A,http://192.0.2.20:7780/xtv-ws-client/images/Channel_Logo_Large.png
+210,AMCPHD,AMC HD (Pacific),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/76290/amc_2400_color_dark_white.png
+211,APLHDP,Animal Planet HD (Pacific),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/54653/animalplanet_2400_color_dark.png
+212,BRAVOHP,Bravo HD (Pacific),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/404/bravo_2400_color_dark_white.png
+213,DISNHDP,Disney Channel HD (Pacific),LIVE,false,false,A,http://cps-static.rovicorp.com/2/open/Rovi%20Images/Logo/22849/source_22849_400_400_white.png
+214,DJCHHDP,Disney Junior HD (Pacific),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/33838/disneyjuniorhdtelevision_2400_color_dark.png
+215,DSCP,Discovery Channel (Pacific),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/59536/discovery_2400_color_dark_light.png
+216,DXDHDP,Disney XD HD (Pacific),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/15385/disneyxd_2400_color_darklight.png
+217,ESPN2HD,ESPN2 HD,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/17142/espn2_2400_color_dark_light.png
+219,ESPNUHD,ESPNU HD,LIVE,false,false,A,http://cps-static.rovicorp.com/2/open/Rovi%20Images/Logo/21300/source_21300_400_400_white.png
+220,FXP,FX (Pacific),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/35220/fxtelevision_2400_color_dark.png
+221,FXXP,FXX (Pacific),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/44425/fxxchannel_2400_color_dark_white.png
+222,GSNPHD,Game Show Network HD (Pacific),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/1184/gsn_2400_color_dark_light.png
+223,HBOCPHD,HBO Comedy,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Source/5308/hbocomedy_122x66_white.png
+224,HBOZPHD,HBO Movies,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Misc/hbomovies_122x66_white.png
+225,IDPACHD,Investigation Discovery HD (Pacific),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Source/10417/idcanada_122x66_white.png
+226,SYFYHDP,Syfy HD (Pacific),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/1232/syfy_2400_color_dark.png
+227,TBSHD,TBS Superstation HDTV (West),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/410/tbs_2400_white.png
+229,TOONPHD,Cartoon Network HD (Pacific),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/79971/cartoonnetworkhd_2400_color_dark.png
+230,TRUTVHP,truTV HD (Pacific),LIVE,false,false,A,http://cps-static.rovicorp.com/2/open/Rovi%20Images/Logo/34636/source_34636_400_400_white.png
+231,USAHDP,USA Network HD (Pacific),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/20019/usanetwork_2400_color_dark_white.png
+232,WEATH,The Weather Channel,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/29136/twc_2400_color_dark_light.png
+233,5MAXHD,Cinemax Classics,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Misc/cinemaxclassics_122x66_white.png
+234,ACC,ACC Network,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/93878/accnetwork_2400_color_dark_light.png
+235,ACMAXHD,Cinemax Action,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Misc/cinemaxaction_122x66_white.png
+236,AHCHD,American Heroes Channel HD,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/3790/ahc_2400_color_dark_light.png
+237,AXSTV,AXS TV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/Comcast%20Logos/Comcast%20Source%20Logos/AXSTV_2400_color_dark_white.png
+238,BOOM,Boomerang,LIVE,false,false,A,http://cps-static.rovicorp.com/2/open/Rovi%20Images/Logo/90229/source_90229_400_400_white.png
+239,CBSSN,CBS Sports Network,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/12251/cbssportsnetwork_2400_color_dark_light.png
+240,MAXHD,Cinemax,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/412/cinemax_2400_color_dark_white.png
+241,CNBCHD,CNBC HD,LIVE,false,false,A,http://cps-static.rovicorp.com/2/open/Rovi%20Images/Logo/20279/source_20279_400_400_white.png
+242,CNNHD,CNN HD,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/Comcast%20Logos/Comcast%20Source%20Logos/CNN-HD_2400_color_dark.png
+243,DESTHD,Destination America HD,LIVE,false,false,A,http://cps-static.rovicorp.com/2/open/Rovi%20Images/Logo/33623/source_33623_400_400_white.png
+244,DFCHD,Discovery Family Channel HD,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Source/90394/discoveryfamily_122x66_white.png
+245,DLFHD,Discovery Life Channel in HDTV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/87535/discoverylifeus_2400_color_dark_light.png
+246,E,E! Entertainment Television,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/Comcast%20Logos/Comcast%20Source%20Logos/EHD_2400_color_dark.png
+247,ESPNWHD,ESPNEWS HD,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/20777/espnnews_2400_color_dark_light.png
+248,EWTNHD,Eternal Word Television Network HD,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/1168/ewtn_2400_color_dark_white.png
+249,FBNHD,Fox Business HD,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/19810/foxbusiness_2400_color_dark_light.png
+250,FNCHD,Fox News Channel HDTV (East),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/54647/foxnews_2400_white.png
+251,FREFMHD,Freeform HD,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/441/freeform_2400_color_dark_light.png
+252,FS1HD,FS1 HD,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/15896/foxsportsoneus_2400_color_dark_light.png
+253,FS2HD,FS2 HD,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/52343/foxsports2hd_2400_color_dark_light.png
+254,FXMHD,FX Movie Channel HD,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/2419/fxmtv_2400_color_dark_white.png
+255,GLFHD,The Golf Channel HDTV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/open/Rovi%20Images/Logo/20001/source_20001_400_400_white.png
+256,HBOHD,HBO,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/WOTV%20logos/HBOHD.png
+257,HBO2HD,HBO Hits,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Misc/hbohits_122x66_white.png
+258,HBOFHD,HBO Family HD,LIVE,false,false,A,http://192.0.2.20:7780/xtv-ws-client/images/Channel_Logo_Large.png
+259,HBOLAHD,HBO Latino,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Source/9359/hbolatino_122x66_white.png
+260,HBOSGHD,HBO Drama,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Misc/hbodrama_122x66_white.png
+261,HDNETMV,HDNet Movies,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/12232/hdnetmovies_2400_color_dark.png
+262,HLNHD,HLN HD,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/107678/hln_2400_color_dark.png
+263,MNBCHD,MSNBC HD,LIVE,false,false,A,http://cps-static.rovicorp.com/2/open/Rovi%20Images/Logo/23408/source_23408_400_400_white.png
+264,MAXHITS,Cinemax Hits,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Misc/cinemaxhits_122x66_white.png
+265,MOVIEHD,MovieMax HD,LIVE,false,false,A,http://192.0.2.20:7780/xtv-ws-client/images/Channel_Logo_Large.png
+266,MTHD,MOTORTREND HD,LIVE,false,false,A,http://cps-static.rovicorp.com/2/open/Rovi%20Images/Logo/10559/source_10559_400_400_white.png
+267,NEWSNTN,NewsNation,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/82999/newsnation_2400_color_dark.png
+268,NFLNRZD,NFL RedZone HD,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/23754/nflrz_2400_color_dark_light.png
+269,NGCHD,National Geographic HD,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/17251/nationalgeographichd_2400_color_dark.png
+270,NGWIHD,National Geographic Wild HD,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/24417/nationalgeographicwild_2400_color_dark.png
+271,OANHD,One America News Network HD,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/45246/oan_2400_color_dark.png
+272,OMAXHD,OuterMAX HD,LIVE,false,false,A,http://192.0.2.20:7780/xtv-ws-client/images/Channel_Logo_Large.png
+273,OXYGNHP,Oxygen HD (Pacific),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/87369/oxygentruecrime_2400_color_dark_light.png
+274,PURSTHD,Pursuit Channel HD,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/85127/pursuit_2400_color_dark.png
+275,QVCHD,QVC HD,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/436/qvc_2400_color_dark.png
+276,SCIHD,Science Channel HD,LIVE,false,false,A,http://cps-static.rovicorp.com/2/open/Rovi%20Images/Logo/19977/source_19977_400_400_white.png
+277,SECH,SEC Network HD,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/24597/secnetwork_2400_color_dark_light.png
+278,TCMHD,Turner Classic Movies HD,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/89953/tcm_2400_color_dark_white.png
+281,STORE,Store Publishing Channel,LIVE,false,false,A,/images/vod/original/341.png
+301,ATTRM,AT&T SportsNet Rocky Mountain,LIVE,false,false,A,http://192.0.2.20:7780/xtv-ws-client/images/Channel_Logo_Large.png
+302,ATTRMALT1,AT&T SportsNet Rocky Mountain Alternate,LIVE,false,false,A,http://192.0.2.20:7780/xtv-ws-client/images/Channel_Logo_Large.png
+303,KHMTDT4,KHMT-DT4,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/3912/ion_2400_color_dark_light.png
+304,KCWY NBC,KCWY NBC,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Source/1209/nbc_122x66_white.png
+305,KHMT FOX,KHMT FOX,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/4/fox_2400_color_dark_white.png
+306,KSVI ABC,KSVI ABC,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/5/abc_2400_color_dark_light.png
+307,KTVQ CBS,KTVQ CBS,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/87/cbs_2400_color_dark_white.png
+308,KULR NBC,KULR NBC,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Source/1209/nbc_122x66_white.png
+309,KULR SWX,KULR SWX,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Source/92750/swx_122x66_white.png
+310,BET-HD,Black Entertainment Television HDTV (West),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/31059/bet_2400_color_dark_white.png
+311,OWN,Oprah Winfrey Network,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/28845/owntv_2400_color_dark_light.png
+312,TLC HD,TLC HD ,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/31757/tlc_2400_color_dark_light.png
+321,MC01H,Music Choice Today's Hits,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Source/109199/musicchoice_122x66_white.png
+322,MC02,Music Choice Trending Hits,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Source/109199/musicchoice_122x66_white.png
+323,MC03H,Music Choice Feel-Good Favorites,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Source/109199/musicchoice_122x66_white.png
+324,MC,Music Choice Pop Energy HDTV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Source/109199/musicchoice_122x66_white.png
+325,MC05H,Music Choice Hip-Hop,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Source/109199/musicchoice_122x66_white.png
+326,MC06H,Music Choice Dance,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Source/109199/musicchoice_122x66_white.png
+327,MC07H,Music Choice Hip-Hop Classics,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Source/109199/musicchoice_122x66_white.png
+328,MC08H,Music Choice Throwback Jams,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Source/109199/musicchoice_122x66_white.png
+329,MC09H,Music Choice R&B Classics,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Source/109199/musicchoice_122x66_white.png
+330,MC10H,Choice Today's R&B,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Source/109199/musicchoice_122x66_white.png
+331,MC11H,Music Choice Gospel,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Source/109199/musicchoice_122x66_white.png
+332,MC12H,Music Choice Contemporary Christian,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Source/109199/musicchoice_122x66_white.png
+333,MC13H,Music Choice Rock,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Source/109199/musicchoice_122x66_white.png
+334,MC,Music Choice Yacht Rock,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Source/109199/musicchoice_122x66_white.png
+335,MC15H,Music Choice '60s & '70s Mellow Hits,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Source/109199/musicchoice_122x66_white.png
+336,MC16H,Music Choice Adult Alternative,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Source/109199/musicchoice_122x66_white.png
+337,MC17H,Music Choice Alt & Rock Favorites,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Source/109199/musicchoice_122x66_white.png
+338,MC18H,Music Choice Classic Rock,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Source/109199/musicchoice_122x66_white.png
+339,MC19H,Music Choice Soft Rock,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Source/109199/musicchoice_122x66_white.png
+340,MC20,Music Choice Happy Hits,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Source/109199/musicchoice_122x66_white.png
+341,MC21H,Music Choice Pop Hits,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Source/109199/musicchoice_122x66_white.png
+342,MC22H,Music Choice Today's Latin Hits,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Source/109199/musicchoice_122x66_white.png
+343,MC23,Music Choice Tropicales,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Source/109199/musicchoice_122x66_white.png
+344,MC24H,Music Choice Romantic Latin Pop,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Source/109199/musicchoice_122x66_white.png
+345,MC25H,Music Choice '70s & '80s Favorites,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Source/109199/musicchoice_122x66_white.png
+346,MC26,Music Choice '90s,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Source/109199/musicchoice_122x66_white.png
+347,MC27H,Music Choice '80s,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Source/109199/musicchoice_122x66_white.png
+348,MC28H,Music Choice '70s,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Source/109199/musicchoice_122x66_white.png
+349,MC29H,Music Choice '60s Generation,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Source/109199/musicchoice_122x66_white.png
+350,MC30H,Music Choice Solid Gold Oldies,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Source/109199/musicchoice_122x66_white.png
+351,MC31,Music Choice Pop & Country,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Source/109199/musicchoice_122x66_white.png
+352,MC32H,Music Choice Today's Country,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Source/109199/musicchoice_122x66_white.png
+353,MC33H,Music Choice Country Favorites,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Source/109199/musicchoice_122x66_white.png
+354,MC34H,Music Choice Classic Country,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Source/109199/musicchoice_122x66_white.png
+355,MC35H,Music Choice Country Rock,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Source/109199/musicchoice_122x66_white.png
+356,MC36H,Music Choice Sleep Noise,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Source/109199/musicchoice_122x66_white.png
+357,MCRVB,Music Choice Relaxing Vibes,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Source/109199/musicchoice_122x66_white.png
+358,MC38H,Music Choice Calming Classical,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Source/109199/musicchoice_122x66_white.png
+359,MC39H,Music Choice Joyful Instruments,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Source/109199/musicchoice_122x66_white.png
+360,MC40H,Music Choice Pop Instrumentals,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Source/109199/musicchoice_122x66_white.png
+361,MC41H,Music Choice Light Classical,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Source/109199/musicchoice_122x66_white.png
+362,MC42H,Music Choice Classical Masterpieces,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Source/109199/musicchoice_122x66_white.png
+363,MC43H,Music Choice Soundscapes,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Source/109199/musicchoice_122x66_white.png
+364,MC44H,Music Choice Smooth Jazz,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Source/109199/musicchoice_122x66_white.png
+365,MC45H,Music Choice Jazz,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Source/109199/musicchoice_122x66_white.png
+366,MC46H,Music Choice Blues,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Source/109199/musicchoice_122x66_white.png
+367,MC47H,Music Choice Singers & Swing,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Source/109199/musicchoice_122x66_white.png
+368,MC48H,Music Choice Easy Listening,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Source/109199/musicchoice_122x66_white.png
+369,MC49H,Music Choice Classic Christmas,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Source/109199/musicchoice_122x66_white.png
+370,MC50H,Music Choice Sounds of the Seasons,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Source/109199/musicchoice_122x66_white.png
+381,BYU Radio,BYU Radio,LIVE,false,false,A,http://192.0.2.20:7780/xtv-ws-client/images/Channel_Logo_Large.png
+421,AWEHD -STG,AWEHD -STAGING - CLEAR,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Source/74565/awe_122x66_white.png
+422,BETHD,BET HD Staging,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/31059/bet_2400_color_dark_white.png
+423,TOON,Cartoon Network Staging,LIVE,false,false,A,http://192.0.2.20:7780/xtv-ws-client/images/Channel_Logo_Large.png
+424,COMEDYP STG,CMDTVHD - STAGING  - ENC,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/32807/comedycentral_2400_white.png
+425,CMTVHD STG,CMTVHD - STAGING - ENC,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/27/cmtusa_2400_color_dark_white.png
+461,CSPAN2,Cable Satellite Public Affairs Network 2,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/1160/cablesatellitepublicaffairsnetwork2_2400_color_dark.png
+462,AMCHD,AMC HDTV (West),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/76290/amc_2400_color_dark_white.png
+464,WEHD-W,Women's Entertainment Network HDTV (West),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/29283/wetv_2400_color_dark_light.png
+465,SUNOD,Sundance On Demand,LIVE,false,false,A,http://cps-static.rovicorp.com/2/open/Rovi%20Images/Logo/29281/source_29281_400_400_white.png
+466,IFCHD,IFC HDTV (West),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/82635/ifc_2400_color_dark_white.png
+467,A&E,A&E Network (West),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/15377/aande_2400_color_dark_white.png
+468,COOK,The Cooking Channel,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/Comcast%20Logos/Comcast%20Source%20Logos/cookingchannel_2400_color_dark.png
+469,CSPAN3,Cable Satellite Public Affairs Network 3,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/5740/cablesatellitepublicaffairsnetwork3_2400_color_dark.png
+470,CSPAN,Cable Satellite Public Affairs Network,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/93136/cspan_2400_color_dark.png
+471,FOOD,Food Network (West),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/2006/fn_2400_color_dark_light.png
+472,FBN,Fox Business Network,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/19810/foxbusiness_2400_color_dark_light.png
+473,HALMRK,Hallmark Channel (West),LIVE,false,false,A,/images/vod/original/322.png
+474,HMYS,Hallmark Mystery,LIVE,false,false,A,http://cps-static.rovicorp.com/2/open/Rovi%20Images/Logo/16137/source_16137_400_400_white.png
+475,HGTV,Home & Garden Television (West),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/86421/hgtelevision_2400_color_dark_light.png
+476,HISTW,History (West),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/1254/history_2400_color_dark_light.png
+478,LRW,Lifetime Real Women,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/10338/lifetimerealwomen_2400_color_dark_light.png
+479,MILH,Military History Channel,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/16612/militaryhistory_2400_color_dark.png
+480,ShopHQ,ShopHQ,LIVE,false,false,A,http://192.0.2.20:7780/xtv-ws-client/images/Channel_Logo_Large.png
+481,LIFE,Lifetime Television (West),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/21822/lifetime_2400_color_dark_light.png
+482,QVC,Quality Value Convenience Network,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/436/qvc_2400_color_dark.png
+483,TWC,The Weather Channel,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/29136/twc_2400_color_dark_light.png
+484,JTV,Jewelry Television,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/32129/jtvjewelrytv_2400_color_dark_light.png
+485,BTN,Big Ten Network (National),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/20009/big10network_2400_color_dark.png
+486,FYIHD,FYI (West) HDTV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/open/Rovi%20Images/Logo/59549/source_59549_400_400_white.png
+487,GMSHWHD,Game Show Network HDTV (West),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/1184/gsn_2400_color_dark_light.png
+488,DISNEY,The Disney Channel (West),LIVE,false,false,A,http://cps-static.rovicorp.com/2/open/Rovi%20Images/Logo/2499/source_2499_400_400_white.png
+489,CD34,Adult Alternative,LIVE,false,false,A,http://cps-static.rovicorp.com/2/open/Rovi%20Images/Logo/87899/source_87899_140_140_white.png
+490,SM036,Stingray Rock,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/Comcast_2400_1578/Source/43840/StingrayMusic_2400_color_dark.png
+491,SM024,Stingray Bluegrass,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/Comcast_2400_1578/Source/43840/StingrayMusic_2400_color_dark.png
+492,SM040,Stingray Broadway,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/Comcast_2400_1578/Source/43840/StingrayMusic_2400_color_dark.png
+493,SM001,Stingray Classic Rock,LIVE,false,false,A,http://cps-static.rovicorp.com/2/open/Rovi%20Images/Logo/4639/source_4639_400_400_white.png
+494,SM038,Stingray Classic Masters,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/Comcast_2400_1578/Source/43840/StingrayMusic_2400_color_dark.png
+495,SM009,Stingray Country Classics,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/Comcast_2400_1578/Source/43839/StingrayMusic_2400_white.png
+496,SM006,Stingray Dance Clubbin',LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/Comcast_2400_1578/Source/43840/StingrayMusic_2400_color_dark.png
+497,SM036,Stingray Easy Listening,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Misc/stingrayeasylistening_122x66_white.png
+498,SM045,Stingray Eclectic Electronic,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/Comcast_2400_1578/Source/43840/StingrayMusic_2400_color_dark.png
+499,SM028,Stingray Remember the '80's,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Misc/stingrayrememberthe80s_122x66_white.png
+500,SM015,Stingray Flashback '70's,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/Comcast_2400_1578/Source/43840/StingrayMusic_2400_color_dark.png
+501,SM019,Stingray Folk Roots,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/Comcast_2400_1578/Source/43840/StingrayMusic_2400_color_dark.png
+502,SM026,Stingray Gospel,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/Comcast_2400_1578/Source/43840/StingrayMusic_2400_color_dark.png
+503,SM079,Stingray Groove (Disco & Funk),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/Comcast_2400_1578/Source/43840/StingrayMusic_2400_color_dark.png
+504,SM030,Stingray Hip Hop,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Misc/stingrayhiphop_122x66_white.png
+505,SM007,Stingray Hit List,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Misc/stingrayhitlist_122x66_white.png
+506,SM011,Stingray Holiday Hits,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/Comcast_2400_1578/Source/43840/StingrayMusic_2400_color_dark.png
+507,SM008,Stingray Hot Country,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Misc/stingrayhotcountry_122x66_white.png
+508,SM031,Stingray Jazz Masters,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/Comcast_2400_1578/Source/43840/StingrayMusic_2400_color_dark.png
+509,SM032,Stingray Jazz Now,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/Comcast_2400_1578/Source/43840/StingrayMusic_2400_color_dark.png
+510,SM021,Stingray Jukebox Oldies,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/Comcast_2400_1578/Source/43840/StingrayMusic_2400_color_dark.png
+511,SM029,Stingray Kids' Stuff,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/Comcast_2400_1578/Source/43840/StingrayMusic_2400_color_dark.png
+512,SM008,Stingray Maximum Party,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/Comcast_2400_1578/Source/43840/StingrayMusic_2400_color_dark.png
+513,SM007,Stingray Nothin' But 90's,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Misc/stingraynothinbut90_122x66_white.png
+514,SM022,Stingray No Fences,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/Comcast_2400_1578/Source/43840/StingrayMusic_2400_color_dark.png
+515,SM004,Stingray Pop Adult,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Misc/stingraypopadult_122x66_white.png
+516,SMESP,Stingray: Pop Classics,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/Comcast_2400_1578/Source/43840/StingrayMusic_2400_color_dark.png
+517,SM046,Stingray Retro Latino,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/Comcast_2400_1578/Source/43839/StingrayMusic_2400_white.png
+518,SM036,Stingray Rock,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/Comcast_2400_1578/Source/43840/StingrayMusic_2400_color_dark.png
+519,SM048,Stingray Rock en Español,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/Comcast_2400_1578/Source/43840/StingrayMusic_2400_color_dark.png
+520,SM049,Stingray Romance Latino,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/Comcast_2400_1578/Source/43840/StingrayMusic_2400_color_dark.png
+521,SM040,Stingray Smooth Jazz,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Misc/stingraysmoothjazz_122x66_white.png
+522,SM027,Stingray Soul Storm,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Misc/stingraysoulstorm_122x66_white.png
+523,SM003,Stingray Swinging Standards,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/Comcast_2400_1578/Source/43840/StingrayMusic_2400_color_dark.png
+524,SM018,Stingray The Blues,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/Comcast_2400_1578/Source/43840/StingrayMusic_2400_color_dark.png
+525,APHD,Animal Planet HDTV (West),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/54653/animalplanet_2400_color_dark.png
+526,SM005,Stingray The Chill Lounge,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/Comcast_2400_1578/Source/43840/StingrayMusic_2400_color_dark.png
+527,SM042,Stingray Y2K,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/Comcast_2400_1578/Source/43840/StingrayMusic_2400_color_dark.png
+528,SM032,Stingray Jammin',LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/Comcast_2400_1578/Source/43840/StingrayMusic_2400_color_dark.png
+529,DESTAMHD,Destination America HDTV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/open/Rovi%20Images/Logo/21068/source_21068_400_400_white.png
+530,DSCHD,The Discovery Channel HDTV (West),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/59536/discovery_2400_color_dark_light.png
+531,DFCHD,Discovery Family Channel HDTV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Source/90394/discoveryfamily_122x66_white.png
+532,DISJr,Disney Jr. HDTV West,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/33838/disneyjuniorhdtelevision_2400_color_dark.png
+533,DISXD,Disney XD (West),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/15385/disneyxd_2400_color_darklight.png
+534,ESPN,ESPN,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/SourceLogos/120x60/ESPN.png
+535,ESNEWSHD,ESPN News HDTV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/20777/espnnews_2400_color_dark_light.png
+536,ESPNUHD,ESPNU HDTV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/open/Rovi%20Images/Logo/21300/source_21300_400_400_white.png
+537,ESPN2HD,ESPN2 HDTV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/17142/espn2_2400_color_dark_light.png
+538,FRFHD,Freeform HDTV (West),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/441/freeform_2400_color_dark_light.png
+539,GFAM,Great American Family HDTV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/97203/gafamily_2400_color_dark_white.png
+540,IDHD,Investigation Discovery HDTV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Source/10417/idcanada_122x66_white.png
+541,NGCHD,National Geographic Channel HDTV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/17251/nationalgeographichd_2400_color_dark.png
+542,NATGEOWILDHD,National Geographic Wild HDTV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/31325/natgeohd_2400_color_dark.png
+543,OWN,The Oprah Winfrey Network HDTV (West),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/28845/owntv_2400_color_dark_light.png
+544,SECN,SEC Network HDTV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/24597/secnetwork_2400_color_dark_light.png
+545,TLCHD,The Learning Channel HDTV (West),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/31757/tlc_2400_color_dark_light.png
+546,TRVL,Travel Channel On Demand,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/42205/travelchannel_2400_color_dark_light.png
+547,EDEPHD,ESPN Deportes HDTV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/9976/espndeportes_2400_color_dark.png
+548,FXMHD,FX Movie Channel HDTV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/2419/fxmtv_2400_color_dark_white.png
+549,AHCHD,American Heroes Channel HDTV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/3790/ahc_2400_color_dark_light.png
+550,DFAMHD,Discovery Familia (U.S. feed) HDTV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/19989/discoveryfamilia_2400_color_dark_white.png
+551,SCICHANL,Science Channel,LIVE,false,false,A,http://cps-static.rovicorp.com/2/open/Rovi%20Images/Logo/94457/source_94457_140_140_white.png
+552,CNNHD,Cable News Network HDTV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/Comcast%20Logos/Comcast%20Source%20Logos/CNN-HD_2400_color_dark.png
+553,HLNHD,HLN HDTV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/107678/hln_2400_color_dark.png
+554,TOONH,Cartoon Network HDTV (West),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/79971/cartoonnetworkhd_2400_color_dark.png
+555,TBSHD,TBS Superstation HDTV (West),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/410/tbs_2400_white.png
+556,PCS,Local Programming,LIVE,false,false,A,http://192.0.2.20:7780/xtv-ws-client/images/Channel_Logo_Large.png
+557,ASTCA CHANNEL ADS,Local Programming,LIVE,false,false,A,http://192.0.2.20:7780/xtv-ws-client/images/Channel_Logo_Large.png
+558,SPG 2023,Local Programming,LIVE,false,false,A,http://192.0.2.20:7780/xtv-ws-client/images/Channel_Logo_Large.png
+559,EAS,EAS,EAS,false,false,A,http://192.0.2.20:7780/xtv-ws-client/images/Channel_Logo_Large.png
+560,KVZK-TV,Local Programming,LIVE,false,false,A,http://192.0.2.20:7780/xtv-ws-client/images/Channel_Logo_Large.png
+582,AETVHDP,A&E HD (Pacific),LIVE,false,false,A,/images/vod/original/321.png
+583,BETJ,BET Jams,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/4332/betjams_2400_color_dark_white.png
+584,BETSOUL,BET Soul,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/4334/betsoultv_2400_color_dark_white.png
+585,BHER,BET Her,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/100362/bether_2400_color_dark_light.png
+587,CINHD,Crime & Investigation Network HD,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/10085/ci_2400_color_dark.png
+588,CMTMUS,CMT Music,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/27/cmtusa_2400_color_dark_white.png
+589,CSPAN3,CSPAN3,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/5740/cablesatellitepublicaffairsnetwork3_2400_color_dark.png
+590,EWTNES,EWTN Español,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/1168/ewtn_2400_color_dark_white.png
+591,FYIP,FYI (Pacific),LIVE,false,false,A,http://cps-static.rovicorp.com/2/open/Rovi%20Images/Logo/59549/source_59549_400_400_white.png
+592,GSN,Game Show Network,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/1184/gsn_2400_color_dark_light.png
+593,INSPIRE,TBN Inspire,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/2873/tbninspire_2400_color_dark.png
+594,HISTP,History (Pacific),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/1254/history_2400_color_dark_light.png
+595,HMYSHD,Hallmark Mystery HDTV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/open/Rovi%20Images/Logo/20666/source_20666_400_400_white.png
+596,HSN,Home Shopping Network,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/75395/hsn_2400_color_dark_light.png
+597,JTV,Jewelry Television,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/32129/jtvjewelrytv_2400_color_dark_light.png
+600,LIFEP,Lifetime (Pacific),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/21822/lifetime_2400_color_dark_light.png
+601,MILH,Military History Channel,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/16612/militaryhistory_2400_color_dark.png
+602,MTVU,mtv-U,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/13955/mtvuchannel_2400_color_dark_white.png
+603,POPHD,Pop HDTV (West),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/51521/poptv_2400_color_dark_light.png
+604,REELZ,ReelzChannel,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/75600/reelz_2400_color_dark.png
+605,SHOPHQ,ShopHQ,LIVE,false,false,A,http://192.0.2.20:7780/xtv-ws-client/images/Channel_Logo_Large.png
+606,SM003,Stingray Adult Alternative,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/Comcast_2400_1578/Source/43840/StingrayMusic_2400_color_dark.png
+607,SMUS20,Stingray Alt Country/Americana,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/Comcast_2400_1578/Source/43840/StingrayMusic_2400_color_dark.png
+608,SMUS16,Stingray Alt Rock Classics,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/Comcast_2400_1578/Source/43840/StingrayMusic_2400_color_dark.png
+609,SMUS24,Stingray Bluegrass,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/Comcast_2400_1578/Source/43840/StingrayMusic_2400_color_dark.png
+610,SMUS40,Stingray Broadway,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/Comcast_2400_1578/Source/43840/StingrayMusic_2400_color_dark.png
+611,SM027,Stingray Chamber Music,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/Comcast_2400_1578/Source/43840/StingrayMusic_2400_color_dark.png
+612,SM005,Stingray The Chill Lounge,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/Comcast_2400_1578/Source/43840/StingrayMusic_2400_color_dark.png
+613,SM026,Stingray Classic Masters,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/Comcast_2400_1578/Source/43840/StingrayMusic_2400_color_dark.png
+614,SM001,Stingray Classic Rock,LIVE,false,false,A,http://cps-static.rovicorp.com/2/open/Rovi%20Images/Logo/4639/source_4639_400_400_white.png
+615,SM034,Stingray Classic R'n'B & Soul,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/Comcast_2400_1578/Source/43840/StingrayMusic_2400_color_dark.png
+616,SM009,Stingray Country Classics,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/Comcast_2400_1578/Source/43839/StingrayMusic_2400_white.png
+617,SM006,Stingray Dance Clubbin',LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/Comcast_2400_1578/Source/43840/StingrayMusic_2400_color_dark.png
+618,SM037,Stingray Easy Listening,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Misc/stingrayeasylistening_122x66_white.png
+619,SM045,Stingray Eclectic Electronic,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/Comcast_2400_1578/Source/43840/StingrayMusic_2400_color_dark.png
+620,SM015,Stingray Flashback '70s,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/Comcast_2400_1578/Source/43840/StingrayMusic_2400_color_dark.png
+621,SM019,Stingray Folk Roots,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/Comcast_2400_1578/Source/43840/StingrayMusic_2400_color_dark.png
+622,SMUS26,Stingray Gospel,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/Comcast_2400_1578/Source/43840/StingrayMusic_2400_color_dark.png
+623,SM062,Stingray Groove (Disco and Funk),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/Comcast_2400_1578/Source/43840/StingrayMusic_2400_color_dark.png
+624,SM070,Stingray Hip Hop,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Misc/stingrayhiphop_122x66_white.png
+625,SM007,Stingray Hit List,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Misc/stingrayhitlist_122x66_white.png
+626,SMUS11,Stingray Holiday Hits,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/Comcast_2400_1578/Source/43840/StingrayMusic_2400_color_dark.png
+627,SM008,Stingray Hot Country,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Misc/stingrayhotcountry_122x66_white.png
+628,SMUS43,TikTok Radio,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/Comcast_2400_1578/Source/43840/StingrayMusic_2400_color_dark.png
+629,SM016,Stingray Jazz Masters,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/Comcast_2400_1578/Source/43840/StingrayMusic_2400_color_dark.png
+630,SM017,Stingray Jazz Now,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/Comcast_2400_1578/Source/43840/StingrayMusic_2400_color_dark.png
+631,SM021,Stingray Jukebox Oldies,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/Comcast_2400_1578/Source/43840/StingrayMusic_2400_color_dark.png
+632,SM029,Stingray Kids' Stuff,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/Comcast_2400_1578/Source/43840/StingrayMusic_2400_color_dark.png
+633,SM046,Stingray Maximum Party,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/Comcast_2400_1578/Source/43840/StingrayMusic_2400_color_dark.png
+634,SMUS22,Stingray No Fences,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/Comcast_2400_1578/Source/43840/StingrayMusic_2400_color_dark.png
+635,SM042,Stingray Nothin' but '90s,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Misc/stingraynothinbut90_122x66_white.png
+636,SM004,Stingray Pop Adult,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Misc/stingraypopadult_122x66_white.png
+637,SMUS13,Stingray Rock Alternative,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/Comcast_2400_1578/Source/43840/StingrayMusic_2400_color_dark.png
+638,SMESP,Stingray: Rock en español,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/Comcast_2400_1578/Source/43840/StingrayMusic_2400_color_dark.png
+639,SMUS46,Stingray Retro Latino,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/Comcast_2400_1578/Source/43839/StingrayMusic_2400_white.png
+640,SM036,Stingray Rock,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/Comcast_2400_1578/Source/43840/StingrayMusic_2400_color_dark.png
+641,SM120,Stingray Romance Latino,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/Comcast_2400_1578/Source/43840/StingrayMusic_2400_color_dark.png
+642,SM040,Stingray Smooth Jazz,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Misc/stingraysmoothjazz_122x66_white.png
+643,SMUS27,Stingray Soul Storm,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Misc/stingraysoulstorm_122x66_white.png
+644,SM022,Stingray The Spa,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/Comcast_2400_1578/Source/43840/StingrayMusic_2400_color_dark.png
+645,SM035,Stingray Swinging Standards,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/Comcast_2400_1578/Source/43840/StingrayMusic_2400_color_dark.png
+646,SM018,Stingray The Blues,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/Comcast_2400_1578/Source/43840/StingrayMusic_2400_color_dark.png
+647,SMUS42,Stingray Y2K,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/Comcast_2400_1578/Source/43840/StingrayMusic_2400_color_dark.png
+648,TENISHD,Tennis Channel HD,LIVE,false,false,A,http://cps-static.rovicorp.com/2/open/Rovi%20Images/Logo/20735/source_20735_400_400_white.png
+649,UPHD,UPtv HD,LIVE,false,false,A,http://cps-static.rovicorp.com/2/open/Rovi%20Images/Logo/24319/source_24319_400_400_white.png
+650,ACMAXP,ActionMAX (Pacific),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Misc/cinemaxaction_122x66_white.png
+651,MAXP,Cinemax (Pacific),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/412/cinemax_2400_color_dark_white.png
+652,FANDUEL,FanDuel TV HDTV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/6207/fandueltv_2400_color_dark_light.png
+653,FREFRMP,Freeform (Pacific) HD,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/441/freeform_2400_color_dark_light.png
+654,FUSEHD,Fuse HD,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/18844/fuse_2400_color_dark_white.png
+655,HBO2PHD,HBO2 HD (Pacific),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Misc/hbohits_122x66_white.png
+656,HBOFPHD,HBO Family HD (Pacific),LIVE,false,false,A,http://192.0.2.20:7780/xtv-ws-client/images/Channel_Logo_Large.png
+657,HBOLPHD,HBO Latino HD (Pacific),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Source/9359/hbolatino_122x66_white.png
+658,HBOHDP,HBO HD (Pacific),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/WOTV%20logos/HBOHD.png
+659,HBOSPHD,HBO Signature HD (Pacific),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Misc/hbodrama_122x66_white.png
+660,MOMAXP,MoreMAX (Pacific),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Misc/cinemaxhits_122x66_white.png
+661,OVATNHD,Ovation HD,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/58329/ovation_2400_color_dark_white.png
+662,POSTV,Positiv TV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/12195/positiv_2400_color_dark.png
+663,SMILE,Smile,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Source/72922/ontv4u_122x66_white.png
+665,BBCWDEH,BBC World News HD,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/54175/bbcworldnews_2400_color_dark_light.png
+666,MAXLAT,MAX Latino (East) HD,LIVE,false,false,A,http://192.0.2.20:7780/xtv-ws-client/images/Channel_Logo_Large.png
+667,SMEVER80,Stingray - Everything 80's,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/Comcast_2400_1578/Source/43840/StingrayMusic_2400_color_dark.png
+668,SMUS15,Stingray Heavy Metal,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/Comcast_2400_1578/Source/43840/StingrayMusic_2400_color_dark.png
+669,STGRYLAT,Stingray Today Latino,LIVE,false,false,A,http://cps-static.rovicorp.com/2/open/Rovi%20Images/Logo/101791/source_101791_400_400_white.png
+670,SMESP,Stingray: Tropical,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/SonyTV%20Logos/DMX/DMX.png
+671,SMESP,Stingray: Latino urbano,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/Comcast_2400_1578/Source/43840/StingrayMusic_2400_color_dark.png
+672,EPHD,E! Entertainment Television HD (Pacific),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/Comcast%20Logos/Comcast%20Source%20Logos/EHD_2400_color_dark.png
+673,ENLAC,TBN Enlace USA,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/75598/enlace_2400_color_dark.png
+675,VICEPHD,Vice HD (Pacific),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/43148/vice_2400_color_dark_white.png
+676,MLBN,MLB Network,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/45053/mlbnetworkhd_2400_color_dark_light.png
+677,TBSHDP,TBS HD (Pacific),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/410/tbs_2400_white.png
+678,TNTPHD,TNT HD (Pacific),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/12625/tnthd_2400_color_dark_white.png
+681,TNTHD,Turner Network Television HDTV (West),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/12625/tnthd_2400_color_dark_white.png
+682,ESPNHD,ESPN HD,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/SourceLogos/120x60/ESPN.png
+683,COOKHD,Cooking Channel HD,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/Comcast%20Logos/Comcast%20Source%20Logos/cookingchannel_2400_color_dark.png
+684,THMXHDP,ThrillerMAX HD (Pacific),LIVE,false,false,A,http://192.0.2.20:7780/xtv-ws-client/images/Channel_Logo_Large.png
+716,NFLHD,NFL Network HD,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/89215/nflnetwork_2400_color_dark_light.png
+766,ESPN2HD,ESPN2 HD,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/17142/espn2_2400_color_dark_light.png
+767,ESPNHD,ESPN HD,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/SourceLogos/120x60/ESPN.png
+768,ESPNUHD,ESPNU HD,LIVE,false,false,A,http://cps-static.rovicorp.com/2/open/Rovi%20Images/Logo/21300/source_21300_400_400_white.png
+777,USAHDP,USA Network HD (Pacific),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/20019/usanetwork_2400_color_dark_white.png
+786,TRUTVHP,truTV HD (Pacific),LIVE,false,false,A,http://cps-static.rovicorp.com/2/open/Rovi%20Images/Logo/34636/source_34636_400_400_white.png
+788,CNBC,CNBC HD,LIVE,false,false,A,http://cps-static.rovicorp.com/2/open/Rovi%20Images/Logo/28/source_28_400_400_white.png
+789,KCRADT,NBC - KCRA,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Source/1209/nbc_122x66_white.png
+790,KQCADT,CW - KQCA,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/17761/cw_2400_color_dark_light.png
+791,KVIEDT,PBS KVIE,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/168/pbs_2400_color_dark_light.png
+792,KMAXDT,KMAX - D1 - Independent,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/1542/kmax31_2400_color_dark.png
+793,KTXLDT,KTXL - FOX,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/4/fox_2400_color_dark_white.png
+794,KSPXDT,KSPX - ION,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/3912/ion_2400_color_dark_light.png
+795,KXTVDT,KXTV - 10.1 - ABC,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/5/abc_2400_color_dark_light.png
+796,KOVRDT,KOVR - D1 - CBS,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/87/cbs_2400_color_dark_white.png
+797,VVI_LTTV_213,Outside Television -Lake Tahoe TV (RSN),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/SonyTV%20Logos/Outside/Outside.png
+799,Inwonder,Inwonder,LIVE,false,false,A,/images/vod/original/16.png
+800,Xploration Station,Xploration Station,LIVE,false,false,A,/images/vod/original/54.png
+801,Popular Science,Popular Science,LIVE,false,false,A,/images/vod/original/51.png
+806,RACER Select,RACER Select,LIVE,false,false,A,/images/vod/original/381.png
+807,TeenVee,TeenVee,LIVE,false,false,A,/images/vod/original/13.png
+808,Smart Healthy Green Living,Smart Healthy Green Living,LIVE,false,false,A,/images/vod/original/11.png
+809,Trace Latina,Trace Latina,LIVE,false,false,A,/images/vod/original/23.jpg
+810,Gusto Espanol,Gusto Espanol,LIVE,false,false,A,/images/vod/original/39.png
+812,Fuel TV ,Fuel TV ,LIVE,false,false,A,/images/vod/original/35.png
+813,NTD,NTD,LIVE,false,false,A,/images/vod/original/10.png
+814,Drool,Drool,LIVE,false,false,A,/images/vod/original/32.png
+816,DroneTV,DroneTV,LIVE,false,false,A,/images/vod/original/62.png
+819,Infast ( Lifestyle ),Infast ( Lifestyle ),LIVE,false,false,A,/images/vod/original/17.png
+821,Nolly-Africa-HD,Nolly-Africa-HD,LIVE,false,false,A,/images/vod/original/6.png
+823,Zee Mundo,Zee Mundoz,LIVE,false,false,A,/images/vod/original/21.png
+824,TRACE URBAN,TRACE URBAN,LIVE,false,false,A,/images/vod/original/29.jpg
+831,Cine en Espanol,Cine en Espanol,LIVE,false,false,A,/images/vod/original/47.png
+832,NegociosTV,NegociosTV,LIVE,false,false,A,/images/vod/original/33.png
+833,SPIN,SPIN,LIVE,false,false,A,/images/vod/original/56.png
+836,TheRedGreenChannel,TheRedGreenChannel,LIVE,false,false,A,/images/vod/original/68.png
+837,MoreU,MoreU,LIVE,false,false,A,/images/vod/original/67.png
+838,BEOND TV,BEOND TV,LIVE,false,false,A,/images/vod/original/4.png
+839,Younghollywood,Younghollywood,LIVE,false,false,A,/images/vod/original/1.png
+840,Trace Sportstar,Trace Sportstar,LIVE,false,false,A,/images/vod/original/24.png
+842,WatchMojo,WatchMojo,LIVE,false,false,A,/images/vod/original/63.png
+843,Introuble,Introuble,LIVE,false,false,A,/images/vod/original/14.png
+845,WITZ-Comedy TV,WITZ-Comedy TV,LIVE,false,false,A,/images/vod/original/59.png
+849,Gusto TV,Gusto TV,LIVE,false,false,A,/images/vod/original/72.png
+850,Judge Nosey,Judge Nosey,LIVE,false,false,A,/images/vod/original/682.jpg
+852,123go - Spanish,123go - Spanish,LIVE,false,false,A,/images/vod/original/37.png
+853,5-Minutes Craft,5-Minutes Craft,LIVE,false,false,A,/images/vod/original/44.png
+856,LATV,LATV,LIVE,false,false,A,/images/vod/original/28.png
+858,BYU,BYU,LIVE,false,false,A,/images/vod/original/2.png
+859,TrailersFromHell,TrailersFromHell,LIVE,false,false,A,/images/vod/original/64.png
+861,Ideas En 5 Minutos,Ideas En 5 Minutos,LIVE,false,false,A,/images/vod/original/36.png
+863,SURF Cinema,SURF Cinema,LIVE,false,false,A,/images/vod/original/441.png
+866,ROI TV,ROI TV,LIVE,false,false,A,/images/vod/original/55.png
+868,123GO English,123GO English,LIVE,false,false,A,/images/vod/original/45.png
+869,Confess by Nosey,Confess by Nosey,LIVE,false,false,A,/images/vod/original/681.jpg
+901,Reuters,Reuters,LIVE,false,false,A,/images/vod/original/105.png
+903,Brat TV,Brat TV,LIVE,false,false,A,/images/vod/original/101.png
+904,AWE Plus,AWE Plus,LIVE,false,false,A,/images/vod/original/103.png
+905,Defiance Media,Defiance Media,LIVE,false,false,A,/images/vod/original/107.png
+906,NDTV 24x7,NDTV 24x7,LIVE,false,false,A,/images/vod/original/106.png
+908,KTS TV,Kirkwood Television Services,LIVE,false,false,A,http://cps-static.rovicorp.com/2/open/Rovi%20Images/Logo/13293/source_13293_140_140_white.png
+909,CALAVERAS_COMMUNITY_CHANNEL,Calaveras Community TV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/open/Rovi%20Images/Logo/42385/source_42385_140_140_white.png
+910,CALAVERAS_COMMUNITY_CHANNEL_2,Calaveras Community TV 2,LIVE,false,false,A,http://cps-static.rovicorp.com/2/open/Rovi%20Images/Logo/42386/source_42386_140_140_white.png
+911,NBCSCAHD,NBC Sports California,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/15200/nbcsportscalifornia_2400_color_dark.png
+912,NBCSBAHDPLUS,NBC Sports Plus,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/24267/nbcsportsbayareaplus_2400_color_dark.png
+913,NBCSBAH,NBC Sports Bay Area HD,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/3396/nbcsportsbayarea_2400_color_dark.png
+914,NBCSCAHDPLUS,NBC Sports Plus 2,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/15200/nbcsportscalifornia_2400_color_dark.png
+915,KCRA3_METV,KCRA MeTV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/1075/metv_2400_color_dark_light.png
+916,KVIE_2,KVIE PBS KVIE 2,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/168/pbs_2400_color_dark_light.png
+917,KVIEVME,KVIE PBS Kids,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/12728/pbskids_2400_color_dark_light.png
+918,KVIE_WORLD,KVIE World,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Source/19617/pbsworld_122x66_white.png
+919,KSPX_BOUNCE,KSPX Bounce,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/73466/bounce_2400_color_dark_white.png
+920,KXTVDT3,KXTV Quest,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/73181/questtvusa_2400_color_dark.png
+921,KXTV_TRUE_CRIME,KXTV - 10.2 - True Crime Network,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/14818/truecrimenetwork_2400_color_dark.png
+922,KOVR_START_TV,KOVR - D2 - StartTV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/58129/starttelevision_2400_color_darkk_light.png
+923,KOVR_DABL,KOVR - D3 - DABL,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/100983/dabl_2400_color_dark.png
+924,KSPXDT5,KSPX Ion+,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/18581/ionplus_2400_color_dark_light.png
+925,KSPXDT6,KSPX Scripps News,LIVE,false,false,A,http://cps-static.rovicorp.com/2/open/Rovi%20Images/Logo/46631/source_46631_400_400_white.png
+926,KSPX_LAFF,KSPX Laff,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/64477/laff_2400_color_dark_light.png
+927,KSPX_COURT_TV,KSPX Court TV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Misc/courttv_122x66_white.png
+928,KXTV_MYSTERY,KXTV - 10.4 - ION Mystery,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/64477/laff_2400_color_dark_light.png
+929,KTXL_ANTENNA_TV,KTXL Antenna TV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/8528/antennatv_2400_color_dark_light.png.png
+930,KTXL_GRIT,KTXL Grit TV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/open/Rovi%20Images/Logo/57044/source_57044_400_400_white.png
+931,KTXL_TBD_TV,KTXL TBD,LIVE,false,false,A,http://cps-static.rovicorp.com/2/open/Rovi%20Images/Logo/93299/source_93299_400_400_white.png
+932,KQCA_ESTRELLA,KQCA Estrella TV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/769/estrellatv_2400_color_dark.png
+933,KQCA_HEROES_AND_ICONS,KQCA Heroes & Icons,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/3661/heroesandicons_2400_color_dark_light.png
+941,SMUS25,Stingray The Light,LIVE,false,false,A,http://192.0.2.20:7780/xtv-ws-client/images/Channel_Logo_Large.png
+942,SMUS37,Stingray Pop Classics,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/Comcast_2400_1578/Source/43840/StingrayMusic_2400_color_dark.png
+943,SMESP,Stingray: Urbana Adulta,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/Comcast_2400_1578/Source/43840/StingrayMusic_2400_color_dark.png
+962,Horse and Country,Horse and Country,LIVE,false,false,A,/images/vod/original/121.png
+964,SportsGrid Network,SportsGrid Network,LIVE,false,false,A,/images/vod/original/123.png
+965,REVOLT Mixtape,REVOLT Mixtape,LIVE,false,false,A,/images/vod/original/125.png
+966,OAN Plus,OAN Plus,LIVE,false,false,A,/images/vod/original/124.png
+967,VOLCANO,Volcano Channel,LIVE,false,false,A,http://192.0.2.20:7780/xtv-ws-client/images/Channel_Logo_Large.png
+968,TWC Pioneer,TWC Pioneer,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/29136/twc_2400_color_dark_light.png
+969,TWC Kirkwood,TWC Kirkwood,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/29136/twc_2400_color_dark_light.png
+970,VOLWC,VolcanoVision Weather Channel,LIVE,false,false,A,http://cps-static.rovicorp.com/2/open/Rovi%20Images/Logo/38182/source_38182_140_140_white.png
+981,EAS,EAS ,EAS,false,false,A,http://192.0.2.20:7780/xtv-ws-client/images/Channel_Logo_Large.png
+982,EAS,EAS,EAS,false,false,A,http://192.0.2.20:7780/xtv-ws-client/images/Channel_Logo_Large.png
+1001,DSTAR,Daystar,LIVE,false,false,A,http://cps-static.rovicorp.com/2/open/Rovi%20Images/Logo/11492/source_11492_400_400_white.png
+1021,LIFEMOV,Lifetime Movies (West),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/19296/lmn_2400_color_dark_white.png
+1022,ABCNL,ABC News Live,LIVE,false,false,A,http://cps-static.rovicorp.com/2/open/Rovi%20Images/Logo/95930/source_95930_140_140_white.png
+1023,KFVE,KFVE,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/52916/k5_2400_color_dark_white.png
+1024,KHNL,KHNL,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Source/1209/nbc_122x66_white.png
+1025,KGMB,KGMB,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/87/cbs_2400_color_dark_white.png
+1026,CW,CW Plus (West),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/17761/cw_2400_color_dark_light.png
+1027,KHONDT2,KHONDT2,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/17761/cw_2400_color_dark_light.png
+1028,FOX,KHON HDTV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/4/fox_2400_color_dark_white.png
+1029,DIYA,Diya TV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/open/Rovi%20Images/Logo/72967/source_72967_400_400_white.png
+1030,EWTN-W,Eternal Word Television Network,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/1168/ewtn_2400_color_dark_white.png
+1031,HSN2,HSN2,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/33927/hsn2_2400_color_dark_light.png
+1032,BLOOMBER,Bloomberg TV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/open/Rovi%20Images/Logo/106827/source_106827_400_400_white.png
+1033,FS2,Fox Sports 2,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/Comcast_2400_1578/Source/54608/fox_sports2_2400_color_dark_light.png
+1034,HALFAM,Hallmark Family,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/89259/hallmarkfamily_2400_color_dark.png
+1035,QVCPLUS,QVC Plus,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/32129/jtvjewelrytv_2400_color_dark_light.png
+1036,VICELAND,Viceland,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Source/88284/vicetv_122x66_white.png
+1037,CRIINVHD,Crime & Investigation HDTV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/10085/ci_2400_color_dark.png
+1038,SM003,Stingray Adult Alternative,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/Comcast_2400_1578/Source/43840/StingrayMusic_2400_color_dark.png
+1039,SM029,Stingray Classic RnB & Soul,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/Comcast_2400_1578/Source/43840/StingrayMusic_2400_color_dark.png
+1040,SM015,Stingray Heavy Metal,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/Comcast_2400_1578/Source/43840/StingrayMusic_2400_color_dark.png
+1041,FXHD,FX HDTV (West),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/35220/fxtelevision_2400_color_dark.png
+1042,FXXHD,FXX HDTV (West),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/44425/fxxchannel_2400_color_dark_white.png
+1043,DLFHD,Discovery Life Channel in HDTV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/87535/discoverylifeus_2400_color_dark_light.png
+1044,ACCESS,Access TV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/open/Rovi%20Images/Logo/4683/source_4683_140_140_white.png
+1045,FS1HD,Fox Sports 1 HDTV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/15896/foxsportsoneus_2400_color_dark_light.png
+1046,FOXDEPPA,Fox Deportes (Pacific),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/88329/foxdeportes_2400_color_dark_light.png
+1047,HISTEHD,The History Channel en Español HDTV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/open/Rovi%20Images/Logo/89984/source_89984_400_400_white.png
+1048,ASTCA01,Local Programming 01,LIVE,false,false,A,http://192.0.2.20:7780/xtv-ws-client/images/Channel_Logo_Large.png
+1049,TNT,TNT On Demand,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/4797/tntlaus_2400_color_dark_white.png
+1062,RACER Brasil,RACER Brasil,LIVE,false,false,A,/images/vod/original/382.png
+1064,CARSD,CARS.TV HDTV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Source/23268/carstv_122x66_white.png
+1065,CMDYD,Comedy.tv HDTV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/23272/comedytv_2400_color_dark_light.png
+1066,ESTVD,ES.TV HDTV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/23267/estv_2400_color_dark.png
+1067,JUSHD,Justice Central HDTV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/46654/justicecentral_2400_color_dark_light.png
+1068,MDSTD,MYDestination.TV HDTV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Source/23270/mydestinationtv_122x66_white.png
+1069,PETSD,Pets.TV HDTV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/23269/petstv_2400_color_dark_light.png
+1070,RCPHD,Recipe.TV HDTV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/23271/recipetv_2400_color_dark_light.png
+1071,BTNHD,Big Ten Network HDTV (National),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/20009/big10network_2400_color_dark.png
+1072,FXDEHD,Fox Deportes en Español HDTV (U.S.),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/88329/foxdeportes_2400_color_dark_light.png
+1073,GLIV,Great American Faith & Living HDTV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/98133/greatamericanfaithliving_2400_color_dark_white.png
+1074,WFNHD,World Fishing Network HDTV (U.S.),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/23643/wrldfishnet_2400_color_dark_white.png
+1075,FGHTNET,Fight Network HDTV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Source/52353/fightnetworkhd_122x66_white.png
+1076,GMPNT,GamePlus Network HD,LIVE,false,false,A,http://cps-static.rovicorp.com/2/open/Rovi%20Images/Logo/16126/source_16126_140_140_white.png
+1077,MavTV,MavTV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/open/Rovi%20Images/Logo/16174/source_16174_400_400_white.png
+1078,RVLTHD,Revolt HDTV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/45049/revolt_2400_color_dark_light.png
+1081,CMDYD,Comedy.tv HDTV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/23272/comedytv_2400_color_dark_light.png
+1082,KAIL,KAIL Tri-State Christian Television HDTV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/2276/tct_2400_color_dark_white.png
+1083,KFRE-DT,KFRE CW HDTV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/17761/cw_2400_color_dark_light.png
+1085,KFSNH,KFSN ABC HDTV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/5/abc_2400_color_dark_light.png
+1086,KFSNDT2,KFSN Localish,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/12537/localish_2400_color_dark.png
+1087,This TV,KFSN Charge!,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/88229/charge_2400_color_dark_white.png
+1088,KGMC,KGMC Estrella HDTV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/769/estrellatv_2400_color_dark.png
+1089,KGMCDT5,KGMC MeTV Toons,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/109992/metvtoons_2400_color_dark_light.png
+1090,MeTV,KGMC MeTV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/1075/metv_2400_color_dark_light.png
+1091,KGPEHD,CBS KGPE HDTV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/87/cbs_2400_color_dark_white.png
+1092,MYSTERY,KGPE ION Mystery,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/52900/ionmystery_2400_color_dark.png
+1093,KGPEDT3,KGPE Antenna TV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/8528/antennatv_2400_color_dark_light.png.png
+1094,COURTTV,Court TV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Misc/courttv_122x66_white.png
+1095,KMPHD,KMPH HDTV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/4/fox_2400_color_dark_white.png
+1096,KMPH2,KMPH Dabl,LIVE,false,false,A,http://cps-static.rovicorp.com/2/open/Rovi%20Images/Logo/20963/source_20963_400_400_white.png
+1097,COMET,KMPH Comet TV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/19465/comet_2400_color_dark_light.png
+1098,KMPHDT5,KMPH The Nest,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/72764/thenest_2400_color_dark_light.png
+1099,KNSODT,KNSO Telemundo HDTV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/1301/telemundo_2400_color_dark.png
+1100,KNSO2,KNSO Exitos TV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/34383/Telexitos_2400_color_darklight.png
+1101,COZI,KNSO Cozi,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/65750/cozitv_2400_color_dark_white.png
+1102,KNSODT4,KNSO American Crimes,LIVE,false,false,A,http://cps-static.rovicorp.com/2/open/Rovi%20Images/Logo/75353/source_75353_400_400_white.png
+1103,KNSO5,KNSO Oxygen,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/87369/oxygentruecrime_2400_color_dark_light.png
+1104,KSEEHD,KSEE NBC HDTV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Source/1209/nbc_122x66_white.png
+1105,KSEE,KSEE Bounce,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/73466/bounce_2400_color_dark_white.png
+1106,KSEEL,KSEE Grit TV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/open/Rovi%20Images/Logo/19519/source_19519_400_400_white.png
+1107,REWIND,KSEE Rewind TV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/101936/rewindtv_2400_color_dark.png
+1108,KVPT,KVPT Valley PBS HDTV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/168/pbs_2400_color_dark_light.png
+1121,CMDYD STG CLR,CMDTVHD - STAGING - CLR,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/23272/comedytv_2400_color_dark_light.png
+1123,GFAM,Great American Family HDTV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/97203/gafamily_2400_color_dark_white.png
+1124,JLTV,Jewish Life TV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/19497/jewishlife_2400_color_dark.png
+1125,KIDST,Kids Street,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/95320/kidsstreet_2400_color_dark_light.png
+1126,HALLHD,Hallmark Channel HDTV (East),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/SonyTV%20Logos/Hallmark/HALLMARKHD.png
+1127,LIFEMOV,Lifetime Movies HDTV (West),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/19296/lmn_2400_color_dark_white.png
+1128,EAS,VVI EAS,EAS,false,false,A,http://192.0.2.20:7780/xtv-ws-client/images/Channel_Logo_Large.png
+1142,QVC2D,QVC2 HD,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/44522/qvc2_2400_color_dark.png
+1143,INDIEHD,IndiePlex HDTV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/SonyTV%20Logos/Indieplex/INDIEPLEX.png
+1144,MPLEXHD,MoviePlex HDTV East,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/SonyTV%20Logos/Movieplex/MOVIEPLEX.png
+1145,RETHD,RetroPlex HDTV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/SonyTV%20Logos/RetroPlex/RETROPLEX.png
+1146,SZCHD,STARZ Comedy HD (East),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/12901/starzcomedy_2400_color_dark_white.png
+1147,SZCIH,STARZ Cinema HD (East),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/5233/starzcinema_2400_color_dark_white.png
+1148,SZEHD,STARZ Edge HD (East),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/1245/starzedge_2400_color_dark_white.png
+1149,STZAH,STARZ ENCORE Action HD (East),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/2000/starzeaction_2400_color_dark_white.png
+1150,STZBH,STARZ ENCORE Black HD (East),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/2001/starzenblack_2400_color_dark_white.png
+1151,STZEH,STARZ ENCORE HD (East),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/13168/starzencorehd_2400_color_dark_white.png
+1152,STZCH,STARZ ENCORE Classic HD (East),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/43100/starzenclassic_2400_color_dark_white.png
+1153,STZFM,STARZ ENCORE Family (East) HDTV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/43285/starzenfamily_2400_color_dark_white.png
+1154,STZSH,STARZ ENCORE Suspense HD (East),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/43102/starzensuspense_2400_color_dark_white.png
+1155,STZWS,STARZ ENCORE Westerns (East) HDTV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/43147/starzenwesterns_2400_color_dark_white.png
+1156,STZHD,STARZ HD (East),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/12904/starzhd_2400_color_dark_white.png
+1157,STZ B,STARZ InBlack (East),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/43133/starzinblack_2400_color_dark_white.png
+1159,SZKHD,STARZ Kids & Family HD (East),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/5231/starzkidsfamily_2400_color_dark_white.png
+1160,GOSP,BET Gospel,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/10636/betgospel_2400_color_dark_white.png
+1161,LOGOHD,LOGO HDTV (West),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/16188/logo_color_dark_2400.png
+1162,NICK2HD,Nickelodeon Too HDTV (East),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Source/38287/nick2_122x66_white.png
+1163,SMITHHD,Smithsonian Channel HDTV (West),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/91358/smithsonianchannelhd_2400_color_dark.png
+1164,Tr3s,Tr3s (East),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/4330/tr3s_2400_color_dark_white.png
+1165,SHOFe,Showtime FamilyZone (East) HDTV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/SonyTV%20Logos/Showtime/SHOWTIMEFAMILY.png
+1166,FLIXe,Flix HDTV (East),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/2520/flix_2400_color_dark_light.png
+1167,SHOND,Showtime Next East HDTV (East),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/9679/showtimenext_2400_color_dark.png
+1168,SHO2HD,Showtime 2 HDTV (East),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Misc/showtime2_122x66_white.png
+1169,SHOBETHD,SHOxBET HDTV (East),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/6069/shobet_2400_color_dark_white.png
+1170,SHOCHD,Showtime Showcase HDTV (East),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/21582/showcasehd_2400_color_dark_light.png
+1171,SHOWHD,SHOWTIME HDTV (East),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/415/ppwshowtime_2400_color_dark.png
+1172,SHOXHD,Showtime Extreme HDTV (East),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/87368/showtimeextreme_2400_color_dark.png
+1173,TMCHD,The Movie Channel HDTV (East),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/Comcast%20Logos/Comcast%20Source%20Logos/TMCHD_2400_color_dark.png
+1174,TMCXHD,The Movie Channel Xtra HDTV (East),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/21587/tmcxtrahdtv_2400_color_dark.png
+1175,SHOWD,Showtime Women HDTV (East),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/9671/showtimewomen_2400_color_dark.png
+1177,Screams and Scares,Screams and Scares,LIVE,false,false,A,/images/vod/original/185.png
+1179,Black Stories,Black Stories,LIVE,false,false,A,/images/vod/original/181.png
+1180,The Classics,The Classics,LIVE,false,false,A,/images/vod/original/183.png
+1181,GFN Football,GFN Football,LIVE,false,false,A,/images/vod/original/663.png
+1201,BTVHD,Bloomberg HD,LIVE,false,false,A,http://cps-static.rovicorp.com/2/open/Rovi%20Images/Logo/29715/source_29715_400_400_white.png
+1202,FANDUELR,FanDuel Racing HDTV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/10136/fanduelracing_2400_color_dark_light.png
+1203,CNBCWO,CNBC World HDTV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/open/Rovi%20Images/Logo/9222/source_9222_400_400_white.png
+1204,TELMUN,Telemundo Network (West),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/1301/telemundo_2400_color_dark.png
+1205,UNVSOHD,UNIVERSO HDTV (West),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/3861/universo_2400_color_dark.png
+1241,CNBCH,Consumer News & Business Channel HDTV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/open/Rovi%20Images/Logo/89860/source_89860_400_400_white.png
+1242,ESPN2HD,ESPN2 HDTV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/17142/espn2_2400_color_dark_light.png
+1243,EDEPHD,ESPN Deportes HDTV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/9976/espndeportes_2400_color_dark.png
+1244,ESPNHD,ESPN HDTV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/SourceLogos/120x60/ESPN.png
+1245,ESPNUHD,ESPNU HDTV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/open/Rovi%20Images/Logo/21300/source_21300_400_400_white.png
+1246,MLBHD,MLB Network HDTV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/45053/mlbnetworkhd_2400_color_dark_light.png
+1247,NFLHD,The NFL Network HDTV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/89215/nflnetwork_2400_color_dark_light.png
+1248,NHLHD,NHL Network US HDTV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/SourceLogos/400x300/nhl-hd.png
+1249,TBSHD,TBS Superstation HDTV (West),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/410/tbs_2400_white.png
+1250,TNTHD,Turner Network Television HDTV (West),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/12625/tnthd_2400_color_dark_white.png
+1251,TruTVHD,truTV HDTV (West),LIVE,false,false,A,http://cps-static.rovicorp.com/2/open/Rovi%20Images/Logo/34636/source_34636_400_400_white.png
+1252,USAHD,USA Network HDTV (West),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/20019/usanetwork_2400_color_dark_white.png
+1253,DFAMHD,Discovery Familia (U.S. feed) HDTV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/19989/discoveryfamilia_2400_color_dark_white.png
+1254,DSCEHD,The Discovery Channel en Español HDTV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/3936/discesp_2400_color_dark_white.png
+1255,HOGRHD,Hogar de HGTV HDTV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/99804/hogarhgtv_2400_color_dark_light.png
+1258,CNNE,Cable News Network en Español HDTV (USA),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/105356/cnnesp_2400_color_dark_light.png
+1259,CNNINTHD,Cable News Network International HDTV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/58031/cnn_2400_color_dark_light.png
+1260,MLBSZ,MLB Network Strike Zone HDTV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/20785/mlb_strikezone_color_dark_light_2400.png
+1262,GoTraveler,GoTraveler,LIVE,false,false,A,/images/vod/original/403.png
+1263,Les Secrets De Nos Regions,Les Secrets De Nos Regions,LIVE,false,false,A,/images/vod/original/248.png
+1264,InTouch+,InTouch+,LIVE,false,false,A,/images/vod/original/241.png
+1265,America's Test Kitchen,America's Test Kitchen,LIVE,false,false,A,/images/vod/original/247.png
+1266,Cook's Country,Cook's Country,LIVE,false,false,A,/images/vod/original/402.png
+1267,RTVi US,RTVi US,LIVE,false,false,A,/images/vod/original/404.png
+1269,Impact Gospel,Impact Gospel,LIVE,false,false,A,/images/vod/original/243.png
+1270,Sports Grid Canada,Sports Grid Canada,LIVE,false,false,A,/images/vod/original/242.png
+1283,LatiNation ,LatiNation ,LIVE,false,false,A,/images/vod/original/263.png
+1284,Cine de Horror,Cine de Horror,LIVE,false,false,A,/images/vod/original/264.png
+1302,BABY1HD,BabyFirst TV HDTV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/28251/babyfirst_2400_color_dark_light.png
+1304,EARTHX,EarthX HDTV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Source/105640/earthx_122x66_white.png
+1305,FRANCE24,France 24 (France),LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/58699/france24tv_2400_color_dark_light.png
+1306,IMPCTHD,Impact Network HDTV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/85118/impact_2400_color_dark_white.png
+1307,LAWCRXUMO,Law & Crime,LIVE,false,false,A,http://192.0.2.20:7780/xtv-ws-client/images/Channel_Logo_Large.png
+1308,NLS,Next Level Sports HDTV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/48811/nextlevelsports_2400_color_dark.png
+1309,FUNROADS,Fun Roads (National) HDTV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/94414/funroads_2400_color_dark.png
+1310,get,get (Great Entertainment Television) HDTV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/122x66_1253/Source/48352/greattv_122x66_white.png
+1311,CSONY,Cine Sony Television HD,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/93558/sonycine_2400_color_dark_light.png
+1312,SMovies,Sony Movies HDTV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/35650/sonymovies_2400_color_dark_light.png
+1313,TNAWRPL,TNA Wrestling,LIVE,false,false,A,http://192.0.2.20:7780/xtv-ws-client/images/Channel_Logo_Large.png
+1321,COSMIC Frontiers,COSMIC Frontiers,LIVE,false,false,A,/images/vod/original/442.png
+1322,beIN sports Xtra ,beIN sports Xtra ,LIVE,false,false,A,/images/vod/original/283.png
+1323,Wedo Big Stories ,Wedo Big Stories ,LIVE,false,false,A,/images/vod/original/282.png
+1341,Salem News,Salem News,LIVE,false,false,A,/images/vod/original/301.png
+1342,Masha and the Bear,Masha and the Bear,LIVE,false,false,A,/images/vod/original/302.jpg
+1362,WedoTV Amor,WedoTV Amor,LIVE,false,false,A,/images/vod/original/405.png
+1381,GFAM,Great American Family HDTV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/97203/gafamily_2400_color_dark_white.png
+1404,Intravel International ,Intravel International ,LIVE,false,false,A,/images/vod/original/464.png
+1407,Tasty,Tasty,LIVE,false,false,A,/images/vod/original/467.png
+1409,Comercio TV,Comercio TV,LIVE,false,false,A,/images/vod/original/469.png
+1421,BuzzFeed Unsolved,BuzzFeed Unsolved,LIVE,false,false,A,/images/vod/original/481.png
+1422,Waterbear,Waterbear,LIVE,false,false,A,/images/vod/original/485.jpg
+1423,Imagine Playworld,Imagine Playworld,LIVE,false,false,A,/images/vod/original/482.png
+1441,World Cruise Channel,World Cruise Channel,LIVE,false,false,A,/images/vod/original/1025.png
+1461,ACN Country (American Country Network),ACN Country (American Country Network),LIVE,false,false,A,/images/vod/original/521.png
+1463,Unleashed by DOGTV,Unleashed by DOGTV,LIVE,false,false,A,/images/vod/original/523.png
+1464,K-Baseball TV,K-Baseball TV,LIVE,false,false,A,/images/vod/original/524.png
+1465,TeleOnce America,TeleOnce America,LIVE,false,false,A,/images/vod/original/525.png
+1466,Caracol Mix,Caracol Mix,LIVE,false,false,A,/images/vod/original/526.png
+1501,Electric Now - En Espanol,Electric Now - En Espanol,LIVE,false,false,A,/images/vod/original/561.png
+1502,History & Warfare,History & Warfare,LIVE,false,false,A,/images/vod/original/562.png
+1503,Fashion TV,Fashion TV,LIVE,false,false,A,/images/vod/original/563.png
+1521,Food On,Food On,LIVE,false,false,A,/images/vod/original/581.png
+1522,Game On,Game On,LIVE,false,false,A,/images/vod/original/582.png
+1523,Trend On,Trend On,LIVE,false,false,A,/images/vod/original/583.png
+1524,Travel On,Travel On,LIVE,false,false,A,/images/vod/original/584.png
+1541,MODUS SUPER SERIES DARTS,MODUS SUPER SERIES DARTS,LIVE,false,false,A,/images/vod/original/601.png
+1542,World Poker Tour en Português,World Poker Tour en Português,LIVE,false,false,A,/images/vod/original/602.png
+1543,World Poker Tour en Español,World Poker Tour en Español,LIVE,false,false,A,/images/vod/original/603.png
+1544,Cigar TV,Cigar TV,LIVE,false,false,A,/images/vod/original/604.png
+1545,EntrepreneurTV,EntrepreneurTV,LIVE,false,false,A,/images/vod/original/605.png
+1546,Valuetainment,Valuetainment,LIVE,false,false,A,/images/vod/original/606.png
+1547,Real Crime Uncovered by VideoElephant,Real Crime Uncovered by VideoElephant,LIVE,false,false,A,/images/vod/original/607.png
+1548,Travel Escapes,Travel Escapes,LIVE,false,false,A,/images/vod/original/608.png
+1549,Beyond Paranormal,Beyond Paranormal,LIVE,false,false,A,/images/vod/original/609.png
+1561,Black Enterprise Streaming Network,Black Enterprise Streaming Network,LIVE,false,false,A,/images/vod/original/661.png
+1581,Cowboy+Sports,Cowboy+Sports,LIVE,false,false,A,/images/vod/original/662.png
+1602,Ecuavisa,Ecuavisa,LIVE,false,false,A,/images/vod/original/726.png
+1603,TC,TC,LIVE,false,false,A,/images/vod/original/730.png
+1604,Teleamazonas,Teleamazonas,LIVE,true,false,A,/images/vod/original/731.png
+1621,TELEAMAZON,TELEAMAZONAS,LIVE,false,false,A,/images/vod/original/731.png
+1622,RTS,RTS,LIVE,false,false,A,/images/vod/original/729.png
+1624,Oromar,Oromar,LIVE,false,false,A,/images/vod/original/728.png
+1625,Ecuador TV,Ecuador TV,LIVE,false,false,A,/images/vod/original/725.png
+1626,TVC,TVC,LIVE,false,false,A,/images/vod/original/732.png
+1627,GAMAVISIÓN,GAMAVISIÓN,LIVE,false,false,A,/images/vod/original/727.png
+1641,Pro League Network,Pro League Network,LIVE,false,false,A,/images/vod/original/770.png
+1642,Skytop TV,Skytop TV,LIVE,false,false,A,/images/vod/original/771.png
+1643,Lovin Dubai,Lovin Dubai,LIVE,false,false,A,/images/vod/original/772.png
+1661,CANALCAPI,CANAL CAPITAL,LIVE,false,false,A,/images/vod/original/971.png
+1681,TELECARI,TELECARIBE,LIVE,false,false,A,/images/vod/original/966.png
+1682,TELEPACI,TELEPACIFICO,LIVE,false,false,A,/images/vod/original/964.png
+1683,TELECAFE,TELECAFÉ,LIVE,false,false,A,/images/vod/original/967.png
+1684,TRO,TRO,LIVE,false,false,A,/images/vod/original/973.png
+1685,TELEANTI,TELEANTIOQUIA,LIVE,false,false,A,/images/vod/original/968.png
+1686,CANAL1COL,CANAL UNO,LIVE,false,false,A,/images/vod/original/972.png
+1687,RCN,CANAL RCN,LIVE,false,false,A,/images/vod/original/974.png
+1688,CARACOL,CARACOL,LIVE,false,false,A,/images/vod/original/970.png
+1689,CANALINST,CANAL INSTITUCIONAL,LIVE,false,false,A,/images/vod/original/975.png
+1690,SEÑALCOL,SEÑAL COLOMBIA,LIVE,false,false,A,/images/vod/original/969.png
+1691,TELEMEDE,TELEMEDELLIN,LIVE,false,false,A,/images/vod/original/965.png
+1701,FS1HD,Fox Sports 1 HDTV,LIVE,false,false,A,http://cps-static.rovicorp.com/2/Open/2400x2400_1578/Source/15896/foxsportsoneus_2400_color_dark_light.png

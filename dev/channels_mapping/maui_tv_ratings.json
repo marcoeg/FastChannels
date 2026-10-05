@@ -1,0 +1,37 @@
+{
+ "response": [
+  {
+   "tvRatingId": 1,
+   "tvRating": "TVY"
+  },
+  {
+   "tvRatingId": 2,
+   "tvRating": "TVY7"
+  },
+  {
+   "tvRatingId": 3,
+   "tvRating": "TVG"
+  },
+  {
+   "tvRatingId": 4,
+   "tvRating": "TVPG"
+  },
+  {
+   "tvRatingId": 5,
+   "tvRating": "TV14"
+  },
+  {
+   "tvRatingId": 6,
+   "tvRating": "TVMA"
+  },
+  {
+   "tvRatingId": 0,
+   "tvRating": "NR"
+  }
+ ],
+ "statusCode": 0,
+ "statusMessage": "TV Ratings successfully retrieved.",
+ "errorCode": null,
+ "errorMessage": null,
+ "httpStatus": 200
+}

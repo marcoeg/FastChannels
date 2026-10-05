@@ -1,0 +1,18 @@
+table,id,code,description
+TvRatings,0,NR,No Rating
+TvRatings,1,TVY,All Children
+TvRatings,2,TVY7,Directed to Children age 7 and above
+TvRatings,3,TVG,General Audience
+TvRatings,4,TVPG,Parental Guidance Suggested
+TvRatings,5,TV14,Parents Strongly Cautioned
+TvRatings,6,TVMA,Mature Audience Only
+AssetRatings,1,NR,No Restriction
+AssetRatings,2,G,General
+AssetRatings,3,PG,Parent Guided
+AssetRatings,4,PG-13,Children under 13 with Parent Guide
+AssetRatings,5,R,Restricted
+AssetRatings,6,NC-17,No Children under 17
+AssetRatings,7,AO,Adult Only
+AssetRatings,8,X,Sex(S) or violence(V)
+AssetRatings,9,XX,Explicit sex (S) or violence (V)
+AssetRatings,10,XXX,Explicit sex(S) and violence(V)

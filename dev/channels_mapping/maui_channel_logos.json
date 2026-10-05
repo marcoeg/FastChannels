@@ -1,0 +1,639 @@
+{
+ "response": [
+  {
+   "imageId": 37,
+   "imageName": "123go - Spanish",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 45,
+   "imageName": "123GO English",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 341,
+   "imageName": "25-sky",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 44,
+   "imageName": "5-Minutes - English",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 321,
+   "imageName": "A&E_HD",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 521,
+   "imageName": "ACNCountryAmericanCountryNetwork.png",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 247,
+   "imageName": "AmericaTestKitchen",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 103,
+   "imageName": "AWE Plus",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 283,
+   "imageName": "bein sports xtra",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 4,
+   "imageName": "BEOND TV",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 609,
+   "imageName": "BeyondParanormal.png",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 661,
+   "imageName": "BlackEnterpriseStreamingNetwork",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 181,
+   "imageName": "blackstories",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 101,
+   "imageName": "Brat TV",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 481,
+   "imageName": "BuzzFeedUnsolved.png",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 2,
+   "imageName": "BYU",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 526,
+   "imageName": "CaracolMix.jpg",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 604,
+   "imageName": "CigarTV.png",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 47,
+   "imageName": "Cine en Espanol",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 264,
+   "imageName": "CineDeHorror",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 469,
+   "imageName": "ComercioTV.png",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 681,
+   "imageName": "confess",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 402,
+   "imageName": "CookCountryW",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 442,
+   "imageName": "COSMICFrontiers",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 662,
+   "imageName": "cowboysports",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 107,
+   "imageName": "Defiance Media",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 62,
+   "imageName": "DroneTV",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 32,
+   "imageName": "Drool",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 725,
+   "imageName": "ECUATV",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 726,
+   "imageName": "ECUAVISA",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 561,
+   "imageName": "ElectricNowEnEspanol.png",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 605,
+   "imageName": "EntrepreneurTV.png",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 563,
+   "imageName": "FashionTV.png",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 581,
+   "imageName": "FoodOn.png",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 35,
+   "imageName": "Fuel TV",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 727,
+   "imageName": "GAMAV",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 582,
+   "imageName": "GameOn.png",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 663,
+   "imageName": "GFNFootball",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 403,
+   "imageName": "GoTravelerW",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 39,
+   "imageName": "Gusto TV",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 72,
+   "imageName": "gustotv1",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 421,
+   "imageName": "HallMarkChannel",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 322,
+   "imageName": "Hallmark_HD",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 562,
+   "imageName": "HistoryWarfare.png",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 121,
+   "imageName": "Horse and Country",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 36,
+   "imageName": "Ideas En 5 Minutos",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 482,
+   "imageName": "ImaginePlayworld",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 243,
+   "imageName": "ImpactGospel",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 17,
+   "imageName": "Infast Lifestyle",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 241,
+   "imageName": "InTouch+",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 464,
+   "imageName": "IntravelInternational.png",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 14,
+   "imageName": "Introuble",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 16,
+   "imageName": "Inwonder",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 682,
+   "imageName": "judgenosey",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 524,
+   "imageName": "KBaseballTV.png",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 263,
+   "imageName": "LatiNation",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 28,
+   "imageName": "LATV",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 248,
+   "imageName": "LesSecrets",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 772,
+   "imageName": "LovinDubai.png",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 302,
+   "imageName": "mashaandthebear",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 975,
+   "imageName": "MinnieTV Colombia Canal_Institutional",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 974,
+   "imageName": "MinnieTV Colombia Canal_RCN",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 973,
+   "imageName": "MinnieTV Colombia Canal_Tro",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 972,
+   "imageName": "MinnieTV Colombia Canal_Uno",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 971,
+   "imageName": "MinnieTV Colombia Capital",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 970,
+   "imageName": "MinnieTV Colombia Caracol",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 969,
+   "imageName": "MinnieTV Colombia Senal_Colombia",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 968,
+   "imageName": "MinnieTV Colombia TELEANTIOQUIA",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 967,
+   "imageName": "MinnieTV Colombia TELECAFE",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 966,
+   "imageName": "MinnieTV Colombia Telecaribe",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 965,
+   "imageName": "MinnieTV Colombia Telemedellin",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 964,
+   "imageName": "MinnieTV Colombia Telepacifico",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 601,
+   "imageName": "MODUSSUPERSERIESDARTS.png",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 67,
+   "imageName": "MoreU",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 106,
+   "imageName": "NDTV 24x7",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 33,
+   "imageName": "NegociosTV",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 6,
+   "imageName": "Nolly-Africa-HD",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 10,
+   "imageName": "NTD",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 124,
+   "imageName": "Oan-Plus",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 728,
+   "imageName": "OROMAR",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 51,
+   "imageName": "Popular Science",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 770,
+   "imageName": "ProLeagueNetwork.png",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 382,
+   "imageName": "racer brasil",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 381,
+   "imageName": "racer select",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 607,
+   "imageName": "RealCrimeUncoveredbyVideoElephant.png",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 105,
+   "imageName": "Reuters",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 125,
+   "imageName": "Revolt-Mixtape",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 55,
+   "imageName": "ROI TV",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 729,
+   "imageName": "RTS",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 404,
+   "imageName": "RTViUSW",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 301,
+   "imageName": "salemnew",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 185,
+   "imageName": "screamsandscares",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 771,
+   "imageName": "SkytopTV.png",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 11,
+   "imageName": "Smart Healthy Green Living",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 56,
+   "imageName": "SPIN",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 123,
+   "imageName": "SportGrid",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 242,
+   "imageName": "SportGridCanada",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 441,
+   "imageName": "SURFCinema",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 467,
+   "imageName": "Tasty.png",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 730,
+   "imageName": "TCTV",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 13,
+   "imageName": "TeenVee",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 731,
+   "imageName": "TELEAMAZON",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 525,
+   "imageName": "TeleOnceAmerica.jpg",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 183,
+   "imageName": "theclassic",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 68,
+   "imageName": "TheRedGreenChannel",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 23,
+   "imageName": "Trace Latina",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 24,
+   "imageName": "Trace Sportstar",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 29,
+   "imageName": "TRACE URBAN",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 64,
+   "imageName": "TrailersFromHell",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 608,
+   "imageName": "TravelEscapes.png",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 584,
+   "imageName": "TravelOn.png",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 583,
+   "imageName": "TrendOn.png",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 732,
+   "imageName": "TVC",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 523,
+   "imageName": "UnleashedbyDOGTV.png",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 606,
+   "imageName": "Valuetainment.png",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 63,
+   "imageName": "WatchMojo",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 485,
+   "imageName": "waterbear",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 282,
+   "imageName": "wedo big stories",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 405,
+   "imageName": "WeDoTVAmorW",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 59,
+   "imageName": "WITZ-Comedy TV",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 1025,
+   "imageName": "WorldCruiseChannel",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 603,
+   "imageName": "WorldPokerTourenEspaol.png",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 602,
+   "imageName": "WorldPokerTourenPortugus.png",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 54,
+   "imageName": "Xploration Station",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 1,
+   "imageName": "Younghollywood",
+   "imageTypeDescription": "Channel Logo"
+  },
+  {
+   "imageId": 21,
+   "imageName": "Zee Mundo",
+   "imageTypeDescription": "Channel Logo"
+  }
+ ],
+ "statusCode": 0,
+ "statusMessage": "List of Images of Channel Logo category retrieved successfully",
+ "errorCode": null,
+ "errorMessage": null,
+ "httpStatus": 200
+}

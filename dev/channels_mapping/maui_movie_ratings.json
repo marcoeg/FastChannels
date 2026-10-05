@@ -1,0 +1,49 @@
+{
+ "response": [
+  {
+   "assetRatingId": 1,
+   "assetRating": "NR"
+  },
+  {
+   "assetRatingId": 2,
+   "assetRating": "G"
+  },
+  {
+   "assetRatingId": 3,
+   "assetRating": "PG"
+  },
+  {
+   "assetRatingId": 4,
+   "assetRating": "PG-13"
+  },
+  {
+   "assetRatingId": 5,
+   "assetRating": "R"
+  },
+  {
+   "assetRatingId": 6,
+   "assetRating": "NC-17"
+  },
+  {
+   "assetRatingId": 7,
+   "assetRating": "AO"
+  },
+  {
+   "assetRatingId": 8,
+   "assetRating": "X"
+  },
+  {
+   "assetRatingId": 9,
+   "assetRating": "XX"
+  },
+  {
+   "assetRatingId": 10,
+   "assetRating": "XXX"
+  }
+ ],
+ "statusCode": 0,
+ "statusMessage": "Movie ratings successfully retrieved.",
+ "errorCode": null,
+ "errorMessage": null,
+ "httpStatus": 200
+}
