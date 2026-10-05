@@ -130,18 +130,22 @@ Have something playing first ("Tune to KQED"). Volume starts at 50%.
 
 | # | Say | Expect | ID | ✓ |
 |---|---|---|---|---|
-| 5.1 | "Turn it up." | 60% | G1 | |
-| 5.2 | "Quieter please." | 50% | G3 | |
-| 5.3 | "Mute it." | Muted | G8 | |
-| 5.4 | "Turn it up." | Unmuted, 60% | G2 | |
-| 5.5 | "Set the volume to twenty percent." | 20% | G5 | |
-| 5.6 | "Turn it up a lot." | About 50% | G6 | |
-| 5.7 | "Set the volume to max." | 100% | G4 | |
-| 5.8 | "Pause it." / "Resume." | Pauses / plays | G9 | |
-| 5.9 | "Stop." | Player closes, grid shows | G9 | |
-| 5.10 | "Resume." | Says nothing is playing — no error loop | G9 | |
+| 5.1 | "Turn it up." | 60% | G1 | ✓ 60% |
+| 5.2 | "Quieter please." | 50% | G3 | ✓ 50% |
+| 5.3 | "Mute it." | Muted | G8 | ✓ muted |
+| 5.4 | "Turn it up." | Unmuted, 60% | G2 | ✓ unmuted, 60% |
+| 5.5 | "Set the volume to twenty percent." | 20% | G5 | ✓ 20% |
+| 5.6 | "Turn it up a lot." | About 50% | G6 | ✓ set 0.5 |
+| 5.7 | "Set the volume to max." | 100% | G4 | ✓ 100% |
+| 5.8 | "Pause it." / "Resume." | Pauses / plays | G9 | ✓ paused / playing |
+| 5.9 | "Stop." | Player closes, grid shows | G9 | ✓ idle |
+| 5.10 | "Resume." | Says nothing is playing — no error loop | G9 | ✓ one `tv_play` → not_ready; "Nothing is playing to resume." No retry loop |
 
 Check the level after each step: `python3 ~/Development/ytvn-epg/remote.py state`.
+
+*Run 2026-10-05 10:24, Pixel phone, room `test-plan`, gpt-5.6-terra:
+10/10 pass. Every level checked against the player state each command
+returned. One tool call per step; 2.5–4.6 s per turn.*
 
 ## Session 6 — teaching memory
 
