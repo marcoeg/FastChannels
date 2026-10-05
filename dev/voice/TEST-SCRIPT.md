@@ -212,14 +212,22 @@ kept by design, as for Al Jazeera) and "User asked assistant to forget…"
 
 | # | Say | Expect | ID | ✓ |
 |---|---|---|---|---|
-| 8.1 | "What can you do?" | Live TV, guide, catch-up/restart, on demand, volume — no captions | J4 | |
-| 8.2 | "Turn on captions." | This TV can't do captions | K1 | |
-| 8.3 | "Record Columbo tonight." | Can't record; mentions catch-up | K3 | |
-| 8.4 | "Can you set a timer to turn the TV on that channel when it starts?" | Can't schedule; gives the start time | K2 | |
-| 8.5 | "Go back to the last channel." | Asks which channel (no last-channel) | K5 | |
-| 8.6 | "Is there any…" (stop mid-sentence) | Waits or asks you to finish | L3 | |
-| 8.7 | Ask "What's on TV right now?" and talk over the answer with "Stop — put on KQED." | Stops, tunes KQED | L4 | |
-| 8.8 | "Hey Wanda." | Answers as Minny | J5 | |
+| 8.1 | "What can you do?" | Live TV, guide, catch-up/restart, on demand, volume — no captions | J4 | ✓ content right (no captions claimed); the VOICE sounded odd — see run note |
+| 8.2 | "Turn on captions." | This TV can't do captions | K1 | ✓ |
+| 8.3 | "Record Columbo tonight." | Can't record; mentions catch-up | K3 | ✓ "can't schedule recordings", offered to check tonight / later |
+| 8.4 | "Can you set a timer to turn the TV on that channel when it starts?" | Can't schedule; gives the start time | K2 | ✓ "can't set timers", offered the start time |
+| 8.5 | "Go back to the last channel." | Asks which channel (no last-channel) | K5 | ✓ asked for the channel; "KQED" then tuned |
+| 8.6 | "Is there any…" (stop mid-sentence) | Waits or asks you to finish | L3 | ✓ "Go ahead — what are you looking for?" |
+| 8.7 | Ask "What's on TV right now?" and talk over the answer with "Stop — put on KQED." | Stops, tunes KQED | L4 | ✓ answer cut mid-word, KQED tuned |
+| 8.8 | "Hey Wanda." | Answers as Minny | J5 | ✓ "Hi — I'm Minny." |
+
+*Run 2026-10-05 11:37, Pixel phone, room `test-plan`, gpt-5.6-terra:
+8/8 on content; no tool calls except the two KQED tunes. 8.1's reply
+sounded odd to the tester (the voice, not the words). Pipeline: ElevenLabs
+eleven_flash_v2_5, plugin default voice, no fixed language, no voice
+settings; metrics and logs normal for that turn (TTS ttfb 0.18 s); the
+generation is not in ElevenLabs history, so no audio to analyse. Cause
+open.*
 
 ---
 
