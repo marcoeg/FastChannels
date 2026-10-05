@@ -88,7 +88,9 @@ _PREFERENCE = re.compile(
     r"we (really |all )?(like|love|hate|enjoy|usually|always|never|watch)|"
     r"(i|we) (usually|always|never|normally)|(my|our) (usual|normal|default|regular)|"
     r"usually|every (night|morning|day|evening|weekend|week)|"
-    r"(don'?t|never) (ever )?(suggest|show|recommend|play) me|"
+    r"(don'?t|do not|never) (ever )?(suggest|show|recommend|play|put on)\b|"
+    r"my preference|(my|our) (wife|husband|partner|kids?|son|daughter|family) "
+    r"(likes?|loves?|hates?|enjoys?|watch(es)?)|the kids (watch|like|love)|"
     r"(always|never) (set|put|play|suggest|show|turn)|"
     r"when i say)\b", re.I)
 _QUESTION = re.compile(
@@ -104,14 +106,18 @@ def wants_memory(user_text: str) -> bool:
     """True for a statement of preference, habit or standing instruction.
     A question that merely mentions a favourite ("what's my favorite news
     channel?") asks memory; it doesn't add to it."""
-    t = user_text.strip()
+    t = re.sub(r"^(hey |hi |ok )?(minny|minnie|wanda)[,.!]?\s*", "", user_text.strip(), flags=re.I)
     if len(t) < 8 or not _PREFERENCE.search(t):
         return False
-    if re.search(r"\b(remember|forget)\b", t, re.I) and not t.endswith("?"):
-        return True
     # A question is never a statement to store — whether it starts with a
-    # question word or not ("You know what my preferred volume is?").
-    return not (t.endswith("?") or _QUESTION.match(t) or _ASKING.match(t))
+    # question word or not ("You know what my preferred volume is?"), and
+    # STT does not always add the question mark ("Do you remember my
+    # favorite channel"). Checked before the remember/forget shortcut.
+    if t.endswith("?") or _QUESTION.match(t) or _ASKING.match(t):
+        return False
+    if re.match(r"^(no,? )?(just )?forget (it|that|about it)[.!]?$", t, re.I):
+        return False                          # a cancellation, not a request
+    return True
 
 
 # An assistant line that declined or failed. Replaying those as "earlier

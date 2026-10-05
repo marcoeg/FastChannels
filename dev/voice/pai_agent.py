@@ -399,7 +399,8 @@ def build_agent(primers: list | None = None) -> Agent:
 
         @agent.tool_plain
         async def tv_watch_title(title: str, year: int | None = None,
-                                 channel: str | None = None) -> str:
+                                 channel: str | None = None,
+                                 catchup: bool = False) -> str:
             """Play, watch or catch up on a show, film or series BY NAME — the
             one call for any named programme, even when a channel is named
             too ("catch up on Face the Nation on channel 5" → title="Face the
@@ -409,11 +410,14 @@ def build_agent(primers: list | None = None) -> Agent:
             or tunes the channel airing it now, or plays it as catch-up if it
             aired on this TV (on that channel, if given) in the last 24
             hours. When several titles match it lists them with asset ids —
-            ask the viewer, then call tv_play_asset(asset_id)."""
-            return await _watch_title(title, year, channel, retry=True)
+            ask the viewer, then call tv_play_asset(asset_id). catchup=True
+            when the viewer asked for catch-up / an earlier or "yesterday's"
+            edition / from the beginning: skips on demand, and a programme
+            on now is restarted instead of tuned mid-programme."""
+            return await _watch_title(title, year, channel, retry=True, catchup=catchup)
 
         async def _watch_title(title: str, year: int | None, channel: str | None,
-                               retry: bool) -> str:
+                               retry: bool, catchup: bool = False) -> str:
             only = None
             if channel:
                 hit, _ = await pr.find_channel(channel)
@@ -421,7 +425,7 @@ def build_agent(primers: list | None = None) -> Agent:
             # The three lookups are independent: run them together (they
             # took ~4 s in sequence, and viewers spoke again before an answer).
             titles, live, recent = await asyncio.gather(
-                pr.search_titles(title, year),
+                pr.search_titles(title, year) if not catchup else _none(),
                 _airing_now(title, only) if not year else _none(),
                 _aired_recently(title, only) if not year else _none())
             pick = pr.pick_title(title, titles)
@@ -431,6 +435,15 @@ def build_agent(primers: list | None = None) -> Agent:
                 return ("Not playing — several titles match; ask which: "
                         + "; ".join(f"{t.title} ({t.year or 'year ?'}) "
                                     f"asset_id={t.asset_id}" for t in titles))
+            if not year and catchup and len(live) == 1 and live[0].get("airing_id"):
+                # "Catch up on X" while X is on: from its beginning, not live
+                # mid-programme.
+                r = live[0]
+                ok, played = await _control_ok("play_airing",
+                                               {"airing_id": r["airing_id"], "mode": "restart"})
+                if ok:
+                    return (f"{r['title']!r} is on now on {r['channel_name']} — restarted "
+                            f"from its beginning: {played}")
             if not year:
                 # "Put on Columbo": a show airing now on one of this TV's channels.
                 if len(live) == 1:
@@ -474,8 +487,12 @@ def build_agent(primers: list | None = None) -> Agent:
                 if retry and len(words) >= 3 and _MISHEARD_PLAY.match(words[0]):
                     rest = " ".join(words[1:])
                     return (f"(nothing matched {title!r}; tried {rest!r}) "
-                            + await _watch_title(rest, year, channel, retry=False))
+                            + await _watch_title(rest, year, channel, retry=False,
+                                                 catchup=catchup))
             where = f" on {only}" if only else ""
+            if year:
+                return (f"No on-demand title matching {title!r} ({year}) on this TV "
+                        "(live and catch-up were not checked for a dated film).")
             return (f"No on-demand title matching {title!r} on this TV, and it "
                     f"isn't on live right now or in the last 24 hours{where}. "
                     "Say so; don't guess when it is on.")
@@ -555,7 +572,7 @@ def build_agent(primers: list | None = None) -> Agent:
             leave it out for the newest releases. Returns titles with asset
             ids (play one with tv_play_asset) and the category names."""
             titles, cats = await pr.browse(category)
-            if not titles and not cats:
+            if titles is None or (not titles and not cats):
                 return "The on-demand catalogue is unavailable right now."
             if not titles:
                 return (f"No on-demand category like {category!r}. Categories: "

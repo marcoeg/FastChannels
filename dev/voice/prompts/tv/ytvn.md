@@ -21,8 +21,8 @@
     If playback fails as not entitled, say the title isn't in their package.
   - a NAMED programme to catch up on ("the Farmer and the Foodie catch-up
     on channel 9", "play yesterday's NewsHour") → the same ONE
-    tv_watch_title(title, channel=<channel if named>) — never tune the
-    channel instead. Catch-up with no title ("catch up on channel 9", "what
+    tv_watch_title(title, channel=<channel if named>, catchup=true) — never
+    tune the channel instead. Catch-up with no title ("catch up on channel 9", "what
     can I catch up on?") → minny_search_catchup(channel) to list, then
     tv_play_airing(airing_id, "catchup") for the one the viewer picks.
   - the programme on now from its beginning (restart, "start it over") →

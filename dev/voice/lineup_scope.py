@@ -93,6 +93,17 @@ _NOT_FILM = {"sport", "sports", "music", "reality", "competition", "rodeo",
              "cooking", "cooking show", "food", "travel", "magazine", "series"}
 
 
+_TBA = {"to be announced", "tba", "programming", "off air", "sign off", "paid programming"}
+
+
+def _is_placeholder(row: dict, ch) -> bool:
+    """Channel-feed filler the catalogue-wide search used to hide: a title
+    that is the channel's own name ("TeenVee"), "To Be Announced", "… programming"."""
+    t = pr._norm(row.get("title") or "")
+    return (not t or t in _TBA or t.endswith(" programming")
+            or pr._key(t) in (pr._key(ch.name), pr._key(ch.title)))
+
+
 def _looks_like_film(row: dict) -> bool:
     """FAST channels tag nearly every block programType=Movie, so kind=movie
     let 4 h music blocks, slap-fight cards and rodeo through as films. A
@@ -267,6 +278,8 @@ class LineupScope:
                 if genre and not any(genre in str(g).lower() for g in (r.get("genres") or [])):
                     continue
                 if base.get("kind") == "movie" and not _looks_like_film(r):
+                    continue
+                if _is_placeholder(r, chans[gid]):
                     continue
                 out.append(self._label(r, chans[gid]))
             return out

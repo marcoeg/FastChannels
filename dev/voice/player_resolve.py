@@ -40,6 +40,10 @@ LINEUP_TTL_S = 300
 
 # Network names viewers say for the Bay Area OTA stations in this lineup
 # (the Muxley headend). Only affiliations that are certain.
+BRANDS = {"fox2": "2581", "ktvufox2": "2581", "fox2ktvu": "2581", "cbs5": "2583",
+          "kpixcbs5": "2583", "cbsbayarea": "2583", "kqed9": "2585", "pbs9": "2585",
+          "nbcbayarea": "2586", "nbc11": "2586", "kntvnbc": "2586", "ion65": "2591",
+          "telemundo48": "2589", "metv": "2588"}
 NETWORKS = {"fox": "2581", "cbs": "2583", "pbs": "2585", "nbc": "2586",
             "telemundo": "2589", "ion": "2591"}
 
@@ -193,6 +197,12 @@ async def find_channel(query: str) -> tuple[Channel | None, list[Channel]]:
             return hit[0], []
 
     k, nq = _key(q), _norm(q)
+    # On-air brands: "Fox 2", "KTVU Fox 2", "NBC Bay Area", "CBS 5".
+    b = squash(q)
+    if b in BRANDS or k in BRANDS:
+        hit = [c for c in chans if c.channel_id == BRANDS.get(b, BRANDS.get(k))]
+        if hit:
+            return hit[0], []
     if nq in NETWORKS or k in NETWORKS:
         cid = NETWORKS.get(nq) or NETWORKS[k]
         hit = [c for c in chans if c.channel_id == cid]
@@ -253,7 +263,7 @@ async def search_titles(query: str, year: int | None = None,
     return titles[:limit]
 
 
-async def browse(category: str | None = None, limit: int = 12) -> tuple[list[Title], list[str]]:
+async def browse(category: str | None = None, limit: int = 12) -> tuple[list[Title] | None, list[str]]:
     """(titles, categories): the first titles of an on-demand category
     (default New Releases) from viewer://titles?category=…, and — when the
     category is unknown or the viewer may want a choice — the category names
@@ -267,11 +277,14 @@ async def browse(category: str | None = None, limit: int = 12) -> tuple[list[Tit
                 if isinstance(c, dict) and c.get("name") and c["name"].isascii()]
     except Exception as e:  # noqa: BLE001
         logger.warning("ytvn categories unavailable: %s", e)
+    def stem(x: str) -> str:              # "comedies" / "comedy", "dramas"
+        x = _norm(x)
+        return re.sub(r"ies\b", "y", x).rstrip("s")
     name = None
     if category:
-        want = _norm(category).rstrip("s")
-        name = next((c for c in cats if _norm(c).rstrip("s") == want), None) \
-            or next((c for c in cats if want and want in _norm(c)), None)
+        want = stem(category)
+        name = next((c for c in cats if stem(c) == want), None) \
+            or next((c for c in cats if want and want in stem(c)), None)
         if name is None:
             return [], cats
     uri = "viewer://titles" + (f"?{urlencode({'category': name}, quote_via=quote)}" if name else "")
@@ -280,7 +293,7 @@ async def browse(category: str | None = None, limit: int = 12) -> tuple[list[Tit
         rows = json.loads(raw if isinstance(raw, str) else str(raw))
     except Exception as e:  # noqa: BLE001
         logger.warning("ytvn browse %s unavailable: %s", uri, e)
-        return [], cats
+        return None, cats                     # failed — not "no such category"
     return [Title(str(r["asset_id"]), r.get("title") or "", r.get("year"))
             for r in rows if isinstance(r, dict) and r.get("asset_id")][:limit], cats
 
