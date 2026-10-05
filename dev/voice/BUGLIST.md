@@ -345,3 +345,65 @@ one per batch.
   corrections still fail 2/9 when the second statement yields no fact.
 - *Re-tested:* session 6 re-run 10:58 on a wiped test graph: 4/4, profile
   has all three facts, the dislike on its own "Reality shows" entity.
+
+**T5 [MEDIUM] Broad schedule searches showed only the programmes that started earliest** (`lineup_scope.py`, `search_lineup` / `window_rank`) — **FIXED 2026-10-05, spoken re-test passed**
+- *Found:* session 7 step 7.2, 2026-10-05 11:03. "What should I watch
+  tonight?" → `minny_search_live_schedule(range 6 PM–5 AM)` with no channel
+  or query, so the wrapper searched all 53 lineup channels: 695 matches,
+  sorted by start time, cut to 25. A programme already on when the window
+  opens is a match, so all 25 rows had started between 4 AM and 5:57 PM and
+  Minny suggested The Last Man on the Moon "at four fifteen" for tonight.
+- *A regression?* Not from a working state. Every version ranked by start
+  time and cut: the catalogue-wide search before Oct 4 returned ~a dozen
+  earliest-starting rows (Oct 2 and Oct 4 "movie around five": 5 and 4
+  rows, none starting in the window → "not seeing a film beginning around
+  five"); 186766f (Oct 4 09:28) made the search per station and cut at 40;
+  7482102 (Oct 4 17:18) cut at 25 with a note. The per-station search made
+  it bite harder (53 channels' running programmes fill the cut), and the
+  no-genre "tonight" question had never gone through this path: it was
+  asked on Sep 1, 14, 22 and 26, all on the earlier backends. It did show
+  as a symptom in 2.5 today ("25-row cap" in the note, undiagnosed).
+- *Fix:* `window_rank`: rows are ordered from the window's start (or now,
+  if later): what starts at that moment first, then what is already on
+  with at least 30 minutes left (most time left first), then what starts
+  next, and so on; what has ended or is about to goes last. The "now"
+  window keeps its uncapped start order (dcfc902). The cap note says what
+  the 25 are.
+- *Verified:* unit checks of the ordering rules. Real row sets captured
+  uncapped (tonight 695, around five 46, cooking 32, next two hours 181,
+  today 1083, tomorrow evening 204, upcoming 1061), old cut vs new:
+  tonight 0 → 19 rows starting at 6 PM (locals first) plus the 6 longest
+  running blocks; around five drops the 6 films ending 2–28 min after 4:30
+  for 5:00 starts; today asked at 11 AM 25 ended rows → 19 on now + 6
+  next; cooking unchanged. The recorded 7.2 and 2.5 answers re-asked with
+  the new rows (5× each): 7.2 → PBS NewsHour, Chicago Fire, M*A*S*H at six
+  5/5 (old rows: "four seventeen" 4/4); 2.5 → LoudQUIETloud 5–7 with The
+  Last Man on the Moon "already underway, ends 6:16" or Future From Above
+  5/5; 2.6 cooking unchanged. model_bench (gpt-5.6-terra): routing 27/27,
+  judge 4.96/4.67/4.96 vs 4.96/4.70/5.00 before; "around five" helpful
+  4 → 5; the three one-point drops are on untouched paths (a catch-up
+  wording, "50%" spoken as digits, news-now at a later hour). Agent
+  restarted 11:21, voice_probe PASS with the new note in the rollout.
+- *Left:* 25 rows cannot represent an 11-hour window: "tonight" asked at
+  11 AM shows the 6 PM slot (asked at 7:30 PM it shows what is on then and
+  the 8 PM starts, the realistic case). A sample spread across the window
+  is a possible follow-up.
+- *Re-tested:* session 7 re-run 11:28: "What should I watch tonight?" →
+  America's Test Kitchen at seven, Check, Please! at seven thirty,
+  Independent Lens at ten; the broad search's cut began at 6 PM.
+
+**T6 [MEDIUM] A station's evening is truncated: the catalogue caps each channel search at 25 rows across all its feeds** (MinnyAgent `search_live_schedule`; `lineup_scope.py` `guide_channel` / `_names`)
+- *Found while fixing T5.* `search_live_schedule(channel="KQED", 6 PM–5 AM)`
+  returns 25 rows by start time spread over the station's four feeds ([MN]
+  KQED HDTV, Muxley KQED-DT, KQEDDT2, PBS Kids): 6–10 PM only. The wrapper
+  keeps the primary feed's rows (6–7 of them) and drops the rest, so KQED's
+  "tonight" ends at 10 PM; COZI (two feeds) reaches midnight, single-feed
+  FAST channels are complete. Affects "what's on KQED tonight / tomorrow"
+  (the channel route through `filter`) and each station's share of the
+  broad per-station search.
+- *Why:* the wrapper deliberately queries the name that matches all of a
+  station's feeds, because catch-up recordings can sit on any of them.
+  Schedule searches don't need that.
+- *Fix (to decide):* for schedule searches pass the primary feed's exact
+  name (keep the all-feeds name for catch-up), or a larger limit on the
+  catalogue side. Check "what's on KQED tonight" before and after.

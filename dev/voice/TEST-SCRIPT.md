@@ -63,7 +63,7 @@ Disconnect.
 | 2.2 | "And what is after that?" | The airing after the one just named | F2 | ✓ George Lopez at 11 (treated the 9–11 block as one) |
 | 2.3 | "How long does it last?" | Duration of that airing | F2 | ✓ 11 PM–1 AM, correct |
 | 2.4 | "What's on next on KQED?" | Next programme, start time | B3 | ✓ |
-| 2.5 | "Any movie I can watch at around five o'clock today?" | Only films airing around five | B4 | ~ LoudQUIETloud 5–7 ok; Monday M.A.S.S. not a film; missed real films spanning 5 (movie filter lets FAST filler through, 25-row cap) |
+| 2.5 | "Any movie I can watch at around five o'clock today?" | Only films airing around five | B4 | ~ LoudQUIETloud 5–7 ok; Monday M.A.S.S. not a film; missed real films spanning 5 (movie filter lets FAST filler through; the 25-row cut kept the earliest-starting rows, BUGLIST T5) |
 | 2.6 | "Any cooking shows on tonight?" | Titles and times only, no invented episode details | B5 | ✓ (skipped Top Chef VIP on KSTS) |
 | 2.7 | "What's on tomorrow morning on KPIX?" | Tomorrow's programmes, not today's | B7 | ✓ |
 | 2.8 | "What's on TV right now?" then "No, I meant what is playing on my TV right now." | Second answer is what's on screen | F7 | ✓ |
@@ -171,20 +171,42 @@ transcript log, not the graph.*
 KQED favourite, does not like reality shows, normal volume 0.4. Stats: 4
 entities (user, KQED, Reality shows, Volume), 3 edges, 3 episodes.*
 
+*Re-run 11:24 (after the T5 restart, test memory wiped first): 4/4 again.
+Profile: all three facts. Stats: 5 entities (an "assistant" node this
+time), 3 edges, 3 episodes.*
+
 ## Session 7 — memory in a new session
 
 Reconnect (new session).
 
 | # | Say | Expect | ID | ✓ |
 |---|---|---|---|---|
-| 7.1 | "What's my favorite channel?" | KQED | H2 | |
-| 7.2 | "What should I watch tonight?" | Suggestions, no reality shows | H3 | |
-| 7.3 | "Put the volume back to normal." | 40% | G7 | |
-| 7.4 | "What did I tell you last time?" | Recalls session 6 (KQED, reality shows, volume) — nothing invented | H8 | |
-| 7.5 | "Forget that KQED is my favorite." | Confirms | H4 | |
+| 7.1 | "What's my favorite channel?" | KQED | H2 | ✓ "Your favorite channel is KQED.", from the profile, no tool |
+| 7.2 | "What should I watch tonight?" | Suggestions, no reality shows | H3 | ~ no reality shows ("I skipped the reality fare"), but "tonight" got The Last Man on the Moon at 4:15 PM: every row the search returned started before 6 PM. BUGLIST T5 |
+| 7.3 | "Put the volume back to normal." | 40% | G7 | ✓ `tv_volume(set 0.4)` → 40% |
+| 7.4 | "What did I tell you last time?" | Recalls session 6 (KQED, reality shows, volume) — nothing invented | H8 | ✓ KQED, no reality shows, 40%, from the notes; nothing invented |
+| 7.5 | "Forget that KQED is my favorite." | Confirms | H4 | ✓ KQED favourite ended in the graph; the forget request is a fact the profile filter keeps out |
 
 Disconnect, wait a minute, then `./memory_cli.py --test profile` — KQED no
 longer a favourite.
+
+*Run 2026-10-05 11:03, Pixel phone, room `test-plan`, gpt-5.6-terra:
+4 pass, 7.2 partial. Profile afterwards: reality-shows dislike and volume
+0.4, KQED gone. Graph: 4 episodes, the KQED favourite ended (not deleted).
+T5 fixed 11:21 (`lineup_scope.window_rank`).*
+
+*Re-run 11:28 after the T5 fix: 7.2 ✓ — one KQED search plus one broad
+movie search (158 matches, the new cut starting at 6 PM): "America's Test
+Kitchen at seven, Check, Please! at seven thirty, Independent Lens at
+ten", no reality shows. 7.1, 7.3, 7.5 ✓. 7.4 ~: called search_memory,
+got all three facts back, and answered only "your usual volume is forty
+percent" — read "last time" as the last thing said (the volume was the
+last preference stated in session 6); nothing invented. The first run
+answered with all three from the notes. Graph afterwards: the KQED
+favourite ended; two new facts from the forget, "KQED is not the user's
+favorite channel anymore" (shown in the profile; "no longer" facts are
+kept by design, as for Al Jazeera) and "User asked assistant to forget…"
+(a request, kept out).*
 
 ## Session 8 — out of scope and edge cases
 
