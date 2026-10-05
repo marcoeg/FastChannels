@@ -255,6 +255,7 @@ class LineupScope:
         self._map: dict[str, pr.Channel] = {}   # guide channel id → lineup row
         self._names: dict[str, str] = {}        # primary guide id → guide name
         self._query: dict[str, str] = {}        # lineup channel_id → guide name
+        self._exact: dict[str, str] = {}        # lineup channel_id → primary feed's name
         self._at = 0.0
         self._failed_at = 0.0
         self._lock = asyncio.Lock()
@@ -334,7 +335,7 @@ class LineupScope:
                 self.unavailable = "lineup"
                 return                      # stale beats nothing
             matches = await asyncio.gather(*(self._match(c) for c in lineup))
-            m, names, query = {}, {}, {}
+            m, names, query, exact = {}, {}, {}, {}
             # Primaries first: a sister feed of one station must never take
             # the id another lineup channel answers to.
             for ch, hit in zip(lineup, matches):
@@ -347,12 +348,13 @@ class LineupScope:
                         m.setdefault(f, ch)
                     names[pid] = pname
                     query[ch.channel_id] = q
+                    exact[ch.channel_id] = pname
             missing = [c.name for c, h in zip(lineup, matches) if not h]
             logger.info("lineup map: %d/%d channels in the guide, %d feeds%s",
                         len(names), len(lineup), len(m),
                         f"; missing {missing}" if missing else "")
             if m:
-                self._map, self._names, self._query = m, names, query
+                self._map, self._names, self._query, self._exact = m, names, query, exact
                 self._at = time.monotonic()
             else:
                 self.unavailable = "guide"
@@ -364,15 +366,19 @@ class LineupScope:
         return ("This TV's channel list is unavailable right now (the TV "
                 "player isn't answering) — say so; don't say nothing is on.")
 
-    async def guide_channel(self, said: str) -> tuple[str, str] | None:
+    async def guide_channel(self, said: str, *, exact: bool = False) -> tuple[str, str] | None:
         """The TV's number or channel name → (the name the guide matches for
         all of that station's feeds, the lineup channel_id); None if it isn't
-        a lineup channel."""
+        a lineup channel. exact=True gives the primary feed's own name
+        instead: the guide returns at most 25 rows for a `channel`, shared
+        by every feed the name matches, so a schedule search for "KPIX"
+        (five feeds) ended at 8 PM. Catch-up keeps the all-feeds name —
+        recordings can sit on any feed."""
         hit, _ = await pr.find_channel(said)
         if hit is None:
             return None
         await self.channels()
-        q = self._query.get(hit.channel_id)
+        q = (self._exact if exact else self._query).get(hit.channel_id)
         return (q, hit.channel_id) if q else None
 
     def _label(self, row: dict, ch: pr.Channel) -> dict:
@@ -577,7 +583,8 @@ class LineupScopedToolset(WrapperToolset):
                 return await self.scope.search_lineup({**args, "genre": g})
         only = None
         if name in SCOPED and tool_args.get("channel"):
-            guide = await self.scope.guide_channel(str(tool_args["channel"]))
+            guide = await self.scope.guide_channel(
+                str(tool_args["channel"]), exact=name == "minny_search_live_schedule")
             if guide:
                 tool_args = {**tool_args, "channel": guide[0]}
                 only = guide[1]
