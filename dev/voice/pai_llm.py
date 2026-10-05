@@ -127,7 +127,8 @@ class PydanticLLMStream(llm.LLMStream):
         if not user_text:
             return
         brain = self._pai.brain
-        if is_echo_greeting(user_text, self._pai.last_reply_at, time.monotonic()):
+        if is_echo_greeting(user_text, self._pai.last_reply_at, time.monotonic(),
+                            brain.last_reply()):
             # LiveKit started this (preemptive) run for an echo; its hook will
             # drop the turn — don't call the model, commit or trace it.
             logger.info("echo greeting, no model run: %r", user_text)

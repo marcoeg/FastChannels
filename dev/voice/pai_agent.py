@@ -523,16 +523,23 @@ def build_agent(primers: list | None = None) -> Agent:
                 return []
             from datetime import datetime, timedelta, timezone
             now = datetime.now(timezone.utc)
-            try:
-                raw = await scopes[0].minny.direct_call_tool("search_live_schedule", {
-                    "query": pr.split_caps(title), "window": "range",
-                    "start": (now - timedelta(hours=24)).isoformat(timespec="seconds"),
-                    "end": now.isoformat(timespec="seconds")})
-                rows = await scopes[0].filter("minny_search_live_schedule", raw)
-            except Exception:  # noqa: BLE001
-                return []
-            if not isinstance(rows, list):
-                return []
+            # The guide's query needs every word: "PBS NewsHour" is stored as
+            # "PBS News Hour" but "SportsCenter" as one word — ask both ways.
+            queries = list(dict.fromkeys([title, pr.split_caps(title)]))
+            window = {"window": "range",
+                      "start": (now - timedelta(hours=24)).isoformat(timespec="seconds"),
+                      "end": now.isoformat(timespec="seconds")}
+
+            async def one(q: str) -> list:
+                try:
+                    raw = await scopes[0].minny.direct_call_tool(
+                        "search_live_schedule", {"query": q, **window})
+                    got = await scopes[0].filter("minny_search_live_schedule", raw)
+                except Exception:  # noqa: BLE001
+                    return []
+                return got if isinstance(got, list) else []
+
+            rows = [r for rs in await asyncio.gather(*(one(q) for q in queries)) for r in rs]
             out, seen = [], set()
             for r in sorted(rows, key=lambda r: r.get("start") or "", reverse=True):
                 if not (_title_matches(title, r) and r.get("airing_id")):
@@ -617,7 +624,14 @@ def build_agent(primers: list | None = None) -> Agent:
         preferences. Not for TV schedules."""
         if ctx.deps.memory is None:
             return "No stored memories match that."
-        facts = await ctx.deps.memory.deep_search(query, limit=8)
+        # Embedding + graph round trips with no bound of their own (the
+        # OpenAI SDK waits up to 600 s): the profile is already in the prompt.
+        try:
+            facts = await asyncio.wait_for(ctx.deps.memory.deep_search(query, limit=8), 3.0)
+        except (asyncio.TimeoutError, Exception) as e:  # noqa: BLE001
+            logger.warning("search_memory: %s", e or "timeout")
+            return ("Memory search is unavailable right now — answer from the "
+                    "household profile above, or say you can't recall.")
         return "\n".join(f"- {f}" for f in facts) or "No stored memories match that."
 
     return agent
@@ -682,8 +696,9 @@ class VoiceBrain:
 _CLOSING_ACK = re.compile(
     r"^(oh |ah |well )?(ok(ay)?|great|perfect|cool|nice|awesome|excellent|wonderful|"
     r"good|very good|that'?s (great|good|perfect)|got it|ok(ay)?,? (great|thanks|thank you|cool|perfect)|"
+    r"(great|perfect|cool|nice|awesome|excellent|wonderful|good),? (thanks|thank you)|"
     r"thanks?( a lot| so much| very much)?|thank you( very much| so much)?)"
-    r"( minny)?[.!]*$", re.I)
+    r"([, ]+(minny|minnie))?[.!]*$", re.I)
 
 
 # A bare greeting heard right after Minny spoke is her own echo (a phantom
@@ -695,8 +710,16 @@ BARE_GREETING = re.compile(
 GREETING_ECHO_S = 4.0
 
 
-def is_echo_greeting(text: str, last_reply_at: float, now: float) -> bool:
-    return bool(BARE_GREETING.match(text.strip())) and now - last_reply_at < GREETING_ECHO_S
+def is_echo_greeting(text: str, last_reply_at: float, now: float,
+                     last_reply: str = "") -> bool:
+    t = text.strip()
+    if not BARE_GREETING.match(t):
+        return False
+    # "Okay Minny." right after "…want me to put it on?" answers the
+    # question; the echo filter swallowed it and the offer was never acted on.
+    if re.match(r"(ok|okay)\b", t, re.I) and last_reply.rstrip().endswith("?"):
+        return False
+    return now - last_reply_at < GREETING_ECHO_S
 
 
 # Words the recognizer has produced for a leading "play" ("Clay, the

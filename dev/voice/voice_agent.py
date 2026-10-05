@@ -77,7 +77,7 @@ def _log_transcript(role: str, text: str, **extra) -> None:
         fh.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
 
-from pai_agent import BARE_GREETING as _BARE_GREETING, GREETING_ECHO_S  # noqa: E402
+from pai_agent import BARE_GREETING as _BARE_GREETING, is_echo_greeting  # noqa: E402
 
 
 class TvAssistant(Agent):
@@ -94,9 +94,14 @@ class TvAssistant(Agent):
         # hearing her echo, not the viewer — answering it ("Hi. What would
         # you like to watch?") replaced real answers. A greeting at the start
         # of a session or after a pause still gets one.
-        if _BARE_GREETING.match(str(text).strip()) and (
-                time.monotonic() - self._pai.last_reply_at < GREETING_ECHO_S
-                or getattr(self.session, "agent_state", "") == "speaking"):
+        # Same test as the adapter's (pai_llm skips the model for exactly
+        # these), plus anything said while Minny is still speaking.
+        if is_echo_greeting(str(text), self._pai.last_reply_at, time.monotonic(),
+                            self._pai.brain.last_reply()) or (
+                _BARE_GREETING.match(str(text).strip())
+                and getattr(self.session, "agent_state", "") == "speaking"
+                and not (re.match(r"(ok|okay)\b", str(text).strip(), re.I)
+                         and self._pai.brain.last_reply().rstrip().endswith("?"))):
             logger.info("ignored a greeting %.1f s after Minny spoke (echo): %r",
                         time.monotonic() - self._pai.last_reply_at, text)
             raise StopResponse()

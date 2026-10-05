@@ -336,18 +336,30 @@ class LineupScope:
         if not chans:
             return self.unavailable_text()
 
+        failures: list[str] = []
+
         async def one(gid: str) -> list:
             try:
                 rows = _rows(await self.minny.direct_call_tool(
                     "whats_on_now", {"channel": self._names[gid]})) or []
             except Exception as e:  # noqa: BLE001
                 logger.warning("whats_on_now %s: %s", self._names[gid], e)
+                failures.append(str(e)[:200])
                 return []
             return [self._label(r, chans[gid]) for r in rows
                     if r.get("channel_id") == gid]
 
         per = await asyncio.gather(*(one(g) for g in self._names))
         rows = [r for rs in per for r in rs]
+        # A bare [] (every call failed in a VPN outage) was read as either
+        # "nothing is on" or "couldn't check", at random.
+        if failures and len(failures) * 2 >= len(self._names):
+            return (f"The guide could not be checked ({len(failures)} of "
+                    f"{len(self._names)} channels failed: {failures[0]}). Say the TV "
+                    "guide is unavailable right now — don't say nothing is on.")
+        if not rows:
+            return ("The guide was checked on every channel of this TV and lists "
+                    "nothing on air right now — the guide is reachable.")
         rows.sort(key=lambda r: r.get("channel_number") or 0)
         return rows
 

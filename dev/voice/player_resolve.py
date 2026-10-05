@@ -218,9 +218,11 @@ async def find_channel(query: str) -> tuple[Channel | None, list[Channel]]:
 
     # Every spoken word inside the name ("gusto" → Gusto TV, Gusto Espanol).
     words = [w for w in nq.split() if w not in _NOISE]
+    # The substring test is for call-sign pieces ("pix" in kpix); a 1-2
+    # letter word inside a name matched anything ("me" → valuetainMEnt).
     contains = [c for c in chans
                 if words and all(w in _norm(f"{c.name} {c.title}").split()
-                                 or w in _key(c.name) for w in words)]
+                                 or (len(w) >= 3 and w in _key(c.name)) for w in words)]
     if len(contains) == 1:
         return contains[0], []
     if contains:
