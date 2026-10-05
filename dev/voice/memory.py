@@ -148,6 +148,10 @@ _NOT_HOUSEHOLD = re.compile(
 # remember the household, not the session. Without it, every exchange
 # became facts like "assistant can tune channels" or "UEFA.tv is showing
 # the draw" — true for a minute, then noise in search and the profile.
+# The genre line overrides graphiti's own entity rules (no generic nouns,
+# "when in doubt, do NOT extract"): "I don't like reality shows" got no
+# entity, so no fact — or one hung on the assistant that a later "I like
+# them now" couldn't replace.
 EXTRACTION_INSTRUCTIONS = """\
 This is one exchange between a household and its TV voice assistant. The
 memory exists to know the HOUSEHOLD over weeks and months. Extract ONLY:
@@ -176,7 +180,10 @@ not "preferred volume: 20%"; "KQED", not "favourite channel KQED". The value
 belongs in the fact ("User's preferred volume is 20%"). A later statement
 about the same thing must land on the same entity so it can replace the
 earlier one.
-If the exchange contains none of the above, extract nothing."""
+If the exchange contains none of the above, extract nothing.
+A genre or kind of programme ("reality shows", "horror", "crime dramas") IS
+an entity here, even though it is not a single title: name it by the genre
+("Reality shows", "Horror")."""
 
 
 _PREF_FACT = re.compile(
@@ -197,7 +204,7 @@ _OFFERED = re.compile(r"\b(offered|suggest\w*|recommend\w*|scheduled|airing|"
 _HOUSEHOLD_WORD = re.compile(r"\b(user|users|household|family|kids|children)\b", re.I)
 _HOUSEHOLD_SUBJECT = re.compile(r"^(the )?(user|household|family|kids|children)\b", re.I)
 _INSTRUCTION = re.compile(
-    r"(\b(never|not|no longer|stop|avoid)\b|n't\b)[^.]{0,40}?\b(suggest|recommend|offer|propos|mention)\w*", re.I)
+    r"(\b(never|not|no longer|stop|avoid|steer clear( of)?)\b|n't\b)[^.]{0,40}?\b(suggest|recommend|offer|propos|mention)\w*", re.I)
 _ASSISTANT_RULE = re.compile(
     r"^(the )?(assistant|minny) (should|must|is to|has to|needs to) (never|not|stop|avoid)\b"
     r"[^.]{0,40}?\b(suggest|recommend|offer|propos|mention)\w*", re.I)
@@ -207,6 +214,12 @@ _IDENTITY = re.compile(
     r"is the (parent|father|mother|dad|mom|husband|wife|partner|grandparent) of|"
     r"has (a|an|one|two|three|four|five|six|\d+) (\w+ )?(kids?|child|children|sons?|daughters?|"
     r"wife|husband|partner|dogs?|cats?|family|baby|grandkids?|grandchildren))\b", re.I)
+# "User asked the assistant to set Colombo as their favorite" states a
+# favourite; the one-off-request rule in _NOT_HOUSEHOLD dropped it. Asks to
+# remove or forget a favourite still are not preferences.
+_FAVOURITE_ASK = re.compile(
+    r"^(the )?user (asks?|asked|requests?|requested)\b[^.]*?"
+    r"\b(set|make|remember|save|mark|keep)\b[^.]*?\bfavou?rite\b", re.I)
 _HABIT = re.compile(
     r"^(the )?(user|household|family|kids|children)('s \w+)? (usually |always |often )?"
     r"(watch(es)?|tunes? in to|puts? on)\b[^.]*\b(at (\d{1,2}|one|two|three|four|five|six|seven|"
@@ -226,6 +239,8 @@ def is_household_fact(fact: str) -> bool:
     if _HOUSEHOLD_SUBJECT.match(text) and (_INSTRUCTION.search(text) or _IDENTITY.match(text)
                                            or _HABIT.match(text)):
         return True                           # checked before "user asked…" is ruled out
+    if _FAVOURITE_ASK.match(text):
+        return True
     return bool(_PREF_FACT.search(text)) and not _OFFERED.search(text) \
         and not _NOT_HOUSEHOLD.search(text)
 
