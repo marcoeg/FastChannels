@@ -142,15 +142,53 @@ def local_time(iso: str, now: datetime | None = None) -> str | None:
 _EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
 
 
+def _instant(row: dict, field: str) -> datetime:
+    try:
+        t = datetime.fromisoformat(str(row.get(field)).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return _EPOCH
+    return t if t.tzinfo else t.replace(tzinfo=timezone.utc)
+
+
 def start_key(row: dict) -> datetime:
     """A row's start as an instant. Labelled rows carry Pacific-offset ISO
     text, whose text order is not time order across the fall-back hour
     (01:30-07:00 sorts after 01:00-08:00, which is later)."""
+    return _instant(row, "start")
+
+
+# A programme already on when a window opens counts as "on then" only with
+# this much left; one ending minutes later is the afternoon's tail ("a movie
+# around five" is not one that ends at 4:58).
+ON_AIR_MIN = timedelta(minutes=30)
+
+
+def window_rank(rows: list[dict], start: Any) -> list[dict]:
+    """Rows in the order a capped list should keep them. From the window's
+    start (or now, if that is later): what starts at that moment comes
+    first, then what is already on then with ON_AIR_MIN left — the most
+    time left first — then what starts next, and so on; what has ended or
+    is about to goes last. Plain start-time order put the all-day blocks
+    and the afternoon's tail ahead of everything starting tonight: "what
+    should I watch tonight" got 25 rows that all began before 6 PM."""
+    now = datetime.now(timezone.utc)
     try:
-        t = datetime.fromisoformat(str(row.get("start")).replace("Z", "+00:00"))
+        w0 = datetime.fromisoformat(str(start).replace("Z", "+00:00"))
+        w0 = w0 if w0.tzinfo else w0.replace(tzinfo=timezone.utc)
     except (TypeError, ValueError):
-        return _EPOCH
-    return t if t.tzinfo else t.replace(tzinfo=timezone.utc)
+        w0 = now                            # "upcoming": the next 24 h from now
+    w = max(w0, now)
+    far = datetime.max.replace(tzinfo=timezone.utc)
+
+    def key(r: dict):
+        s, e, ch = start_key(r), _instant(r, "end"), r.get("channel_number") or 0
+        if s >= w:
+            return (s, 0, 0.0, ch)          # starts inside the window
+        if e >= w + ON_AIR_MIN:
+            return (w, 1, -e.timestamp(), ch)   # on when it opens
+        return (far, 2, s.timestamp(), ch)  # over, or ending as it opens
+
+    return sorted(rows, key=key)
 
 
 def _pacific_iso(iso: str) -> str:
@@ -464,15 +502,20 @@ class LineupScope:
                         "yet; say so rather than 'nothing is on'.")
             return ("The guide was searched on every channel of this TV and found "
                     "nothing matching — the guide is reachable; this is a real 'none'.")
-        rows.sort(key=lambda r: (start_key(r), r.get("channel_number") or 0))
         # "On now" is at most one row per station, like whats_on_now (also
         # uncapped): cutting it by start time dropped Liga MX on KSTS (started
         # 6 PM, row 31 of 48) from "any live sports on right now?".
-        if len(rows) > MAX_ROWS and args.get("window") != "now":
+        if args.get("window") == "now":
+            rows.sort(key=lambda r: (start_key(r), r.get("channel_number") or 0))
+            return rows
+        rows = window_rank(rows, args.get("start"))
+        if len(rows) > MAX_ROWS:
             logger.info("search_lineup: %d rows, %d sent", len(rows), MAX_ROWS)
             return {"rows": rows[:MAX_ROWS],
-                    "note": f"{len(rows)} matches; the first {MAX_ROWS} by start "
-                            "time are shown — the list goes on later."}
+                    "note": f"{len(rows)} matches; the {MAX_ROWS} soonest from the "
+                            "window's start are shown — programmes already on when "
+                            "it opens come after the ones starting then; the list "
+                            "goes on later."}
         return rows
 
     async def filter(self, name: str, result: Any, only: str | None = None) -> Any:
