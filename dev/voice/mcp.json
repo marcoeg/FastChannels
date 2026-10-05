@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "minny": {
+      "command": "uv",
+      "args": ["--directory", "/home/marco/Development/MinnyAgent", "run", "minny-mcp"]
+    }
+  }
+}
