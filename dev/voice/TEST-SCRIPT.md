@@ -36,49 +36,71 @@ Mark each step ✓ / ✗ and note what was said when it fails.
 
 | # | Say | Expect | ID | ✓ |
 |---|---|---|---|---|
-| 1.1 | "Hey Minny." | A short greeting, invites a request | J3 | |
-| 1.2 | "What's on TV right now?" | 3–5 programmes, only this TV's channels, Pacific times | A1 | |
-| 1.3 | "Turn that channel on." | Tunes the first channel it just named (or asks which) | F1 | |
-| 1.4 | "What am I watching?" | That programme — answered at once, no "let me check" loop | A4 | |
-| 1.5 | "Great." | Instant "Enjoy." | J1 | |
-| 1.6 | "Switch channel to Fox, channel 2." | KTVU, channel two | C2 | |
-| 1.7 | "Put on CBS." | KPIX, channel five | C3 | |
-| 1.8 | "Play TMZ on KTBU." | Tunes KTVU; doesn't claim TMZ is on unless it checked | C5 | |
-| 1.9 | "Put on Trace." | Asks which: Urban, Sportstar or Latina | C7 | |
-| 1.10 | "Trace Latina." | Tunes it | C7 | |
-| 1.11 | "Put on ESPN." | Not a channel on this TV | C8 | |
-| 1.12 | "What's on channel nine?" | KQED's current programme | A3 | |
-| 1.13 | "Thanks!" | Instant "You're welcome." | J1 | |
+| 1.1 | "Hey Minny." | A short greeting, invites a request | J3 | ✓ (said ~1 s after connect: barged into the welcome, heard as "Minny.") |
+| 1.2 | "What's on TV right now?" | 3–5 programmes, only this TV's channels, Pacific times | A1 | ✓ |
+| 1.3 | "Turn that channel on." | Tunes the first channel it just named (or asks which) | F1 | ✓ asked which of the 4 |
+| 1.4 | "What am I watching?" | That programme — answered at once, no "let me check" loop | A4 | ✓ |
+| 1.5 | "Great." | Instant "Enjoy." | J1 | ✓ |
+| 1.6 | "Switch channel to Fox, channel 2." | KTVU, channel two | C2 | ✓ |
+| 1.7 | "Put on CBS." | KPIX, channel five | C3 | ✓ |
+| 1.8 | "Play TMZ on KTBU." | Tunes KTVU; doesn't claim TMZ is on unless it checked | C5 | ✓ (STT heard "KTVU", so the call-sign fix was not exercised) |
+| 1.9 | "Put on Trace." | Asks which: Urban, Sportstar or Latina | C7 | ✓ |
+| 1.10 | "Trace Latina." | Tunes it | C7 | ✓ ("Tr3s Latina" → Trace Latina) |
+| 1.11 | "Put on ESPN." | Not a channel on this TV | C8 | ✓ |
+| 1.12 | "What's on channel nine?" | KQED's current programme | A3 | ✓ |
+| 1.13 | "Thanks!" | Instant "You're welcome." | J1 | ✓ (instant reply: in voice-conversations.jsonl, not in rollouts) |
 
 Disconnect.
+
+*Run 2026-10-05 09:27, Pixel phone, room `test-plan`, gpt-5.6-terra:
+13/13 pass. No echo: the only interruption was the welcome greeting.*
 
 ## Session 2 — later today and follow-ups
 
 | # | Say | Expect | ID | ✓ |
 |---|---|---|---|---|
-| 2.1 | "Is there any Columbo tonight?" | Channel and times (Pacific) | B1 | |
-| 2.2 | "And what is after that?" | The airing after the one just named | F2 | |
-| 2.3 | "How long does it last?" | Duration of that airing | F2 | |
-| 2.4 | "What's on next on KQED?" | Next programme, start time | B3 | |
-| 2.5 | "Any movie I can watch at around five o'clock today?" | Only films airing around five | B4 | |
-| 2.6 | "Any cooking shows on tonight?" | Titles and times only, no invented episode details | B5 | |
-| 2.7 | "What's on tomorrow morning on KPIX?" | Tomorrow's programmes, not today's | B7 | |
-| 2.8 | "What's on TV right now?" then "No, I meant what is playing on my TV right now." | Second answer is what's on screen | F7 | |
+| 2.1 | "Is there any Columbo tonight?" | Channel and times (Pacific) | B1 | ✓ asked Two and a Half Men instead: COZI ch 12, 9–11 PM |
+| 2.2 | "And what is after that?" | The airing after the one just named | F2 | ✓ George Lopez at 11 (treated the 9–11 block as one) |
+| 2.3 | "How long does it last?" | Duration of that airing | F2 | ✓ 11 PM–1 AM, correct |
+| 2.4 | "What's on next on KQED?" | Next programme, start time | B3 | ✓ |
+| 2.5 | "Any movie I can watch at around five o'clock today?" | Only films airing around five | B4 | ~ LoudQUIETloud 5–7 ok; Monday M.A.S.S. not a film; missed real films spanning 5 (movie filter lets FAST filler through, 25-row cap) |
+| 2.6 | "Any cooking shows on tonight?" | Titles and times only, no invented episode details | B5 | ✓ (skipped Top Chef VIP on KSTS) |
+| 2.7 | "What's on tomorrow morning on KPIX?" | Tomorrow's programmes, not today's | B7 | ✓ |
+| 2.8 | "What's on TV right now?" then "No, I meant what is playing on my TV right now." | Second answer is what's on screen | F7 | ✓ |
 
 Disconnect.
+
+*Run 2026-10-05 09:37, Pixel phone, room `test-plan`, gpt-5.6-terra:
+7 pass, 2.5 partial (search data, not reasoning). Time to first speech
+0.9–4.2 s; the movie search was slowest.*
 
 ## Session 3 — catch-up and restart
 
 | # | Say | Expect | ID | ✓ |
 |---|---|---|---|---|
-| 3.1 | "Play the BBC World News America catch-up on Channel 9." | The newest edition plays from its start | D1 | |
-| 3.2 | "Tune to COZI." | Live COZI | C1 | |
-| 3.3 | "Can you restart this episode from the beginning?" | Restarts at once (one action) | D3 | |
-| 3.4 | "What is this episode about?" | Episode summary, no spoilers | F3 | |
-| 3.5 | "Start PBS NewsHour over from the beginning." | If not on air: says so, offers the latest catch-up | D4 | |
-| 3.6 | "Play yesterday's NewsHour." | Plays if within 24 h, otherwise "the catch-up window has expired" | D5 | |
+| 3.1 | "Play the BBC World News America catch-up on Channel 9." | The newest edition plays from its start | D1 | ✓ negative only: BBC WNA is weekday-only, last aired Fri, not in catch-up. Positive path untested |
+| 3.2 | "Tune to COZI." | Live COZI | C1 | ✓ |
+| 3.3 | "Can you restart this episode from the beginning?" | Restarts at once (one action) | D3 | ✓ one `tv_play_airing(restart)`, begins 1 min early |
+| 3.4 | "What is this episode about?" | Episode summary, no spoilers | F3 | ✗ "can't identify the episode" + web_lookup; the guide row had it (S9E1 "Shoeway to Heaven", with description). Prompt conflict: 30-routing vs 35-web |
+| 3.5 | "Start PBS NewsHour over from the beginning." | If not on air: says so, offers the latest catch-up | D4 | ✓ split into two utterances, answered as one. Didn't offer the 3 PM airing today |
+| 3.6 | "Play yesterday's NewsHour." | Plays if within 24 h, otherwise "the catch-up window has expired" | D5 | ✓ STT "Please yesterday's…"; nothing aired Sun |
 
 Disconnect.
+
+*Run 2026-10-05 09:41 (a Monday), Pixel phone, room `test-plan`, gpt-5.6-terra:
+5 pass, 3.4 fail. 3.1/3.5/3.6 could only test the "not available" path —
+BBC World News America and PBS NewsHour don't air on weekends. Re-run them
+after 3 PM on a weekday (BBC WNA 2:30, NewsHour 3:00 on KQED).*
+
+*Re-run 09:47 after the 3.4 prompt fix (prompt 9320ad4c1966): 3.4 ✓, one
+`minny_whats_on_now("COZI")` call, answered from the guide row, no web search.
+3.1 positive path ✓ with Daniel Tiger's Neighborhood (aired 9:00 on KQED):
+catch-up played from the start. Reply took 11.6 s, all of it in two slow
+OpenAI requests (6.2 s + 4.1 s for 19–31 output tokens; the play tool took
+≤1.4 s). That's 2 of the only 4 requests over 4 s in 419 since Oct 2, so
+it's provider latency, not the player. Two misses: "Play Daniel Tiger on
+Channel 9" tuned it but didn't offer the 9:00 catch-up (ytvn.md:13-14), and
+STT "BBS NewsHour" was searched as heard.*
 
 ## Session 4 — on demand
 
