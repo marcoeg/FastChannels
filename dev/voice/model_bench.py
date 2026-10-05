@@ -92,6 +92,8 @@ QUESTIONS: list[tuple[str, list[list[str]]]] = [
     ("Pause it.", [["tv_pause"]]),
     ("Who directed Dune Part Two?", [["web_lookup"], []]),
     ("Is there any news on right now?", [["minny_whats_on_now"], ["minny_search_live_schedule"]]),
+    # 10-04: a 25-row cap on the "now" search cut Liga MX (KSTS, row 31 of 48)
+    ("Is there any live sports on TV right now?", [["minny_whats_on_now"], ["minny_search_live_schedule"]]),
     ("What's on ESPN?", [["minny_whats_on_now"], ["tv_watch_channel"], []]),
     ("What am I watching right now?", [["tv_get_state"], ["minny_whats_on_now"], []]),   # the on-screen line answers it
     ("Any cooking shows on tonight?", [["minny_search_live_schedule"]]),

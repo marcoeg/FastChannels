@@ -465,7 +465,10 @@ class LineupScope:
             return ("The guide was searched on every channel of this TV and found "
                     "nothing matching — the guide is reachable; this is a real 'none'.")
         rows.sort(key=lambda r: (start_key(r), r.get("channel_number") or 0))
-        if len(rows) > MAX_ROWS:
+        # "On now" is at most one row per station, like whats_on_now (also
+        # uncapped): cutting it by start time dropped Liga MX on KSTS (started
+        # 6 PM, row 31 of 48) from "any live sports on right now?".
+        if len(rows) > MAX_ROWS and args.get("window") != "now":
             logger.info("search_lineup: %d rows, %d sent", len(rows), MAX_ROWS)
             return {"rows": rows[:MAX_ROWS],
                     "note": f"{len(rows)} matches; the first {MAX_ROWS} by start "
