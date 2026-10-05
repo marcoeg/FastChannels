@@ -1,7 +1,8 @@
 # Minny voice satellite — project status
 
-_Last updated 2026-09-24. (Previous revision 2026-09-14 predated the wake
-word, the wake-gated STT, the STT recycle and the capture watchdog.)_
+_Last updated 2026-10-04: troubleshooting note, BUG-0001, `sdkconfig` and
+`dependencies.lock` now tracked. (2026-09-24 revision: wake word, wake-gated
+STT, STT recycle, capture watchdog.)_
 
 ## TL;DR
 
@@ -91,6 +92,17 @@ Normal log noise from room `speaker`: "current speech generation cannot be
 interrupted" (someone spoke over a reply — expected under half-duplex) and an
 occasional "STT stream ended … recreating" (recovered automatically).
 
+**"Wake word not working"**: first check that room `speaker` exists and has
+an `esp32` participant (healer log, or LiveKit `ListRooms`). No room means
+the device is off the network, not a code problem. On 2026-10-04 a fan near
+the device broke its 2.4 GHz Wi-Fi for ~10 min (associate, then a WPA
+handshake timeout, repeated); it survived a power-cycle and cleared the
+moment the fan was off. The firmware retries Wi-Fi and LiveKit forever, so
+once the cause goes away it rejoins by itself. Off the network the UDP log
+is dead: read serial with DTR/RTS left asserted (opening the port with them
+released resets the board). Diagnosis and recovery gaps:
+`BUG-0001-satellite-offline-recovery.md`.
+
 ## The LCD display (removed)
 
 The Waveshare 1.47" Touch LCD module was **defective**: the JD9853 panel
@@ -148,6 +160,10 @@ current experience is already usable, just not interruptible.
 ## Bring-up leftovers
 
 Done since the last revision:
+- `sdkconfig` and `dependencies.lock` are tracked (2026-10-04). The committed
+  `sdkconfig` has the Wi-Fi SSID/password and LiveKit token stripped by the
+  `esp32-secrets` clean filter; a new clone must set the filter up before
+  committing it (README, Secrets).
 - Spoken welcome re-gated to room `voice` only — the satellite stays silent
   on connect until its wake word fires (`e9ea045`).
 - Boot test tone removed — it sounded identical to the wake chime and read as
@@ -170,6 +186,11 @@ Still in the tree (harmless; remove when convenient):
    STT recycle, which touches plugin internals (it degrades to a logged
    no-op and warns at startup if they move).
 4. **Replacement LCD panel** — no firmware work needed (see above).
+5. **BUG-0001: offline diagnosis and recovery.** Record the reset reason
+   and core dumps, show "Wi-Fi down" on the ring, add a LiveKit-stuck restart
+   watchdog that only fires while Wi-Fi is up, and have the healer warn when
+   the satellite has been gone for more than 5 min. See
+   `BUG-0001-satellite-offline-recovery.md`.
 
 ## Key file map
 
