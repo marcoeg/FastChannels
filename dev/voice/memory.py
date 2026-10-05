@@ -69,7 +69,8 @@ PROFILE_TTL_S = 90.0
 # fact (VoiceMemory.prune). VOICE_MEMORY_RETENTION_DAYS=0 disables pruning.
 RETENTION_DAYS = float(os.environ.get("VOICE_MEMORY_RETENTION_DAYS", "14"))
 PROFILE_QUERY = ("user preferences favorite channels shows genres "
-                 "household routine standing instructions")
+                 "household routine standing instructions "
+                 "name family kids language teams")   # who they are, not only what they like
 
 # Only statements ABOUT the household reach graphiti. Its extraction turns
 # whatever it is given into facts — schedule data, suggestions, what the
@@ -87,6 +88,12 @@ _PREFERENCE = re.compile(
     r"my preference|(my|our) (wife|husband|partner|kids?|son|daughter|family) "
     r"(likes?|loves?|hates?|enjoys?|watch(es)?)|the kids (watch|like|love)|"
     r"(always|never) (set|put|play|suggest|show|turn)|"
+    # who the household is (EXTRACTION_INSTRUCTIONS asks for it; the gate
+    # dropped "My name is Marco and we have two kids" before extraction)
+    r"my name is|(i|we) speak|(i|we) live in|i'?m from|"
+    r"(i'?m|we'?re|i am|we are) (a |an )?(big |huge )?(fans?|supporters?) of|"
+    r"(i|we) have (a|an|one|two|three|four|five|\d+) (\w+ )?(kids?|children|sons?|daughters?|dogs?|cats?|grandkids?)|"
+    r"(my|our) (wife|husband|partner|son|daughter|kids?)('s names? (is|are)| (is|are) (called|named))|"
     r"when i say)\b", re.I)
 _QUESTION = re.compile(
     r"^(what|which|when|where|who|how|is|are|do|does|did|can|could|should|"
@@ -129,7 +136,7 @@ _REFUSAL = re.compile(
 # about the guide's data, and meta chatter ("user asks what they would like
 # to do") — the profile query ranks those in when real preferences are few.
 _NOT_HOUSEHOLD = re.compile(
-    r"^(the )?(assistant|minny|tv|guide|catalogue|channel|uefa|programme)\b|"
+    r"^(the )?(assistant|minny|minnie|wanda|chat|chatgpt|tv|guide|catalogue|channel|uefa|programme)\b|"
     r"^(the )?assistant \(|"
     r"\b(is|are) (showing|airing|on now)\b|"
     r"^(the )?lineup\b|"
@@ -173,7 +180,9 @@ If the exchange contains none of the above, extract nothing."""
 
 
 _PREF_FACT = re.compile(
-    r"\b(favou?rite|prefers?|preferred|preference|likes?|loves?|enjoys?|hates?|"
+    # like/love/enjoy only as lower-case verbs: "Love Jones is on BET Cinema"
+    # and "Crazy, Stupid, Love." were household "preferences".
+    r"\b(favou?rite|prefers?|preferred|preference|(?-i:likes?|loves?|enjoys?)|hates?|"
     r"dislikes?|usual(ly)?|normal(ly)?|default|regular|always|never|routine|habit|every (night|morning|day|"
     r"evening|weekend|week)|instructs?|standing|no longer|wants the assistant|"
     r"when (the )?user says|when they say)\b", re.I)
@@ -181,11 +190,42 @@ _OFFERED = re.compile(r"\b(offered|suggest\w*|recommend\w*|scheduled|airing|"
                       r"is on (channel|[A-Z])|called the assistant)\b", re.I)
 
 
+# EXTRACTION_INSTRUCTIONS asks for standing instructions and for facts the
+# household states about itself; the preference test above dropped both from
+# the profile ("never suggest horror" read as an offer, "my name is…" has no
+# preference verb), so Minny said "Got it" and never saw them again.
+_HOUSEHOLD_WORD = re.compile(r"\b(user|users|household|family|kids|children)\b", re.I)
+_HOUSEHOLD_SUBJECT = re.compile(r"^(the )?(user|household|family|kids|children)\b", re.I)
+_INSTRUCTION = re.compile(
+    r"(\b(never|not|no longer|stop|avoid)\b|n't\b)[^.]{0,40}?\b(suggest|recommend|offer|propos|mention)\w*", re.I)
+_ASSISTANT_RULE = re.compile(
+    r"^(the )?(assistant|minny) (should|must|is to|has to|needs to) (never|not|stop|avoid)\b"
+    r"[^.]{0,40}?\b(suggest|recommend|offer|propos|mention)\w*", re.I)
+_IDENTITY = re.compile(
+    r"^(the )?(user|household|family)\b.*?\b(name is|is named|is called|goes by|speaks|"
+    r"lives in|is from|is (a |an )?(big |huge )?(fan|supporter|follower) of|"
+    r"is the (parent|father|mother|dad|mom|husband|wife|partner|grandparent) of|"
+    r"has (a|an|one|two|three|four|five|six|\d+) (\w+ )?(kids?|child|children|sons?|daughters?|"
+    r"wife|husband|partner|dogs?|cats?|family|baby|grandkids?|grandchildren))\b", re.I)
+_HABIT = re.compile(
+    r"^(the )?(user|household|family|kids|children)('s \w+)? (usually |always |often )?"
+    r"(watch(es)?|tunes? in to|puts? on)\b[^.]*\b(at (\d{1,2}|one|two|three|four|five|six|seven|"
+    r"eight|nine|ten|eleven|twelve|noon|midnight)|after (school|work|dinner)|before (bed|school|work)|"
+    r"in the (morning|evening|afternoon)|every|on (weekdays|weekends|\w+days))\b", re.I)
+
+
 def is_household_fact(fact: str) -> bool:
-    """A lasting fact about the household: says what they like, do or want
-    (positive test), and is not an offer, a schedule, or about the
-    assistant / screen / guide."""
+    """A lasting fact about the household: what they like, do or want, a
+    standing instruction, or who they are — not an offer, a schedule, a
+    one-off request, or about the assistant / screen / guide."""
     text = re.sub(r" \(as of [^)]*\)$", "", fact)
+    if _ASSISTANT_RULE.match(text):           # "The assistant should never suggest horror"
+        return True
+    if not _HOUSEHOLD_WORD.search(text):      # a title or schedule line, not the household
+        return False
+    if _HOUSEHOLD_SUBJECT.match(text) and (_INSTRUCTION.search(text) or _IDENTITY.match(text)
+                                           or _HABIT.match(text)):
+        return True                           # checked before "user asked…" is ruled out
     return bool(_PREF_FACT.search(text)) and not _OFFERED.search(text) \
         and not _NOT_HOUSEHOLD.search(text)
 
