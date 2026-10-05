@@ -1,0 +1,3 @@
+# The committed sdkconfig never carries the WiFi credentials or the LiveKit
+# token: the esp32-secrets clean filter drops those lines (README: Secrets).
+sdkconfig filter=esp32-secrets

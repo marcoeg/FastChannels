@@ -143,6 +143,20 @@ Hardware bring-up findings (2026-09-14, all encoded in the tree):
   or wire up a LAN token endpoint later. (Expired token = the UI stuck on
   "connection failed"; the firmware backs off to 60 s retries.)
 - Camera FPC unused; EXIO7 (USB mux) must stay high or USB dies (default).
-- When committing this directory, **never `git add -f` the whole tree** —
-  that force-adds `sdkconfig`/`sdkconfig.secrets.defaults` (token + WiFi
-  password) past both gitignores. Add files explicitly.
+- `sdkconfig` is tracked WITHOUT its secrets: the `esp32-secrets` clean
+  filter (`.gitattributes`) drops the `CONFIG_LK_EXAMPLE_WIFI_SSID`,
+  `CONFIG_LK_EXAMPLE_WIFI_PASSWORD` and `CONFIG_LK_TOKEN` lines from the
+  committed copy; the working file keeps them, and a fresh checkout's build
+  fills them back in from `sdkconfig.secrets.defaults` (settings missing
+  from `sdkconfig` come from the defaults). The filter is defined in
+  `.git/config`, which a clone does not copy — **in a new clone, set it up
+  before committing `sdkconfig`**, or the secrets go in:
+  ```bash
+  git config filter.esp32-secrets.clean \
+    "sed -E '/^CONFIG_(LK_EXAMPLE_WIFI_SSID|LK_EXAMPLE_WIFI_PASSWORD|LK_TOKEN)=/d'"
+  git config filter.esp32-secrets.smudge cat
+  git config filter.esp32-secrets.required true
+  ```
+  `build.sh` deletes and regenerates `sdkconfig` when a defaults file is
+  newer, so it can show as deleted/modified until the next build.
+  `sdkconfig.secrets.defaults` stays git-excluded — never `git add -f` it.
