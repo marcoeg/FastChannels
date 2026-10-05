@@ -60,20 +60,13 @@ SINGLE_VALUE_SETTINGS = ("volume", "caption", "subtitle", "language")
 TEST_RESET_MARKER = Path.home() / "news" / "voice-test-reset"
 
 
-def is_test_room(room: str | None) -> bool:
-    """Test traffic: rooms named test-… (the phone client opened with ?test),
-    voice_probe.py's voice-probe… rooms and the debug console. Their turns are traced but
-    marked, their memory is a separate graph, and their exchanges never
-    reach a real session's "earlier sessions" (nor the reverse)."""
-    room = room or ""
-    # `voice_agent.py console` runs in LiveKit's mock room "console": the
-    # household graph got two facts typed there that had to be scrubbed.
-    return room.startswith(("test-", "voice-probe", "console"))
-# Episodes older than this are pruned unless they hold a lasting household
-# fact (VoiceMemory.prune). VOICE_MEMORY_RETENTION_DAYS=0 disables pruning.
+from rooms import is_test_room  # noqa: E402,F401 — re-exported
+
 TRANSCRIPT_LOG = Path(os.environ.get(
     "VOICE_TRANSCRIPT_LOG", Path.home() / "news" / "voice-conversations.jsonl"))
 PROFILE_TTL_S = 90.0
+# Episodes older than this are pruned unless they hold a lasting household
+# fact (VoiceMemory.prune). VOICE_MEMORY_RETENTION_DAYS=0 disables pruning.
 RETENTION_DAYS = float(os.environ.get("VOICE_MEMORY_RETENTION_DAYS", "14"))
 PROFILE_QUERY = ("user preferences favorite channels shows genres "
                  "household routine standing instructions")
@@ -285,8 +278,11 @@ class VoiceMemory:
         try:
             with open(TRANSCRIPT_LOG, "rb") as fh:
                 fh.seek(0, 2)
-                fh.seek(max(0, fh.tell() - 256_000))
-                lines = fh.read().decode("utf-8", "replace").splitlines()[1:]
+                start = max(0, fh.tell() - 256_000)
+                fh.seek(start)
+                lines = fh.read().decode("utf-8", "replace").splitlines()
+                if start:
+                    lines = lines[1:]       # partial line after the seek
         except OSError:
             return []
         floor = None
@@ -301,9 +297,11 @@ class VoiceMemory:
                 r = json.loads(line)
             except ValueError:
                 continue
+            if not isinstance(r, dict):
+                continue                    # a stray line must not switch memory off
             try:
                 ts = datetime.fromisoformat(r["ts"])
-            except (KeyError, ValueError):
+            except (KeyError, TypeError, ValueError):
                 continue
             # real sessions never see test exchanges, and the reverse
             if floor is not None and ts < floor:

@@ -128,7 +128,12 @@ def _fake(name: str, args: dict) -> dict:
         elif ch == "down":
             p["volume"] = max(0.0, round(p["volume"] - 0.1, 3))
         else:
-            p["volume"] = args.get("level", p["volume"])
+            # As ytvn mcp_server.volume: level required, a small overshoot is
+            # clamped, a percent passed as-is (50) is rejected.
+            lv = args.get("level")
+            if lv is None or not -0.5 <= float(lv) <= 1.5:
+                return {"ok": False, "error": "level is a fraction between 0 and 1 (50% = 0.5)"}
+            p["volume"] = min(1.0, max(0.0, float(lv)))
     return {"ok": True, "dry_run": True, "command": name, "args": args, "player": dict(p)}
 
 

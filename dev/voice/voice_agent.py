@@ -210,8 +210,9 @@ async def entrypoint(ctx: agents.JobContext) -> None:
 
     # Test mode (rooms test-… / voice-probe…): same agent, but traces are
     # marked, memory is a separate graph and real sessions never see test
-    # exchanges — see memory.is_test_room.
-    from memory import is_test_room
+    # exchanges — see rooms.is_test_room (not imported from memory: a broken
+    # graphiti install must leave voice running without memory).
+    from rooms import is_test_room
     is_test = is_test_room(ctx.room.name)
     memory = None
     try:

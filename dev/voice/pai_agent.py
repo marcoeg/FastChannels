@@ -402,9 +402,11 @@ def build_agent(primers: list | None = None) -> Agent:
                                  channel: str | None = None,
                                  catchup: bool = False) -> str:
             """Play, watch or catch up on a show, film or series BY NAME — the
-            one call for any named programme, even when a channel is named
-            too ("catch up on Face the Nation on channel 5" → title="Face the
-            Nation", channel="channel 5"). title: its essential words; year:
+            one call for a named programme to catch up on even when a channel
+            is named too ("catch up on Face the Nation on channel 5" →
+            title="Face the Nation", channel="channel 5", catchup=True). A
+            plain "play X on <channel>" with no catch-up wording is a live
+            request: tv_watch_channel(channel). title: its essential words; year:
             release year if known; channel: the channel the viewer named, if
             any (name or number). In one call it plays the on-demand title,
             or tunes the channel airing it now, or plays it as catch-up if it

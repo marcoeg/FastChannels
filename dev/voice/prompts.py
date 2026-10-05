@@ -14,6 +14,7 @@ rough token estimate.
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -41,8 +42,33 @@ def load_static_instructions(backend: str = "minny",
     if not epg.exists():
         raise FileNotFoundError(
             f"no guide prompt for VOICE_EPG_BACKEND={backend!r}: {epg}")
-    parts.append(epg.read_text(encoding="utf-8").strip())
+    text = epg.read_text(encoding="utf-8").strip()
+    if player == "ytvn":
+        text = _ytvn_vod(text)
+    parts.append(text)
     return "\n\n".join(parts)
+
+
+# The ytvn TV hides minny_search_vod (its on-demand catalogue is the TV's
+# own); the guide section's routes to it cost an unknown-tool retry.
+_YTVN_VOD = {
+    'To stream instead → `minny_search_vod` `kind="movie"`.':
+        "On demand instead → `tv_on_demand`.",
+    "Watch a movie / something to stream / a title with no time →\n    `minny_search_vod`.":
+        "Watch a movie / something to stream / a title with no time →\n"
+        "    `tv_watch_title` (a named title) or `tv_on_demand` (browsing).",
+    "for a\n  title the viewer wants to watch, try `minny_search_vod`, and":
+        "for a\n  title the viewer wants to watch, try `tv_watch_title`, and",
+}
+
+
+def _ytvn_vod(text: str) -> str:
+    for old, new in _YTVN_VOD.items():
+        text = text.replace(old, new)
+    if "minny_search_vod" in text:
+        logging.getLogger("voice.prompts").warning(
+            "guide prompt still routes to minny_search_vod in ytvn mode")
+    return text
 
 
 # How far ahead each guide reaches. The local FalkorDB guide holds the next

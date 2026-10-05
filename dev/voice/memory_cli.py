@@ -15,7 +15,7 @@
   ./memory_cli.py facts "query" [-n 10]  deep_search results
   ./memory_cli.py episodes [-n 10]       recent raw episodes
   ./memory_cli.py profile                EXACTLY the block injected per turn
-  ./memory_cli.py prune [--days 14] [--dry-run]
+  ./memory_cli.py prune [--days N] [--dry-run]   (default: the worker's retention)
                                          retention: drop old episodes except those
                                          that created a current household fact
   ./memory_cli.py wipe --yes             dev reset: drop graph, rebuild indices
@@ -49,7 +49,8 @@ async def main() -> None:
     p_eps.add_argument("-n", type=int, default=10)
     sub.add_parser("profile")
     p_prune = sub.add_parser("prune")
-    p_prune.add_argument("--days", type=float, default=14)
+    p_prune.add_argument("--days", type=float, default=None,
+                         help="default: VOICE_MEMORY_RETENTION_DAYS (as the worker)")
     p_prune.add_argument("--dry-run", action="store_true")
     p_wipe = sub.add_parser("wipe")
     p_wipe.add_argument("--yes", action="store_true")
@@ -92,7 +93,14 @@ async def main() -> None:
             block = format_memory_context(r.profile, r.recent)
             print(block or "(empty — nothing would be injected)")
         elif args.cmd == "prune":
-            print(await mem.prune(args.days, dry_run=args.dry_run))
+            from memory import RETENTION_DAYS
+            days = args.days if args.days is not None else RETENTION_DAYS
+            if days <= 0:
+                sys.exit("retention is off (VOICE_MEMORY_RETENTION_DAYS=0); "
+                         "pass --days to prune anyway")
+            print(f"pruning episodes older than {days:g} days"
+                  f"{' (dry run)' if args.dry_run else ''}")
+            print(await mem.prune(days, dry_run=args.dry_run))
         elif args.cmd == "wipe":
             if not args.yes:
                 sys.exit("refusing without --yes")
