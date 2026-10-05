@@ -151,16 +151,25 @@ returned. One tool call per step; 2.5–4.6 s per turn.*
 
 | # | Say | Expect | ID | ✓ |
 |---|---|---|---|---|
-| 6.1 | "Remember that my favorite channel is KQED." | Confirms | H1 | |
-| 6.2 | "I don't like reality shows." | Acknowledges | H3 | |
-| 6.3 | "My normal volume is 0.4." | Confirms 40% | H5 | |
-| 6.4 | "What's on TV right now?" | Normal answer — and this turn is NOT stored | H6 | |
+| 6.1 | "Remember that my favorite channel is KQED." | Confirms | H1 | ✓ stored: "favourite channel is KQED" |
+| 6.2 | "I don't like reality shows." | Acknowledges | H3 | ✗ first run: episode stored, no fact (BUGLIST T4). ✓ re-run after the fix: "User does not like reality shows." on entity "Reality shows" |
+| 6.3 | "My normal volume is 0.4." | Confirms 40% | H5 | ✓ stored: "normal volume level is 0.4 (40%)" |
+| 6.4 | "What's on TV right now?" | Normal answer — and this turn is NOT stored | H6 | ✓ answered (led with KQED, the new favourite); not stored: 3 episodes |
 
 Disconnect, wait a minute (memory is written in the background), then check:
 ```bash
 ./memory_cli.py --test profile     # KQED favourite, no reality shows, normal volume 0.4
 ./memory_cli.py --test stats       # 3 episodes — not 4
 ```
+
+*Run 2026-10-05 10:28, Pixel phone, room `test-plan`, gpt-5.6-terra:
+3 pass, 6.2 fail (T4). Stats: 4 entities, 2 edges, 3 episodes. The profile's
+"Earlier sessions" lists the 6.4 exchange too; that list is read from the
+transcript log, not the graph.*
+
+*Re-run 10:58 after the T4 fix (test memory wiped first): 4/4 pass. Profile:
+KQED favourite, does not like reality shows, normal volume 0.4. Stats: 4
+entities (user, KQED, Reality shows, Volume), 3 edges, 3 episodes.*
 
 ## Session 7 — memory in a new session
 

@@ -305,3 +305,43 @@ one per batch.
   4.96/4.70/5.00. Agent restarted 10:21, `voice_probe.py` PASS on prompt
   8c8b6c10a103.
 - *Left:* the spoken re-test of 4.2–4.3.
+
+**T4 [MEDIUM] Genre preferences mostly yield no fact: graphiti won't make a genre an entity** (graphiti-core 0.29.3 `prompts/extract_nodes.py:83-160`; `memory.py`) — **FIXED 2026-10-05, spoken re-test passed**
+- *Found:* session 6 step 6.2, 2026-10-05 10:28. "I don't like reality
+  shows." was acknowledged and stored as an episode but produced no fact.
+- *Cause:* a graphiti fact joins two entities, and graphiti's message
+  entity prompt forbids generic nouns, keeps only things that "could have
+  their own Wikipedia article" and ends "When in doubt, do NOT extract".
+  "Reality shows" fails that test; our genre instruction, appended after
+  those rules, mostly lost. Genre facts that did get through hung off
+  user→assistant, so "I like them now" couldn't replace them. Not a
+  regression: graphiti pinned since 2026-08-30, sentence first spoken today.
+- *Fix (memory.py):*
+  1. EXTRACTION_INSTRUCTIONS ends with: a genre or kind of programme IS an
+     entity here, named by the genre ("Reality shows", "Horror").
+  2. The profile filter accepts "User asked the assistant to set/make/
+     remember … as their favourite" (_FAVOURITE_ASK): fix 1 shifted
+     extraction of the household's real "Can you set... Colombo as my
+     favorite." toward that wording (15/20 runs vs 8/20), which the
+     one-off-request rule dropped. Asks to remove or forget a favourite
+     stay excluded.
+  3. _INSTRUCTION recognises "steer clear of suggesting …".
+- *Verified:* the real VoiceMemory path (wants_memory → add_episode →
+  supersede → profile) on scratch graphs, current vs new, 24 scenarios
+  (test-plan cases, genres, supersede/forget sequences, all 12 exchanges
+  that ever qualified for memory). No scenario worse; better: reality
+  dislike 2/3→3/3, crime 2/3→3/3, horror 2/3→3/3, dislike then "I like
+  them now" 2/3→3/3 with the old fact ended (current text once kept both),
+  KQED then forget 2/3→3/3, volume 7/9→9/9, volume 0.6→0.5 3/9→7/9, the
+  household's Colombo favourite 12/20→20/20. Filter: 13/13 unit cases;
+  no change on any fact in voice_memory or voice_memory_test; of 139
+  scratch facts only 12 changed, all asks to set a favourite. Installed
+  file identical to the tested one; agent restarted 10:54, voice_probe
+  PASS, test profile unchanged.
+- *Not fixed here (separate):* "We don't watch sports." and "When I say
+  turn it up, set the volume to twenty." never reach extraction
+  (wants_memory says no); "We watch the news at six" never reaches the
+  profile (0/3 either way); the user's name reaches it 1/3; volume
+  corrections still fail 2/9 when the second statement yields no fact.
+- *Re-tested:* session 6 re-run 10:58 on a wiped test graph: 4/4, profile
+  has all three facts, the dislike on its own "Reality shows" entity.
