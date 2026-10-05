@@ -309,7 +309,7 @@ async def entrypoint(ctx: agents.JobContext) -> None:
         turn_handling=turn_handling,
     )
 
-    wire_session_metrics(session)
+    wire_session_metrics(session, session_id=session_id, is_test=is_test)
 
     # Mirror agent state (listening/thinking/speaking) onto the
     # "agent_state" data topic for hardware clients: the ESP32 satellite

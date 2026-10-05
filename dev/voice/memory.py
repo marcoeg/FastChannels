@@ -194,16 +194,20 @@ def _profile_facts(facts: list[str]) -> list[str]:
     """Household facts only, near-duplicates collapsed (the first, i.e.
     highest-ranked, phrasing wins)."""
     out: list[str] = []
-    seen: list[set[str]] = []
+    seen: list[tuple[set[str], frozenset]] = []
     for f in facts:
         text = re.sub(r" \(as of [^)]*\)$", "", f)
         if not is_household_fact(text):
             continue
         words = {w for w in re.findall(r"[a-z0-9]+", text.lower())
                  if len(w) > 2 and w not in {"the", "user", "their", "and", "for"}}
-        if any(len(words & s) / max(1, len(words | s)) >= 0.6 for s in seen):
+        # Numbers decide: "volume is 20%" and "volume is 40%" share every
+        # word and are two values, not one phrasing — keep both visible.
+        nums = frozenset(re.findall(r"\d+(?:\.\d+)?", text))
+        if any(n == nums and len(words & s) / max(1, len(words | s)) >= 0.6
+               for s, n in seen):
             continue
-        seen.append(words)
+        seen.append((words, nums))
         out.append(f)
     return out
 

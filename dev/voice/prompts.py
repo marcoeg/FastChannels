@@ -15,7 +15,7 @@ rough token estimate.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, time as dtime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -105,7 +105,22 @@ def format_time_context(now_utc: datetime | None = None,
         f"before {local:%H:%M} and its end time is after {local:%H:%M} "
         f"(same day: {local:%a %d %b}). Build every time window "
         f"(now/today/tonight/range) in this zone, offset UTC{offset_h:+d}."
+        f"{_dst_note(local, tz)}"
     )
+
+
+def _dst_note(local: datetime, tz: ZoneInfo) -> str:
+    """Empty except today and the day before the clocks change: one offset
+    for every window put 'tonight' an hour off across the change."""
+    for add, when in ((0, "today"), (1, "tomorrow")):
+        d = (local + timedelta(days=add)).date()
+        a = datetime.combine(d, dtime(0, 0), tz).utcoffset()
+        b = datetime.combine(d, dtime(23, 59), tz).utcoffset()
+        if a != b and local.utcoffset() != b:      # not already changed
+            return (f" Clocks change at 2 AM {when}: from then the offset is "
+                    f"UTC{int(b.total_seconds() // 3600):+d} — use it for times "
+                    "after the change.")
+    return ""
 
 
 def format_memory_context(profile: list[str], recent: list[str]) -> str:

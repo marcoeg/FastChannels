@@ -254,6 +254,7 @@ class PydanticLLMStream(llm.LLMStream):
                     "type": "turn_timing",
                     "session_id": self._pai.session_id,
                     "turn_id": self._turn_id,
+                    "test": self._pai.is_test,
                     "user_chars": len(user_text),
                     "recall_used": recall is not None,
                     "ttfd_ms": round(ttfd_ms) if ttfd_ms is not None else None,

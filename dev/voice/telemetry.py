@@ -44,8 +44,11 @@ _FIELDS = {
 }
 
 
-def wire_session_metrics(session) -> None:
-    """Attach the metrics_collected handler to an AgentSession."""
+def wire_session_metrics(session, session_id: str | None = None,
+                         is_test: bool = False) -> None:
+    """Attach the metrics_collected handler to an AgentSession. Rows carry
+    the session and the test flag, so test-room traffic can be separated
+    from the household's latency."""
 
     @session.on("metrics_collected")
     def _on_metrics(ev) -> None:
@@ -60,7 +63,7 @@ def wire_session_metrics(session) -> None:
             }.get(mtype)
             if key is None:
                 return
-            row = {"type": key}
+            row = {"type": key, "session_id": session_id, "test": is_test}
             for f in _FIELDS[key]:
                 v = getattr(m, f, None)
                 if v is not None:

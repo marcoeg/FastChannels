@@ -55,6 +55,10 @@ from pydantic_ai.messages import (
 logger = logging.getLogger("voice.rollouts")
 
 SCHEMA = "minny-rollout/1"
+# Set by pai_agent.build_agent: which static prompt and which guide-row
+# convention a turn ran under, so datasets can be split where they changed.
+PROMPT_HASH: str | None = None
+ROW_SHAPE = "pacific-iso-compact/2026-10-04"
 ROLLOUT_DIR = Path(os.environ.get(
     "VOICE_ROLLOUT_DIR", str(Path.home() / "news" / "voice-rollouts")))
 
@@ -184,13 +188,25 @@ def to_items(messages: list, *, with_instructions: bool = False) -> list[dict]:
     return items
 
 
+# The lineup-scoped guide answers an empty search or an outage with a
+# sentence, not [] (lineup_scope.py), so "[]" alone never counted them.
+_EMPTY_TEXT = ("this is a real 'none'", "lists nothing on air right now",
+               "Nothing on this TV's channels matches", "may not reach that far",
+               "No stored memories match")
+_OUTAGE_TEXT = ("could not be checked", "is unavailable right now",
+                "channel list is unavailable", "Memory search is unavailable")
+
+
 def _signals(output: list[dict], interrupted: bool, spoken: str) -> dict:
     calls = {i["call_id"] for i in output if i.get("type") == "function_call"}
     results = [i for i in output if i.get("type") == "function_call_output"]
     answered = {i["call_id"] for i in results}
-    empty = sum(1 for i in results
-                if i.get("output", "").strip() in ("", "[]", "{}", '{"result": []}',
-                                                   '{"result":[]}'))
+    texts = [str(i.get("output", "")).strip() for i in results]
+    empty = sum(1 for t in texts
+                if t in ("", "[]", "{}", '{"result": []}', '{"result":[]}')
+                or (len(t) < 400 and any(s in t for s in _EMPTY_TEXT)))
+    outages = sum(1 for t in texts
+                  if len(t) < 400 and any(s in t for s in _OUTAGE_TEXT))
     return {
         "interrupted": interrupted,
         # preemptive generation starts and cancels runs on interim
@@ -198,6 +214,7 @@ def _signals(output: list[dict], interrupted: bool, spoken: str) -> dict:
         "cancelled_before_speech": interrupted and not spoken.strip(),
         "tool_errors": sum(1 for i in results if i.get("error")),
         "empty_tool_results": empty,
+        "tool_outages": outages,
         "unanswered_tool_calls": len(calls - answered),
     }
 
@@ -228,6 +245,8 @@ def build_record(*, session_id: str, turn_index: int, turn_id: str,
         "room": room,
         "is_satellite": is_satellite,
         "epg_backend": os.environ.get("VOICE_EPG_BACKEND", "minny"),
+        "prompt_hash": PROMPT_HASH,
+        "row_shape": ROW_SHAPE,
         "brain": {"llm": os.environ.get("VOICE_LLM", "openai"),
                   "model": models[0] if models else None},
         "user_text": user_text,

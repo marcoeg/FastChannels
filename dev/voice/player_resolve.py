@@ -259,10 +259,44 @@ async def search_titles(query: str, year: int | None = None,
               for r in rows if isinstance(r, dict) and r.get("asset_id")]
     # The edge search also matches descriptions and credits ("trace" finds
     # Onward); a viewer asking for a title says words of the title.
-    words = [w for w in _norm(query).split() if len(w) > 1]
+    # Numbers count as words, in any spelling: "Moana 2" played "Moana" when
+    # the 1-letter "2" was dropped, and "Dune Part 2" matched Part One too.
+    words = [w for w in _title_words(query) if len(w) > 1 or w in _NUMS.values()]
     titles = [t for t in titles
-              if all(w in _norm(t.title).split() for w in words)]
+              if all(w in _title_words(t.title) for w in words)
+              or same_words(query, t.title)]
     return titles[:limit]
+
+
+_NUMS = {str(i): w for i, w in enumerate(
+    "zero one two three four five six seven eight nine ten eleven twelve".split())}
+_NUMS |= {"ii": "two", "iii": "three", "iv": "four", "vi": "six", "vii": "seven",
+          "viii": "eight", "ix": "nine"}
+
+
+def _title_words(text: str) -> list[str]:
+    """Title words with numerals and roman numerals as number words
+    ("Part 2" / "Part II" / "Part Two" → part two)."""
+    return [_NUMS.get(w, w) for w in _norm(text).split()]
+
+
+def same_words(spoken: str, title: str) -> bool:
+    """The spoken words, spaces ignored, are a run of WHOLE words of the
+    title: "Spider Man" ↔ "SpiderMan", "Kungfu Panda" ↔ "Kung Fu Panda".
+    Not a bare substring — "Paw Patrol" must not match "…Paw Patroller"."""
+    s = squash(spoken)
+    if len(s) < 6:
+        return False
+    words = _norm(title).split()
+    for i in range(len(words)):
+        run = ""
+        for w in words[i:]:
+            run += w
+            if run == s:
+                return True
+            if len(run) >= len(s):
+                break
+    return False
 
 
 async def browse(category: str | None = None, limit: int = 12) -> tuple[list[Title] | None, list[str]]:
@@ -305,5 +339,7 @@ def pick_title(query: str, titles: list[Title]) -> Title | None:
     whose title is exactly what was asked for (with a single id)."""
     if len(titles) == 1:
         return titles[0]
-    exact = [t for t in titles if _norm(t.title) == _norm(query)]
+    exact = ([t for t in titles if _norm(t.title) == _norm(query)]
+             or [t for t in titles if squash(t.title) == squash(query)]
+             or [t for t in titles if _title_words(t.title) == _title_words(query)])
     return exact[0] if len(exact) == 1 else None

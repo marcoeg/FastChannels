@@ -36,7 +36,7 @@ import logging
 import os
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from typing import Any
 
@@ -75,6 +75,20 @@ _PLURAL = {"comedies": "comedy", "documentaries": "documentary",
            "sitcoms": "sitcom", "soaps": "soap", "thrillers": "thriller",
            "game shows": "game show", "talk shows": "talk show",
            "children": "children", "kids": "children"}
+
+
+# Genre words whose programmes are tagged by the specific kind: Sunday Night
+# Football is ["American Football", "Pro"] — no "Sports" tag.
+_GENRE_ALSO = {"sports": ("football", "basketball", "baseball", "hockey", "soccer",
+                          "golf", "tennis", "boxing", "wrestling", "racing",
+                          "rodeo", "volleyball", "rugby", "cricket", "lacrosse",
+                          "softball", "mma", "nascar", "athletics", "olympics")}
+
+
+def genre_hit(genre: str, tags) -> bool:
+    """`genre` (lower case) is a word inside one of a row's genre tags."""
+    tags = [str(t).lower() for t in (tags or [])]
+    return any(w in t for w in (genre, *_GENRE_ALSO.get(genre, ())) for t in tags)
 
 
 def genre_query(query: str) -> str | None:
@@ -118,7 +132,25 @@ def local_time(iso: str, now: datetime | None = None) -> str | None:
     now = (now or datetime.now(_TZ)).astimezone(_TZ)
     days = (t.date() - now.date()).days
     day = {0: "today", 1: "tomorrow", -1: "yesterday"}.get(days) or t.strftime("%A %B %-d")
-    return f"{t.strftime('%-I:%M %p')} {day}"
+    # On the night the clocks go back, 1:00-1:59 AM happens twice: say which
+    # (a 1:30 PDT - 1:00 PST programme no longer "ends before it starts").
+    ambiguous = t.replace(fold=1 - t.fold).utcoffset() != t.utcoffset()
+    zone = f" {t.tzname()}" if ambiguous else ""
+    return f"{t.strftime('%-I:%M %p')}{zone} {day}"
+
+
+_EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
+
+
+def start_key(row: dict) -> datetime:
+    """A row's start as an instant. Labelled rows carry Pacific-offset ISO
+    text, whose text order is not time order across the fall-back hour
+    (01:30-07:00 sorts after 01:00-08:00, which is later)."""
+    try:
+        t = datetime.fromisoformat(str(row.get("start")).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return _EPOCH
+    return t if t.tzinfo else t.replace(tzinfo=timezone.utc)
 
 
 def _pacific_iso(iso: str) -> str:
@@ -166,6 +198,14 @@ def _far_ahead(start: Any, days: float = 3) -> bool:
         return False
 
 
+def _searchable(name: str) -> str:
+    """The guide's index matches word prefixes of at most 15 letters, so
+    "TrailersFromHell" (16) finds nothing — as a find_channels query or a
+    `channel` filter — while "TrailersFromHel" finds it. Shorter words pass
+    unchanged."""
+    return " ".join(w[:15] for w in str(name).split())
+
+
 def _same_airing(a: dict, b: dict) -> bool:
     return all(a.get(k) == b.get(k)
                for k in ("title", "episode_title", "start", "end"))
@@ -193,7 +233,10 @@ class LineupScope:
     async def _match(self, ch: pr.Channel) -> tuple[str, str, set[str], str] | None:
         """(primary guide id, its name, all same-feed guide ids, the name to
         pass as `channel` so the guide matches every feed)."""
-        hits = await self._call("find_channels", {"query": ch.title or ch.name})
+        said = ch.title or ch.name
+        hits = await self._call("find_channels", {"query": said})
+        if not hits and _searchable(said) != said:
+            hits = await self._call("find_channels", {"query": _searchable(said)})
         primary = None
         for test in (lambda h: h.get("name") == ch.title,
                      lambda h: (h.get("call_sign") or "").lower() == ch.name.lower(),
@@ -204,12 +247,14 @@ class LineupScope:
                 break
         if primary is None:
             return None
-        pid, pname = primary["id"], primary.get("name") or ch.title
+        pid = primary["id"]
+        # Every name kept here is passed back to the guide as `channel`.
+        pname = _searchable(primary.get("name") or ch.title)
         feeds, query = {pid}, pname
-        now = await self._call("whats_on_now", {"channel": ch.name})
+        now = await self._call("whats_on_now", {"channel": _searchable(ch.name)})
         mine = [r for r in now if r.get("channel_id") == pid]
         if mine:
-            query = ch.name
+            query = _searchable(ch.name)
             # Same programme AND answering to this station's name: a different
             # station simulcasting the same network show is not a feed of it.
             key = pr.squash(ch.name)
@@ -331,7 +376,9 @@ class LineupScope:
             pass
         return row
 
-    async def whats_on_now(self) -> list | str:
+    async def whats_on_now(self, genre: str | None = None) -> list | str:
+        """Every lineup station's current programme; `genre`: only rows
+        with that word in a genre tag (matched before the tags are cut to 3)."""
         chans = await self.channels()
         if not chans:
             return self.unavailable_text()
@@ -347,7 +394,8 @@ class LineupScope:
                 failures.append(str(e)[:200])
                 return []
             return [self._label(r, chans[gid]) for r in rows
-                    if r.get("channel_id") == gid]
+                    if r.get("channel_id") == gid
+                    and (not genre or genre_hit(genre, r.get("genres")))]
 
         per = await asyncio.gather(*(one(g) for g in self._names))
         rows = [r for rs in per for r in rs]
@@ -358,8 +406,9 @@ class LineupScope:
                     f"{len(self._names)} channels failed: {failures[0]}). Say the TV "
                     "guide is unavailable right now — don't say nothing is on.")
         if not rows:
-            return ("The guide was checked on every channel of this TV and lists "
-                    "nothing on air right now — the guide is reachable.")
+            what = f"no {genre} programme" if genre else "nothing"
+            return (f"The guide was checked on every channel of this TV and lists "
+                    f"{what} on air right now — the guide is reachable.")
         rows.sort(key=lambda r: r.get("channel_number") or 0)
         return rows
 
@@ -391,7 +440,7 @@ class LineupScope:
             for r in rows:
                 if r.get("channel_id") != gid:
                     continue
-                if genre and not any(genre in str(g).lower() for g in (r.get("genres") or [])):
+                if genre and not genre_hit(genre, r.get("genres")):
                     continue
                 if base.get("kind") == "movie" and not _looks_like_film(r):
                     continue
@@ -415,7 +464,7 @@ class LineupScope:
                         "yet; say so rather than 'nothing is on'.")
             return ("The guide was searched on every channel of this TV and found "
                     "nothing matching — the guide is reachable; this is a real 'none'.")
-        rows.sort(key=lambda r: (r.get("start") or "", r.get("channel_number") or 0))
+        rows.sort(key=lambda r: (start_key(r), r.get("channel_number") or 0))
         if len(rows) > MAX_ROWS:
             logger.info("search_lineup: %d rows, %d sent", len(rows), MAX_ROWS)
             return {"rows": rows[:MAX_ROWS],
@@ -455,7 +504,7 @@ class LineupScope:
             # "Play the X catch-up" means the latest edition; the guide ranks by
             # relevance, so put the newest first (a stable sort keeps relevance
             # order between titles that started together).
-            kept.sort(key=lambda r: r.get("start") or "", reverse=True)
+            kept.sort(key=start_key, reverse=True)
         if rows and not kept:
             return ("Nothing on this TV's channels matches. (Channels this TV "
                     "doesn't carry may have it — don't offer those.)")
@@ -486,6 +535,15 @@ class LineupScopedToolset(WrapperToolset):
             if guide:
                 tool_args = {**tool_args, "channel": guide[0]}
                 only = guide[1]
+            elif g := genre_query(str(tool_args["channel"])):
+                # "Any news on now?" sent as channel="news": not a channel of
+                # this TV, and the guide's name match found only off-lineup
+                # "news" channels → "nothing matches" → "no news on".
+                if name == "minny_whats_on_now":
+                    return await self.scope.whats_on_now(genre=g)
+                if name == "minny_search_live_schedule" and not tool_args.get("genre"):
+                    args = {k: v for k, v in tool_args.items() if k != "channel"}
+                    return await self.scope.search_lineup({**args, "genre": g})
         result = await super().call_tool(name, tool_args, ctx, tool)
         if name in SCOPED:
             return await self.scope.filter(name, result, only=only)

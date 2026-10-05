@@ -185,6 +185,14 @@ class GatedToolset(WrapperToolset):
         return await super().call_tool(name, tool_args, ctx, tool)
 
 
+def _static_instructions(backend: str, player: str) -> str:
+    text = load_static_instructions(backend, player=player)
+    import hashlib
+    import rollouts
+    rollouts.PROMPT_HASH = hashlib.sha256(text.encode()).hexdigest()[:12]
+    return text
+
+
 def _stdio_toolsets(cfg_path: str, read_timeout: float) -> list:
     """load_mcp_toolsets() with a request timeout: its default is 5 minutes,
     so a stalled guide or TV server froze a voice turn (and its fan-outs)
@@ -295,7 +303,7 @@ def build_agent(primers: list | None = None) -> Agent:
 
     agent = Agent(
         model,
-        instructions=load_static_instructions(backend, player=player),
+        instructions=_static_instructions(backend, player),
         toolsets=[*tv_search, tv],
         model_settings=settings,
         deps_type=TurnDeps,
@@ -543,7 +551,8 @@ def build_agent(primers: list | None = None) -> Agent:
 
             rows = [r for rs in await asyncio.gather(*(one(q) for q in queries)) for r in rs]
             out, seen = [], set()
-            for r in sorted(rows, key=lambda r: r.get("start") or "", reverse=True):
+            from lineup_scope import start_key
+            for r in sorted(rows, key=start_key, reverse=True):
                 if not (_title_matches(title, r) and r.get("airing_id")):
                     continue
                 try:

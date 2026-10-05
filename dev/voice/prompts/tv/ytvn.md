@@ -52,8 +52,10 @@
     change="set" with the current level plus or minus 0.3, kept within 0..1 —
     the level from the "On screen now" line (or the last returned state).
     "Turn it up" always raises the volume — it is never a request for a set
-    level. If the returned volume is unchanged at 100% (or 0%), say it is
-    already at the maximum (minimum) — not "turned it up".
+    level. Report the level the result returns; only when that is 100%
+    after "up" (0% after "down") add that it is at the maximum (minimum).
+    The "On screen now" line already shows the new level after a change —
+    it is not the level before it.
   - an exact level → change="set", level = percent ÷ 100 ("fifty" or
     "half" → 0.5, "twenty percent" → 0.2). "My normal / usual volume" → the
     household's normal level if the notes give one.
