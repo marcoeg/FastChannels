@@ -392,18 +392,35 @@ one per batch.
   America's Test Kitchen at seven, Check, Please! at seven thirty,
   Independent Lens at ten; the broad search's cut began at 6 PM.
 
-**T6 [MEDIUM] A station's evening is truncated: the catalogue caps each channel search at 25 rows across all its feeds** (MinnyAgent `search_live_schedule`; `lineup_scope.py` `guide_channel` / `_names`)
-- *Found while fixing T5.* `search_live_schedule(channel="KQED", 6 PM–5 AM)`
-  returns 25 rows by start time spread over the station's four feeds ([MN]
-  KQED HDTV, Muxley KQED-DT, KQEDDT2, PBS Kids): 6–10 PM only. The wrapper
-  keeps the primary feed's rows (6–7 of them) and drops the rest, so KQED's
-  "tonight" ends at 10 PM; COZI (two feeds) reaches midnight, single-feed
-  FAST channels are complete. Affects "what's on KQED tonight / tomorrow"
-  (the channel route through `filter`) and each station's share of the
-  broad per-station search.
-- *Why:* the wrapper deliberately queries the name that matches all of a
-  station's feeds, because catch-up recordings can sit on any of them.
-  Schedule searches don't need that.
-- *Fix (to decide):* for schedule searches pass the primary feed's exact
-  name (keep the all-feeds name for catch-up), or a larger limit on the
-  catalogue side. Check "what's on KQED tonight" before and after.
+**T6 [MEDIUM] A channel's evening was truncated: the catalogue caps a `channel` search at 25 rows shared by every feed the name matches** (`lineup_scope.py`, `guide_channel` / `LineupScopedToolset.call_tool`) — **FIXED 2026-10-05**
+- *Found while fixing T5.* The catalogue resolves `channel` by name to up
+  to 5 feeds and returns at most 25 rows across them, by start time. For
+  the channel route ("what's on KQED tonight") the wrapper passed the
+  station's short name, which matches every feed: "KPIX" → 5 feeds, 25
+  rows, 6–8 PM; "KQED" → 4 feeds, 6–10 PM; "KTVU" → to 11 PM; "COZI" → to
+  midnight; KQED "upcoming" → 2½ hours. The brain, asked what's on KPIX
+  tonight, stopped at "FBI at eight".
+- *Correction to the first filing:* the broad per-station search was never
+  affected — it already passes each station's exact primary feed name
+  (`_names[pid]`); measured on the T5 capture, 43 of 47 stations with rows
+  tonight reach past 2 AM and the other four are long overnight blocks.
+  Only the channel route used the all-feeds name.
+- *Fix:* `guide_channel(said, exact=True)` returns the primary feed's own
+  name (kept per lineup channel in `_exact` at map build); `call_tool`
+  uses it for `minny_search_live_schedule` only. `minny_whats_on_now`
+  (≤5 rows, no cap issue) and `minny_search_catchup` (recordings can sit
+  on any feed) keep the all-feeds name, as does `minny_find_channels`.
+- *Verified:* each exact name resolves to exactly one feed. Through the
+  wrapper's own lookup and filter, tonight: KQED 6 → 13 rows (to 4:30 AM),
+  KPIX 5 → 18 (to 4 AM), KTVU 8 → 16, COZI 13 → 22, KQED upcoming 6 → 25
+  (18½ h); KNTV, Gusto TV, ION HD (one feed) unchanged. Brain check
+  (questions only): KPIX tonight now ends "CIA at nine and Harlan Coben's
+  Final Twist at ten"; "on KQED right now" and the catch-up question
+  unchanged. model_bench: routing 27/27, judge 4.93/4.59/5.00 vs
+  4.96/4.67/4.96 (the lower-scored questions are on the broad and on-now
+  paths, untouched; "what's next on KQED" and "what is on KTVU" 5/5/5
+  both runs). Restarted 11:59, voice_probe "What's on KQED tonight?" PASS
+  with 13 rows, 6 PM–4:30 AM, in the rollout.
+- *Residual (catalogue side):* 25 rows per feed still bound a long window
+  (a 24-hour "upcoming" on a 30-minute-slot channel reaches ~12 h). The
+  T5 ordering keeps those 25 from the window's start.
