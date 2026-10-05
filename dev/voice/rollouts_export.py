@@ -33,9 +33,13 @@ from collections import defaultdict
 from pathlib import Path
 
 SRC = Path.home() / "news" / "voice-rollouts"
+# A correction can open with an interjection or the wake word ("Minny, no,
+# I said KQED", "Um, I meant channel nine") — anchored after those.
 CORRECTION = re.compile(
-    r"^\s*(no\b|nope|that'?s (not|wrong)|wrong|i said|not that|i meant|"
-    r"you (misunderstood|got it wrong)|actually\b)", re.I)
+    r"^\s*(?:(?:hey\s+)?minny[,.!]?\s*|(?:um+|uh+|oh|well|sorry|hmm+)[,.!]?\s+)*"
+    r"(no\b|nope|nah\b|that'?s (not|wrong|the wrong)|wrong|i said|not that|"
+    r"i meant|i mean\b|i asked|you (misunderstood|misheard|got it wrong)|"
+    r"actually\b|not (what|the one) i)", re.I)
 
 
 def load(since: str | None, until: str | None) -> list[dict]:

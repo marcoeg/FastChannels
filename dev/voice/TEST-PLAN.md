@@ -84,7 +84,7 @@ said, first-audio latency.
 | B5 | "Any cooking shows on tonight?" | live schedule | Titles and times only — no invented episode details | R |
 | B6 | "At what time can I watch the movie Speed?" | live schedule, query | Time and channel, or "not on today" | R |
 | B7 | "What's on tomorrow morning on KPIX?" | live schedule, range in Pacific | Tomorrow's rows, not today's | D |
-| B8 | "What's on at three in the morning?" | live schedule | Within guide coverage, or says the guide doesn't reach that far | D |
+| B8 | "What's on at three in the morning?" | live schedule | Answers from the guide (it reaches ~a week ahead); far-future empty → "the guide may not reach that far" | D |
 
 ## C. Tuning and channel names
 
@@ -107,11 +107,11 @@ said, first-audio latency.
 
 | ID | Say | Expect | Pass when | |
 |---|---|---|---|---|
-| D1 | "Play the BBC World News America catch-up on Channel 9." | `minny_search_catchup` → `tv_play_airing(…, catchup)` | Newest edition plays; state `catch-up` | R |
-| D2 | "I want to watch a catch-up of BBC News." | `minny_search_catchup` (+ play) | Plays or asks which edition | R |
+| D1 | "Play the BBC World News America catch-up on Channel 9." | ONE `tv_watch_title(BBC World News America, channel=9, catchup=true)` (or `minny_search_catchup` → `tv_play_airing(…, catchup)`) | Newest edition plays; state `catch-up` | R |
+| D2 | "I want to watch a catch-up of BBC News." | `tv_watch_title(BBC News, catchup=true)` or `minny_search_catchup` (+ play) | Plays or asks which edition | R |
 | D3 | (Columbo playing) "Can you restart this Columbo episode from the beginning?" | ONE `tv_play_airing(…, restart)` | airing_id from the "On screen now" line; state `restart` | R |
-| D4 | "Start PBS NewsHour over from the beginning." (not on air) | guide lookup | Says it isn't on now; offers catch-up of the latest edition if there is one | R |
-| D5 | Catch-up of yesterday's 5:30 pm edition when older than 24 h | `tv_play_airing` | "Catch-up window expired" — no retry loop | D |
+| D4 | "Start PBS NewsHour over from the beginning." (not on air) | `tv_watch_title(PBS NewsHour, catchup=true)` | Says it isn't on now; offers catch-up of the latest edition if there is one | R |
+| D5 | Catch-up of yesterday's 5:30 pm edition when older than 24 h | `tv_watch_title(…, catchup=true)` | "Catch-up window expired" — no retry loop | D |
 | D6 | Restart on a channel without restart (any FAST channel) | `tv_play_airing` | Says restart isn't offered for that channel | D |
 
 ## E. On demand

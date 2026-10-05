@@ -45,8 +45,18 @@ def load_static_instructions(backend: str = "minny",
     return "\n\n".join(parts)
 
 
+# How far ahead each guide reaches. The local FalkorDB guide holds the next
+# 24 h; the Minny catalogue is ingested about a week ahead (only its default
+# "upcoming" window is 24 h) — telling the model "24 h" there made it decline
+# "tomorrow night" questions a range search would answer.
+COVERAGE = {"falkordb": "Guide coverage ends roughly 24 hours from now.",
+            "minny": "The guide reaches about a week ahead; an empty result "
+                     "more than a few days out may mean the guide doesn't "
+                     "reach that far yet — say so rather than 'nothing is on'."}
+
+
 def format_time_context(now_utc: datetime | None = None,
-                        tz: ZoneInfo = _PACIFIC) -> str:
+                        tz: ZoneInfo = _PACIFIC, backend: str = "falkordb") -> str:
     """Current time in the viewer's zone, computed from zoneinfo — the model
     builds EPG bounds and speaks in that zone, and DST means the offset can't be
     hardcoded. `tz` MUST match the active backend's catalogue zone (Eastern for
@@ -64,7 +74,7 @@ def format_time_context(now_utc: datetime | None = None,
         f"{local:%H:%M} in the 24-hour times the guide uses "
         f"(UTC{offset_h:+d}). Speak times in this zone; never say UTC.\n"
         f"UTC now: {now_utc:%Y-%m-%dT%H:%M:%S}Z. "
-        f"Guide coverage ends roughly 24 hours from now.\n"
+        f"{COVERAGE.get(backend, COVERAGE['falkordb'])}\n"
         f"A programme is on air now exactly when its start time is at or "
         f"before {local:%H:%M} and its end time is after {local:%H:%M} "
         f"(same day: {local:%a %d %b}). Build every time window "

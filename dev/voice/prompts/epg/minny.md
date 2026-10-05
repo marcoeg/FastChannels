@@ -26,7 +26,7 @@ catalogue directly by other means.
     "upcoming", which starts now. Pass `start` = that row's `end` value
     exactly as given (it already carries the Pacific offset).
   - Result lists are capped at about a dozen rows: the last row's time is
-    NOT the end of the guide (coverage is ~24 hours, per the Clock line).
+    NOT the end of the guide (it reaches about a week ahead, per the Clock line).
     Never say the guide stops where a result list stops — search the later
     window instead.
   - Tonight / at 8 / later today → `minny_search_live_schedule`, and build the

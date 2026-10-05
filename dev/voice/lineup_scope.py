@@ -47,6 +47,47 @@ import player_resolve as pr
 logger = logging.getLogger("voice.lineup")
 
 MAP_TTL_S = 3600
+# After a failed map build, don't retry on every voice turn: an outage made
+# each turn wait for 53 find_channels timeouts before saying anything.
+MAP_RETRY_S = 60
+# Rows handed to the model. 40 full rows were ~9.4k tokens, more than the
+# whole history budget (MAX_HISTORY_TOKENS 8000), and the turn was trimmed.
+MAX_ROWS = 25
+# Row fields the model never uses: guide ids (it plays by airing_id and
+# searches by channel name), ranking internals, empty series stats.
+_DROP = {"id", "series_id", "season_id", "score", "matched", "external",
+         "services", "series_episodes", "series_first_year",
+         "series_last_year", "series_seasons", "channel_id"}
+_DESC_CHARS = 160
+# A genre word said as the search query ("cooking shows tonight"): routed to
+# the per-station genre search, since the catalogue-wide text search ranks
+# across 544 channels and the lineup filter keeps a few.
+GENRE_WORDS = {"cooking", "news", "comedy", "comedies", "drama", "dramas",
+               "sports", "documentary", "documentaries", "reality", "kids",
+               "children", "cartoons", "animation", "game show", "game shows",
+               "talk show", "talk shows", "western", "westerns", "music",
+               "travel", "nature", "science", "history", "crime", "mystery",
+               "horror", "romance", "action", "sitcom", "sitcoms", "soap",
+               "soaps", "food", "religious", "faith", "weather", "business",
+               "family", "anime", "thriller", "thrillers"}
+_PLURAL = {"comedies": "comedy", "documentaries": "documentary",
+           "cartoons": "cartoon", "dramas": "drama", "westerns": "western",
+           "sitcoms": "sitcom", "soaps": "soap", "thrillers": "thriller",
+           "game shows": "game show", "talk shows": "talk show",
+           "children": "children", "kids": "children"}
+
+
+def genre_query(query: str) -> str | None:
+    """'cooking shows' / 'Comedies' → the genre word to match in the rows'
+    genre tags; None when the query is title words."""
+    q = " ".join(str(query).lower().replace("programmes", "").replace(
+        "programs", "").split())
+    for cand in (q, q.removesuffix(" shows").removesuffix(" show")):
+        if cand in GENRE_WORDS:
+            return _PLURAL.get(cand, cand)
+    return None
+
+
 # Guide tools whose results carry channels, and the row key holding the id.
 SCOPED = {"minny_whats_on_now": "channel_id",
           "minny_search_live_schedule": "channel_id",
@@ -115,6 +156,16 @@ def _looks_like_film(row: dict) -> bool:
     return bool(row.get("year")) or bool(genres - _NOT_FILM - {"movie"})
 
 
+def _far_ahead(start: Any, days: float = 3) -> bool:
+    """A window starting more than `days` ahead — past where the guide is
+    reliably ingested."""
+    try:
+        st = datetime.fromisoformat(str(start).replace("Z", "+00:00"))
+        return st - datetime.now(st.tzinfo or _TZ) > timedelta(days=days)
+    except (TypeError, ValueError):
+        return False
+
+
 def _same_airing(a: dict, b: dict) -> bool:
     return all(a.get(k) == b.get(k)
                for k in ("title", "episode_title", "start", "end"))
@@ -127,7 +178,10 @@ class LineupScope:
         self._names: dict[str, str] = {}        # primary guide id → guide name
         self._query: dict[str, str] = {}        # lineup channel_id → guide name
         self._at = 0.0
+        self._failed_at = 0.0
         self._lock = asyncio.Lock()
+        self._refresh: asyncio.Task | None = None
+        self.unavailable = "lineup"     # why the map is empty: lineup | guide
 
     async def _call(self, tool: str, args: dict) -> list:
         try:
@@ -156,18 +210,53 @@ class LineupScope:
         mine = [r for r in now if r.get("channel_id") == pid]
         if mine:
             query = ch.name
-            feeds |= {r["channel_id"] for r in now if _same_airing(r, mine[0])}
+            # Same programme AND answering to this station's name: a different
+            # station simulcasting the same network show is not a feed of it.
+            key = pr.squash(ch.name)
+            feeds |= {r["channel_id"] for r in now if _same_airing(r, mine[0])
+                      and key in pr.squash(r.get("channel_name") or "")}
         return pid, pname, feeds, query
 
     async def channels(self) -> dict[str, pr.Channel]:
+        """The map. A stale one is served at once and rebuilt in the
+        background — the hourly rebuild (53 find_channels + 53 whats_on_now)
+        used to sit inside whichever voice turn crossed the hour. Only the
+        first build is waited for, and not again within MAP_RETRY_S of a
+        failure."""
+        now = time.monotonic()
+        if self._map:
+            if now - self._at >= MAP_TTL_S and not (self._refresh and not self._refresh.done()) \
+                    and now - self._failed_at >= MAP_RETRY_S:
+                self._refresh = asyncio.create_task(self._rebuild())
+            return self._map
+        if now - self._failed_at < MAP_RETRY_S:
+            return self._map
+        await self._rebuild()
+        return self._map
+
+    async def _rebuild(self) -> None:
         async with self._lock:
             if self._map and time.monotonic() - self._at < MAP_TTL_S:
-                return self._map
+                return
+            try:
+                await self._build()
+            except Exception as e:  # noqa: BLE001
+                logger.warning("lineup map rebuild failed: %s", e)
+            if not self._map or time.monotonic() - self._at >= MAP_TTL_S:
+                self._failed_at = time.monotonic()
+
+    async def _build(self) -> None:
             lineup = await pr.lineup()
             if not lineup:
-                return self._map            # stale beats nothing
+                self.unavailable = "lineup"
+                return                      # stale beats nothing
             matches = await asyncio.gather(*(self._match(c) for c in lineup))
             m, names, query = {}, {}, {}
+            # Primaries first: a sister feed of one station must never take
+            # the id another lineup channel answers to.
+            for ch, hit in zip(lineup, matches):
+                if hit:
+                    m[hit[0]] = ch
             for ch, hit in zip(lineup, matches):
                 if hit:
                     pid, pname, feeds, q = hit
@@ -182,7 +271,15 @@ class LineupScope:
             if m:
                 self._map, self._names, self._query = m, names, query
                 self._at = time.monotonic()
-            return self._map
+            else:
+                self.unavailable = "guide"
+
+    def unavailable_text(self) -> str:
+        if self.unavailable == "guide":
+            return ("The TV guide is unavailable right now (it could not be "
+                    "reached) — say so; don't say nothing is on.")
+        return ("This TV's channel list is unavailable right now (the TV "
+                "player isn't answering) — say so; don't say nothing is on.")
 
     async def guide_channel(self, said: str) -> tuple[str, str] | None:
         """The TV's number or channel name → (the name the guide matches for
@@ -200,7 +297,14 @@ class LineupScope:
         player's own id — <lineup channel_id>@<start UTC minute> — so the
         model can hand it straight to tv_play_airing (guide and player share
         the station's schedule, so the start minute is the same)."""
-        row = dict(row)
+        row = {k: v for k, v in row.items()
+               if k not in _DROP and v not in (None, [], "", False)}
+        if isinstance(row.get("description"), str) and len(row["description"]) > _DESC_CHARS:
+            row["description"] = row["description"][:_DESC_CHARS].rsplit(" ", 1)[0] + "…"
+        if isinstance(row.get("genres"), list):
+            row["genres"] = row["genres"][:3]
+        if row.get("series_title") == row.get("title"):
+            row.pop("series_title", None)
         row["channel_name"] = ch.name
         row["channel_number"] = ch.number
         start = row.get("start")
@@ -230,7 +334,7 @@ class LineupScope:
     async def whats_on_now(self) -> list | str:
         chans = await self.channels()
         if not chans:
-            return "This TV's lineup is unavailable right now."
+            return self.unavailable_text()
 
         async def one(gid: str) -> list:
             try:
@@ -257,7 +361,7 @@ class LineupScope:
         matched here as a word in any genre tag."""
         chans = await self.channels()
         if not chans:
-            return "This TV's lineup is unavailable right now."
+            return self.unavailable_text()
         genre = (args.get("genre") or "").strip().lower()
         base = {k: v for k, v in args.items() if k not in ("genre", "channel")}
 
@@ -293,10 +397,19 @@ class LineupScope:
                     f"{len(self._names)} channels failed: {failures[0]}). Say the TV "
                     "guide is unavailable right now — don't say nothing is on.")
         if not rows:
+            if _far_ahead(args.get("start")):
+                return ("The guide was searched on every channel of this TV and found "
+                        "nothing for that time — it may not reach that far ahead "
+                        "yet; say so rather than 'nothing is on'.")
             return ("The guide was searched on every channel of this TV and found "
                     "nothing matching — the guide is reachable; this is a real 'none'.")
         rows.sort(key=lambda r: (r.get("start") or "", r.get("channel_number") or 0))
-        return rows[:40]
+        if len(rows) > MAX_ROWS:
+            logger.info("search_lineup: %d rows, %d sent", len(rows), MAX_ROWS)
+            return {"rows": rows[:MAX_ROWS],
+                    "note": f"{len(rows)} matches; the first {MAX_ROWS} by start "
+                            "time are shown — the list goes on later."}
+        return rows
 
     async def filter(self, name: str, result: Any, only: str | None = None) -> Any:
         """`only`: the lineup channel_id the viewer asked about — the guide's
@@ -334,7 +447,7 @@ class LineupScope:
         if rows and not kept:
             return ("Nothing on this TV's channels matches. (Channels this TV "
                     "doesn't carry may have it — don't offer those.)")
-        return kept
+        return kept[:MAX_ROWS]
 
 
 @dataclass
@@ -346,9 +459,15 @@ class LineupScopedToolset(WrapperToolset):
     async def call_tool(self, name, tool_args, ctx, tool):
         if name == "minny_whats_on_now" and not tool_args.get("channel"):
             return await self.scope.whats_on_now()
-        if name == "minny_search_live_schedule" and not tool_args.get("channel") \
-                and not tool_args.get("query"):
-            return await self.scope.search_lineup(tool_args)
+        if name == "minny_search_live_schedule" and not tool_args.get("channel"):
+            if not tool_args.get("query"):
+                return await self.scope.search_lineup(tool_args)
+            # "cooking shows tonight" passed as query="cooking": the catalogue
+            # text search ranks 544 channels and the lineup filter kept 3 rows.
+            g = genre_query(tool_args["query"])
+            if g and not tool_args.get("genre"):
+                args = {k: v for k, v in tool_args.items() if k != "query"}
+                return await self.scope.search_lineup({**args, "genre": g})
         only = None
         if name in SCOPED and tool_args.get("channel"):
             guide = await self.scope.guide_channel(str(tool_args["channel"]))

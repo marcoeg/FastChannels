@@ -61,6 +61,8 @@ from pai_llm import PydanticLLM  # noqa: E402
 from rollouts import RolloutWriter, tracing_enabled  # noqa: E402
 from telemetry import log_turn, wire_session_metrics  # noqa: E402
 
+# User items closer than this with no reply between them are one utterance.
+SPLIT_UTTERANCE_S = 8.0
 logger = logging.getLogger("voice.worker")
 
 VOICE_LOG = Path.home() / "news" / "voice-conversations.jsonl"
@@ -391,7 +393,7 @@ async def entrypoint(ctx: agents.JobContext) -> None:
     asyncio.create_task(_state_ticker())
 
     # Transcript log (playout truth) + memory writes from the same event.
-    last_user = {"text": ""}
+    last_user = {"text": "", "at": 0.0}
 
     # Idle-sleep for the ESP32 satellite: it runs an on-device wake word and
     # only streams while awake, so it relies on the backend (which has real
@@ -415,7 +417,16 @@ async def entrypoint(ctx: agents.JobContext) -> None:
             _log_transcript(role, text, interrupted=interrupted,
                             room=ctx.room.name, session_id=session_id)
             if role == "user":
-                last_user["text"] = text
+                # One utterance the endpointer split into two user items (the
+                # first reply cancelled before speech) is answered as a whole:
+                # pair the reply with both fragments, or "Remember that my
+                # favourite channel" + "is KQED." is never stored.
+                now = time.monotonic()
+                if last_user["text"] and now - last_user.get("at", 0) < SPLIT_UTTERANCE_S:
+                    last_user["text"] = f"{last_user['text']} {text}"
+                else:
+                    last_user["text"] = text
+                last_user["at"] = now
                 sleep_state["last_activity"] = time.monotonic()
                 sleep_state["slept"] = False
             elif role == "assistant" and last_user["text"]:
@@ -424,6 +435,7 @@ async def entrypoint(ctx: agents.JobContext) -> None:
                 pai.last_reply_at = time.monotonic()
                 if memory is not None:
                     memory.remember(last_user["text"], text, interrupted=interrupted)
+                last_user["text"] = ""
         except Exception:  # noqa: BLE001 — logging must never break the pipeline
             logger.debug("conversation_item handler failed", exc_info=True)
 

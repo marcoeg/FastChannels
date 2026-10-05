@@ -61,12 +61,14 @@ TEST_RESET_MARKER = Path.home() / "news" / "voice-test-reset"
 
 
 def is_test_room(room: str | None) -> bool:
-    """Test traffic: rooms named test-… (the phone client opened with ?test)
-    and voice_probe.py's voice-probe… rooms. Their turns are traced but
+    """Test traffic: rooms named test-… (the phone client opened with ?test),
+    voice_probe.py's voice-probe… rooms and the debug console. Their turns are traced but
     marked, their memory is a separate graph, and their exchanges never
     reach a real session's "earlier sessions" (nor the reverse)."""
     room = room or ""
-    return room.startswith("test-") or room.startswith("voice-probe")
+    # `voice_agent.py console` runs in LiveKit's mock room "console": the
+    # household graph got two facts typed there that had to be scrubbed.
+    return room.startswith(("test-", "voice-probe", "console"))
 # Episodes older than this are pruned unless they hold a lasting household
 # fact (VoiceMemory.prune). VOICE_MEMORY_RETENTION_DAYS=0 disables pruning.
 TRANSCRIPT_LOG = Path(os.environ.get(

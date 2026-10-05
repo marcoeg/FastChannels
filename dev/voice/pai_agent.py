@@ -303,7 +303,7 @@ def build_agent(primers: list | None = None) -> Agent:
 
     @agent.instructions
     def time_context(ctx: RunContext[TurnDeps]) -> str:
-        return format_time_context(tz=tz)
+        return format_time_context(tz=tz, backend=backend)
 
     @agent.instructions
     def memory_context(ctx: RunContext[TurnDeps]) -> str:
@@ -445,6 +445,16 @@ def build_agent(primers: list | None = None) -> Agent:
                     return (f"{r['title']!r} is on now on {r['channel_name']} — restarted "
                             f"from its beginning: {played}")
             if not year:
+                # "Put on Trace" is a channel name first: "SOUNDS OF TRACE" on
+                # TRACE URBAN matched the word and tuned it instead of asking
+                # which Trace. A programme still wins when its title is exactly
+                # what was said.
+                hit, cands = await pr.find_channel(title)
+                said = pr.squash(title)
+                if (hit or cands) and not any(
+                        pr.squash(r.get("title", "")) == said for r in live):
+                    return (f"No on-demand title {title!r}, but it is a live "
+                            "channel — " + await tv_watch_channel(title))
                 # "Put on Columbo": a show airing now on one of this TV's channels.
                 if len(live) == 1:
                     r = live[0]
@@ -456,11 +466,6 @@ def build_agent(primers: list | None = None) -> Agent:
                             "ask which: " + "; ".join(
                                 f"{r['channel_name']} ({r.get('channel_number')}) until "
                                 f"{r.get('end_local', '?')}" for r in live))
-                # "Put on Trace": the viewer may have named a channel.
-                hit, cands = await pr.find_channel(title)
-                if hit or cands:
-                    return (f"No on-demand title {title!r}, but it is a live "
-                            "channel — " + await tv_watch_channel(title))
                 # Aired earlier on one of this TV's channels → catch-up, from
                 # the schedule, not the catch-up index: the index lags ~30 min
                 # behind an airing's end, while the player plays any airing in
