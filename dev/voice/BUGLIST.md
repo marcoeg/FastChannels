@@ -263,3 +263,45 @@ one per batch.
   that matches both (index field, channel expansion, or ranking cut), and
   add the repro as a test.
 
+**T2 [MEDIUM] STT returns its own prompt as a user turn** (`voice_agent.py:274-288`, `_stt_prompt`)
+- *Found:* session 4, 2026-10-05 09:59:37, 3 s after connect. 0.74 s of
+  audio (STT metrics; no speech from the tester yet) was transcribed as
+  the full prompt text: "English conversation with Minny, a TV-viewing
+  assistant, about TV channels such as KTVU, KPIX, KQED, KNTV and COZI, and
+  the names of programmes and films." Minny answered it, and the welcome
+  greeting was never spoken or logged.
+- *History:* the first such turn in `voice-conversations.jsonl` since the
+  prompt took this form (64ed26b, 2026-10-04). That commit removed the
+  example sentence because "Hi Minny." was echoed 42 times; the remaining
+  vocabulary text can be echoed too.
+- *Fix (to decide):* drop a final user transcript that matches the STT
+  prompt (or a long run of it) before it becomes a turn, logging it like
+  the echo-greeting filter does; check why the welcome was skipped.
+
+**T3 [MEDIUM] "The second one" counts the tool's list, not the spoken one** (`prompts/tv/ytvn.md:44-46`) — **FIXED 2026-10-05, spoken re-test pending**
+- *Found:* session 4 step 4.3. `tv_on_demand("Comedy")` returned Inside
+  Out 2, Ant-Man and the Wasp: Quantumania, We're the Millers, …; Minny
+  said "Inside Out 2, We're the Millers, Moonshot, …" (skipping Ant-Man).
+  "The second one" → `tv_play_asset("59005")`, Ant-Man.
+- *Wider than T3:* replaying the recorded request (production model and
+  settings, instructions as pydantic-ai 2.31.1 sends them, no tool run),
+  "the last one" played The Alternate Side, the tool's last title, which
+  Minny never named (10/10), and after a spoken channel list "the third
+  one" tuned KQED, the tool's third, instead of channel 45 (10/10).
+- *Fix:* one bullet in ytvn.md's "To put something on" list: a pick by
+  position counts only what Minny said, in her order. Chosen from five
+  placements by side effects: all five fixed every ordinal case 10/10,
+  but in 00-identity it added memory searches and clarifying questions; in
+  the on-demand bullet it answered "Two and a Half Men tonight?" from
+  memory without the guide (4/5); in 30-routing it answered "what am I
+  watching" from the live guide row during a catch-up (3/5).
+- *Verified:* ordinal cases fixed 10/10; "the first one", "Part 2" and
+  "turn that channel on" (still asks which, 10/10) unchanged. All 129
+  recorded turns from Oct 4–5 replayed with and without the fix, differing
+  turns 5× more: no harmful shift. A garbled "Oh, they are saying." no
+  longer changes the volume; "No, I meant what's on my TV" now calls
+  `tv_get_state` first (as production already did). `model_bench.py`
+  (gpt-5.6-terra): routing identical on 27/27, judge 4.89/4.63/5.00 →
+  4.96/4.70/5.00. Agent restarted 10:21, `voice_probe.py` PASS on prompt
+  8c8b6c10a103.
+- *Left:* the spoken re-test of 4.2–4.3.

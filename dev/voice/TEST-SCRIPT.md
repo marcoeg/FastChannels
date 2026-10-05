@@ -106,16 +106,23 @@ STT "BBS NewsHour" was searched as heard.*
 
 | # | Say | Expect | ID | ✓ |
 |---|---|---|---|---|
-| 4.1 | "What is on demand that I can watch later?" | A few new releases from this TV's catalogue | E1 | |
-| 4.2 | "Any comedies on demand?" | Titles from the Comedy category | E2 | |
-| 4.3 | "The second one." | Plays the title it named second | E7 | |
-| 4.4 | "Anything for the kids on demand?" | Family titles (or the category list) | E3 | |
-| 4.5 | "Put on Dune." | Asks Part One or Part Two | E6 | |
-| 4.6 | "Part Two." | Dune: Part Two plays | E4 | |
-| 4.7 | "Play Inside Out 2." | Plays, or "not in your package" | E5 | |
-| 4.8 | "Can you buy it?" | Explains purchases are done in the Web Client | E8 | |
+| 4.1 | "What is on demand that I can watch later?" | A few new releases from this TV's catalogue | E1 | ✓ Moonshot, In the Heights, Cruella, Fast X, Free Guy |
+| 4.2 | "Any comedies on demand?" | Titles from the Comedy category | E2 | ✓ named 5 of the Comedy list, skipping its 2nd (Ant-Man) |
+| 4.3 | "The second one." | Plays the title it named second | E7 | ✗ played Ant-Man (2nd in the tool list); she had said We're the Millers second. BUGLIST T3 |
+| 4.4 | "Anything for the kids on demand?" | Family titles (or the category list) | E3 | ✓ Family category |
+| 4.5 | "Put on Dune." | Asks Part One or Part Two | E6 | ✓ |
+| 4.6 | "Part Two." | Dune: Part Two plays | E4 | ✓ |
+| 4.7 | "Play Inside Out 2." | Plays, or "not in your package" | E5 | ✓ played (entitled, so E8's premise didn't occur) |
+| 4.8 | "Can you buy it?" | Explains purchases are done in the Web Client | E8 | ~ "can't make purchases", true, but no Web Client pointer; no prompt rule covers it |
 
 Disconnect.
+
+*Run 2026-10-05 09:59, Pixel phone, room `test-plan`, gpt-5.6-terra:
+5 pass, 4.3 fail, 4.8 partial. At connect, 0.74 s of audio came back from
+STT as its own vocabulary prompt ("English conversation with Minny, a
+TV-viewing assistant, …"); Minny answered it and the welcome never played.
+BUGLIST T2. T3 fixed at 10:21 (prompt 8c8b6c10a103); 4.2–4.3 re-test
+pending.*
 
 ## Session 5 — volume and playback
 
