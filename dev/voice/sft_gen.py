@@ -45,6 +45,7 @@ Held out: every utterance of eval/suite.json is excluded from the traffic
   ./sft_gen.py --n 400 --out ~/news/voice-sft/run1          # generate, one process
   ./sft_gen.py --n 2000 --workers 4 --out ~/news/voice-sft/run2   # 4 shard processes
   ./sft_gen.py --n 2000 --out ~/news/voice-sft/run2         # again: resumes, skips done ids
+  ./sft_gen.py --recheck ~/news/voice-sft/run2 --retry-errors   # re-filter a run offline; errored turns regenerate on resume
 
 Then: VOICE_ROLLOUT_DIR=~/news/voice-sft/run2/rollouts ./rollouts_export.py --out …
 for the NeMo Gym files, or train from sft_chat/*.jsonl directly. See SFT-DATA.md.
@@ -88,8 +89,9 @@ TURN_TIMEOUT_S = 120
 MAX_ANSWER_CHARS = 400
 WORDS = {"twenty": 20, "thirty": 30, "forty": 40, "fifty": 50, "sixty": 60, "seventy": 70, "eighty": 80}
 NARRATED = re.compile(r"\b(let me (check|look|see)|i'?m (checking|looking)|checking (the|what)|i'?ll (check|look))\b", re.I)
-CLAIMED = re.compile(r"\b(is (now )?on\b|tuned|now showing|is playing|playing now|restart(ed|ing)|"
-                     r"muted|unmuted|paused|resumed|stopped|volume is|set to)\b", re.I)
+CLAIMED = re.compile(r"\b(tuned|switched (to|over)|turned on|now playing|playing from the beginning|"
+                     r"restart(ed|ing)|muted|unmuted|paused|resumed|stopped|volume is (now )?(at )?\d|"
+                     r"set (it |the volume )?to \d|turned (it |the volume )?(up|down))\b", re.I)
 NEGATED = re.compile(r"\b(isn.t|aren.t|not|no\b|can.t|cannot|couldn.t|won.t|unable)\b", re.I)
 
 
@@ -375,6 +377,9 @@ async def teacher_turn(brain: VoiceBrain, model, settings, say: str, deps: TurnD
     return rec, trace, msgs, t0_epoch
 
 
+ALREADY = re.compile(r"\balready\b", re.I)                 # "already tuned to KQED": state, not an action
+
+
 def generic_fails(rec: dict) -> list[str]:
     fails = []
     if rec["error"]:
@@ -386,7 +391,8 @@ def generic_fails(rec: dict) -> list[str]:
         fails.append("too_long")
     if not rec["tools"] and NARRATED.search(ans):
         fails.append("narrated_without_call")
-    if CLAIMED.search(ans) and not NEGATED.search(ans) and not any(t.startswith("tv_") for t in rec["tools"]):
+    if CLAIMED.search(ans) and not NEGATED.search(ans) and not ALREADY.search(ans) \
+            and not any(t.startswith("tv_") for t in rec["tools"]):
         fails.append("action_without_call")
     return fails
 
@@ -502,6 +508,58 @@ async def generate(convs: list[dict], out: Path, model_name: str, defaults: dict
     return stats
 
 
+def recheck(out: Path, defaults: dict, retry_errors: bool) -> Counter:
+    """Re-apply the current checks to every record of a run and rewrite
+    rollouts/, rejected/ and sft_chat/. With retry_errors, conversations
+    whose turns failed with an error (an API outage, a timeout) are dropped
+    altogether, so the next resume regenerates them. No model calls."""
+    stats = Counter()
+    recs: dict[str, list[dict]] = defaultdict(list)       # shard tag -> records
+    for sub in ("rollouts", "rejected"):
+        for p in sorted((out / sub).glob("*.jsonl")):
+            for line in p.read_text(encoding="utf-8").splitlines():
+                try:
+                    recs[p.stem].append(json.loads(line))
+                except ValueError:
+                    stats["unreadable"] += 1
+    errored = {r["gen"]["conversation"] for rs in recs.values() for r in rs if r.get("error")} if retry_errors else set()
+    for tag, rs in recs.items():
+        kept, rejected, chat = [], [], []
+        for r in rs:
+            if r["gen"]["conversation"] in errored:
+                stats["dropped_for_retry"] += 1
+                continue
+            output = r["response"]["output"]
+            calls = [o for o in output if o.get("type") == "function_call"]
+            outs = {o.get("call_id"): o.get("output") for o in output if o.get("type") == "function_call_output"}
+            rec = {"say": r["user_text"], "tools": [c["name"] for c in calls],
+                   "calls": [{"name": c["name"], "args": c.get("arguments"), "output": mb._compact(outs.get(c.get("call_id")))}
+                             for c in calls],
+                   "answer": r.get("spoken_text") or "", "error": r.get("error"), "total_ms": r.get("latency", {}).get("total_ms", 0)}
+            checks = r["gen"].get("checks") or {}
+            fails = generic_fails(rec) + [f for f in es.check_turn(checks, rec, defaults) if f != "error"]
+            if checks.get("max_answer_chars") and len(rec["answer"]) > checks["max_answer_chars"]:
+                fails.append("max_answer_chars")
+            r["gen"]["fails"] = fails
+            if fails:
+                rejected.append(r)
+                for f in fails:
+                    stats[f"fail:{f.split(':')[0]}"] += 1
+            else:
+                kept.append(r)
+                rcp = r["responses_create_params"]
+                chat.append({**to_chat(rcp["input"] + r["response"]["output"], rcp["tools"]),
+                             "metadata": {"session_id": r["session_id"], "turn_index": r["turn_index"],
+                                          "template": r["gen"]["template"], "source": r["gen"]["source"]}})
+        stats["kept"] += len(kept)
+        stats["rejected"] += len(rejected)
+        for sub, rows in (("rollouts", kept), ("rejected", rejected), ("sft_chat", chat)):
+            (out / sub).mkdir(exist_ok=True)
+            (out / sub / f"{tag}.jsonl").write_text("".join(json.dumps(x, ensure_ascii=False) + "\n" for x in rows), encoding="utf-8")
+    (out / "summary-recheck.json").write_text(json.dumps({"ts": time.strftime("%Y-%m-%dT%H:%M:%S"), **stats}, indent=1))
+    return stats
+
+
 def validate(tpl: dict) -> list[str]:
     problems = []
     known = set(tpl["slots"]) | {"channel", "channel_name", "number", "channel_prefix", "channel_full", "misheard_text", "misheard_channel",
@@ -537,6 +595,8 @@ async def main() -> None:
     ap.add_argument("--shard", help="internal: i/k")
     ap.add_argument("--check", action="store_true", help="validate templates and the held-out overlap, offline")
     ap.add_argument("--plan", action="store_true", help="sample and print the traffic; reads only, no model")
+    ap.add_argument("--recheck", type=Path, metavar="DIR", help="re-apply the current checks to a run; no model calls")
+    ap.add_argument("--retry-errors", action="store_true", help="with --recheck: drop errored conversations so a resume regenerates them")
     args = ap.parse_args()
 
     tpl = json.loads(TEMPLATES.read_text())
@@ -558,6 +618,15 @@ async def main() -> None:
         return
     if problems:
         raise SystemExit("templates invalid:\n  " + "\n  ".join(problems))
+    if args.recheck:
+        defaults = json.loads(SUITE.read_text()).get("defaults") or {}
+        stats = recheck(args.recheck, defaults, args.retry_errors)
+        print(f"recheck {args.recheck}: kept {stats['kept']}, rejected {stats['rejected']}, "
+              f"dropped for retry {stats['dropped_for_retry']}")
+        for k, v in sorted(stats.items()):
+            if k.startswith("fail:"):
+                print(f"  {k}: {v}")
+        return
 
     out = args.out or OUT_ROOT / f"{datetime.now():%Y%m%d-%H%M}"
     out.mkdir(parents=True, exist_ok=True)

@@ -3,7 +3,8 @@
 `sft_gen.py` + `sft/templates.json`. Produces teacher trajectories for
 supervised fine-tuning of the laptop model (Qwen3.5-9B) from generated
 traffic, through the real agent against a dry-run TV, rejection-sampled with
-the eval suite's checks. Prepared 2026-10-07; **not yet run.**
+the eval suite's checks. Prepared and first run 2026-10-07 (`run1`, see the
+end).
 
 ## What it writes
 
@@ -69,9 +70,24 @@ A turn is kept only if it passes:
    patterns; the suite's defaults (no UTC, URLs, ids, asterisks, "as an AI");
 2. the generic filters in `sft_gen.generic_fails`: no error or timeout, a
    non-empty answer of at most 400 characters, no "let me check" without a
-   tool call, no claimed action (tuned, muted, playing, volume is…) without
-   a `tv_` call, unless negated;
+   tool call, no claimed action (tuned, switched to, now playing, muted,
+   paused, volume set to N…) without a `tv_` call — unless negated or
+   "already" (a description of the screen, not an action). Information like
+   "Hoy día is on now on KSTS" is not an action; the first run's rule said it
+   was and rejected 138 good turns;
 3. `max_answer_chars` where a template sets it (closings).
+
+The checks can be re-applied to a finished run without model calls:
+
+```bash
+./sft_gen.py --recheck ~/news/voice-sft/run1                 # rewrites rollouts/, rejected/, sft_chat/
+./sft_gen.py --recheck ~/news/voice-sft/run1 --retry-errors  # also drops errored conversations
+```
+
+`--retry-errors` removes every record of a conversation that hit an error
+(an API outage, a timeout), so running the generator again with the same
+`--out` regenerates exactly those; without it they stay in `rejected/` and
+a resume skips them as done. `summary-recheck.json` keeps the counts.
 
 Log utterances carry no template checks, so only the generic filters apply
 to them. The judge is not used here (cost); it stays the eval suite's job.
@@ -106,6 +122,22 @@ with 4 shards about 45 minutes. Expect 15–25 % rejected on the first run;
 read `rejected.jsonl` before trusting the rest, since a check that rejects
 good turns (a title the guide spells differently) is as likely as a teacher
 slip.
+
+## run1 (2026-10-07)
+
+`./sft_gen.py --n 2000 --workers 4 --out ~/news/voice-sft/run1`, 37 minutes
+for the part that ran. The teacher's OpenAI account ran out of credits at
+16:40 UTC, after 1,268 of the 2,000 conversations; the remaining 732 all
+failed with `APIError: You have no credits remaining` and were dropped with
+`--recheck --retry-errors`. Of the turns that did run: **1,340 kept, 31
+rejected** (routing 15, tool_args 13, answer_no_match 6, action claimed
+without a call 2, narrated without a call 1) after the claimed-action rule
+was narrowed. The resume for the other 732 conversations, once credits are
+back:
+
+```bash
+./sft_gen.py --n 2000 --workers 4 --out ~/news/voice-sft/run1
+```
 
 ## Before training
 
