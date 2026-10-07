@@ -141,6 +141,9 @@ class Slots:
     async def load(self, scope) -> None:
         for ch in await pr.lineup():
             spell = [ch.name] + [a for a in self.tpl["aliases"].get(ch.name, []) if a != ch.name]
+            short = re.sub(r"\s*\(.*?\)\s*$", "", ch.name)       # "ACN Country (American Country Network)"
+            if short != ch.name and short not in spell:
+                spell.insert(1, short)
             if ch.number:
                 spell += [str(ch.number), f"channel {ch.number}"]
             self.channels.append({"name": ch.name, "number": ch.number, "spellings": spell})

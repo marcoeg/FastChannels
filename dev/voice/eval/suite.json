@@ -5,7 +5,7 @@
     "screen": {"tuned": {"channel_id": "2581", "number": 2, "name": "KTVU", "airing": null},
                "playing": {"kind": "live", "title": "2 KTVU · live"}},
     "player": {"state": "playing", "muted": false, "volume": 0.5},
-    "answer_no_match": ["(?i)\\butc\\b", "https?://", "asset_id", "airing_id", "\\*", "[0-9]{2}:[0-9]{2}Z", "(?i)as an ai"]
+    "answer_no_match": ["(?i)\\butc\\b", "https?://", "asset_id", "airing_id", "(?m)\\*\\*|^\\s*[*-] |(?<!\\w)\\*[^*\\n]+\\*(?!\\w)", "[0-9]{2}:[0-9]{2}Z", "(?i)as an ai"]
   },
   "scenarios": [
     {"id": "A1", "category": "on now", "volatile": true,

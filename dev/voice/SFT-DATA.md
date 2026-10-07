@@ -75,7 +75,7 @@ A turn is kept only if it passes:
 1. its template's checks through `eval_suite.check_turn`: tool routing
    (`tools_any_of`), tool arguments (`tool_args`, with slot regexes that
    accept every spelling of the bound channel, and numeric levels), answer
-   patterns; the suite's defaults (no UTC, URLs, ids, asterisks, "as an AI");
+   patterns; the suite's defaults (no UTC, URLs, ids, markdown, "as an AI");
 2. the generic filters in `sft_gen.generic_fails`: no error or timeout, a
    non-empty answer of at most 400 characters, no "let me check" without a
    tool call, no claimed action (tuned, switched to, now playing, muted,
@@ -139,19 +139,37 @@ slip.
 
 ## run1 (2026-10-07)
 
-`./sft_gen.py --n 2000 --workers 4 --out ~/news/voice-sft/run1`, 37 minutes
-for the part that ran. The teacher's OpenAI account ran out of credits at
-16:40 UTC, after 1,268 of the 2,000 conversations; the remaining 732 all
-failed with `APIError: You have no credits remaining` and were dropped with
-`--recheck --retry-errors`. Of the turns that did run: **1,340 kept, 31
-rejected** (routing 15, tool_args 13, answer_no_match 6, action claimed
-without a call 2, narrated without a call 1) after the claimed-action rule
-was narrowed. The resume for the other 732 conversations, once credits are
-back:
+`./sft_gen.py --n 2000 --workers 4 --out ~/news/voice-sft/run1`, in two
+parts. The first ran 37 minutes until the teacher's OpenAI account ran out
+of credits at 16:40 UTC, after 1,268 of the 2,000 conversations; the
+remaining 732 failed with `APIError: You have no credits remaining` and
+were dropped with `--recheck --retry-errors`. The resume (same command,
+17:44–17:58 UTC, after credits were added) generated the 870 conversations
+of the re-sampled plan that were not in the output yet, with no errors.
 
-```bash
-./sft_gen.py --n 2000 --workers 4 --out ~/news/voice-sft/run1
-```
+**Result: 2,275 turns kept in 2,105 conversations, 37 rejected** (routing
+24, tool_args 20, action claimed without a call 3, narrated without a call
+1; some turns fail two checks). Sources: 592 log, 1,335 single, 348 multi;
+506 turns with memory notes; screen: 1,346 turns with KTVU on screen (the
+first part, before the screen policy), 672 tuned to a drawn channel, 257
+the grid. Teacher usage for the first part alone was 18.7 M input tokens
+(6.2 M cache reads) and 80 k output.
+
+The rejections, read one by one: the FAST channels whose names read like
+programmes ("Judge Nosey", "Unleashed by DOGTV", "MODUS SUPER SERIES
+DARTS") are tuned with `tv_watch_title` instead of `tv_watch_channel`
+(12); "Restart this from the beginning" on a fake screen that carries no
+airing is declined instead of looked up (3 — the real screen line carries
+the title and airing id, the fake does not); "My normal volume is 0.35"
+was executed as a volume command (1); the rest are single cases. Two
+checks were wrong and were fixed, with the turns recovered by `--recheck`:
+the suite's no-asterisk default rejected every mention of M\*A\*S\*H (16
+turns; it now matches markdown only), and the claimed-action rule rejected
+information ("X is on now on KSTS", 138 turns).
+
+Export for NeMo Gym, verified on this run: `./rollouts_export.py
+--rollouts ~/news/voice-sft/run1/rollouts --out <dir>` (or the
+`VOICE_ROLLOUT_DIR` form above).
 
 ## Before training
 
