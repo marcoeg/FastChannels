@@ -12,22 +12,23 @@ In `--out` (default `~/news/voice-sft/<stamp>/`):
 | File | Contents |
 | --- | --- |
 | `traffic.jsonl` | The sampled conversations before any model call: id, source, template, slots, memory notes, turns with their resolved checks |
-| `rollouts.jsonl` | Kept turns in the production rollout shape (`minny-rollout/1`, built by the agent's own `rollouts.build_record`), one line per turn, with `synthetic: true` and a `gen` block (conversation, template, slots, checks, failures = []) |
-| `rejected.jsonl` | The turns that failed a check, same shape, `gen.fails` naming the checks |
-| `sft_chat.jsonl` | Kept turns as chat messages: `system` (the full production prompt of that turn), `user`, `assistant` with `tool_calls`, `tool` results, the final `assistant` text; `tools` in the chat function shape; `metadata` |
+| `rollouts/shard-*.jsonl` | Kept turns in the production rollout shape (`minny-rollout/1`, built by the agent's own `rollouts.build_record`), one line per turn, with `synthetic: true` and a `gen` block (conversation, template, slots, checks, failures = []) |
+| `rejected/shard-*.jsonl` | The turns that failed a check, same shape, `gen.fails` naming the checks |
+| `sft_chat/shard-*.jsonl` | Kept turns as chat messages: `system` (the full production prompt of that turn), `user`, `assistant` with `tool_calls`, `tool` results, the final `assistant` text; `tools` in the chat function shape; `metadata` |
 | `summary-<shard>.json` | Counts: kept, rejected, failures by kind, skipped (already done) |
 
-Because `rollouts.jsonl` is the production shape, `rollouts_export.py`
-reads it unchanged for the NeMo Gym files:
+Because the kept rollouts are the production shape, `rollouts_export.py`
+reads them unchanged for the NeMo Gym files (point it at the `rollouts/`
+subdirectory, which holds only kept turns):
 
 ```bash
-VOICE_ROLLOUT_DIR=~/news/voice-sft/run2 ./rollouts_export.py --out ~/minny-gym-sft
+VOICE_ROLLOUT_DIR=~/news/voice-sft/run2/rollouts ./rollouts_export.py --out ~/minny-gym-sft
 ```
 
 (`rollouts.py` reads `VOICE_ROLLOUT_DIR` at import; the exporter drops a
 turn whose next utterance reads like a correction, which the multi-turn
 "I meant Trace" scenarios trigger on purpose; use `sft_chat.jsonl` when you
-want those kept.)
+want those kept.) One file per shard: `--workers 4` writes `shard-0-4` … `shard-3-4`.
 
 ## Where the traffic comes from
 
@@ -97,7 +98,7 @@ Needs what the eval suite needs: `OPENAI_API_KEY` (the teacher,
 `VOICE_MODEL`), the Minerva VPN (the guide), `ytvn-epg` serving with the
 page open (lineup, on-demand and title reads; commands are faked). Workers
 are separate processes because the dry-run TV state is per process; each
-writes to the same files from its own shard.
+writes its own files (`shard-i-k`) under the three subdirectories.
 
 Cost and time, rough: 2000 conversations are about 2,800 turns, each
 1–2 teacher requests of ~8k mostly cached input tokens and a short output;
@@ -109,7 +110,7 @@ slip.
 ## Before training
 
 - Split by conversation id, not by turn, so a scenario's turns stay together.
-- Train on `sft_chat.jsonl` with the chat template Qwen serves with on the
+- Train on `sft_chat/*.jsonl` with the chat template Qwen serves with on the
   laptop and the `tools` field rendered by that template; loss on assistant
   tokens only (tool calls and the final text), not on system, user or tool
   results.

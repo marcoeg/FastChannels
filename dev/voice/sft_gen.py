@@ -46,8 +46,8 @@ Held out: every utterance of eval/suite.json is excluded from the traffic
   ./sft_gen.py --n 2000 --workers 4 --out ~/news/voice-sft/run2   # 4 shard processes
   ./sft_gen.py --n 2000 --out ~/news/voice-sft/run2         # again: resumes, skips done ids
 
-Then: VOICE_ROLLOUT_DIR=~/news/voice-sft/run2 ./rollouts_export.py --out … for
-the NeMo Gym files, or train from sft_chat.jsonl directly. See SFT-DATA.md.
+Then: VOICE_ROLLOUT_DIR=~/news/voice-sft/run2/rollouts ./rollouts_export.py --out …
+for the NeMo Gym files, or train from sft_chat/*.jsonl directly. See SFT-DATA.md.
 """
 
 from __future__ import annotations
@@ -423,14 +423,14 @@ def to_chat(items: list[dict], tools: list[dict]) -> dict:
 async def generate(convs: list[dict], out: Path, model_name: str, defaults: dict, shard: str) -> Counter:
     stats = Counter()
     done = set()
-    for name in ("rollouts.jsonl", "rejected.jsonl"):
-        p = out / name
-        if p.exists():
-            for line in p.read_text(encoding="utf-8").splitlines():
-                try:
-                    done.add(json.loads(line)["gen"]["conversation"])
-                except (ValueError, KeyError):
-                    pass
+    for sub in ("rollouts", "rejected", "sft_chat"):
+        (out / sub).mkdir(exist_ok=True)
+    for p in list((out / "rollouts").glob("*.jsonl")) + list((out / "rejected").glob("*.jsonl")):
+        for line in p.read_text(encoding="utf-8").splitlines():
+            try:
+                done.add(json.loads(line)["gen"]["conversation"])
+            except (ValueError, KeyError):
+                pass
     todo = [c for c in convs if c["id"] not in done]
     stats["skipped_done"] = len(convs) - len(todo)
     model, settings = mb.make_model(model_name)
@@ -444,9 +444,10 @@ async def generate(convs: list[dict], out: Path, model_name: str, defaults: dict
             if tuned_screen["tuned"] is None and ch.number:
                 tuned_screen = {"tuned": {"channel_id": ch.channel_id, "number": ch.number, "name": ch.name, "airing": None},
                                 "playing": {"kind": "live", "title": f"{ch.number} {ch.name} · live"}}
-        with open(out / "rollouts.jsonl", "a", encoding="utf-8") as kept, \
-             open(out / "rejected.jsonl", "a", encoding="utf-8") as rejected, \
-             open(out / "sft_chat.jsonl", "a", encoding="utf-8") as chat:
+        tag = f"shard-{shard.replace('/', '-')}"       # one file per shard: no interleaved lines
+        with open(out / "rollouts" / f"{tag}.jsonl", "a", encoding="utf-8") as kept, \
+             open(out / "rejected" / f"{tag}.jsonl", "a", encoding="utf-8") as rejected, \
+             open(out / "sft_chat" / f"{tag}.jsonl", "a", encoding="utf-8") as chat:
             for n, conv in enumerate(todo, 1):
                 sc = {"screen": tuned_screen} if any(t.get("screen") == "tuned" for t in conv["turns"]) else {}
                 es.reset_tv(defaults, sc)
@@ -599,7 +600,7 @@ async def main() -> None:
         json.dumps({"started": datetime.now().isoformat(timespec="seconds"), "model": args.model,
                     "templates": tpl["version"], "stats": dict(stats)}, indent=1))
     print(f"done: kept {stats['kept']}, rejected {stats['rejected']} → {out}/ "
-          f"(rollouts.jsonl, rejected.jsonl, sft_chat.jsonl, traffic.jsonl)")
+          f"(rollouts/, rejected/, sft_chat/, traffic.jsonl)")
     for k, v in sorted(stats.items()):
         if k.startswith("fail:"):
             print(f"  {k}: {v}")
