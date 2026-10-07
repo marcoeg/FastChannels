@@ -107,6 +107,16 @@ SCOPED = {"minny_whats_on_now": "channel_id",
           "minny_search_live_schedule": "channel_id",
           "minny_search_catchup": "channel_id",
           "minny_find_channels": "id"}
+# Searches that take title words in `query` (see LineupScopedToolset.call_tool).
+_TITLE_SEARCHES = ("minny_search_live_schedule", "minny_search_catchup")
+# What `filter` returns when the guide answered but nothing is on this TV's
+# channels — a retry is worth one more call; an outage text is not.
+_NO_MATCH = ("The guide was searched and found nothing",
+             "Nothing on this TV's channels matches")
+
+
+def _no_match(result: Any) -> bool:
+    return result == [] or (isinstance(result, str) and result.startswith(_NO_MATCH))
 
 
 def _rows(result: Any) -> list | None:
@@ -599,5 +609,18 @@ class LineupScopedToolset(WrapperToolset):
                     return await self.scope.search_lineup({**args, "genre": g})
         result = await super().call_tool(name, tool_args, ctx, tool)
         if name in SCOPED:
-            return await self.scope.filter(name, result, only=only)
+            result = await self.scope.filter(name, result, only=only)
+            # The guide needs every query word to match a word of the title.
+            # STT writes "PBS NewsHour"; the guide spells it "PBS News Hour",
+            # and the satellite was told it isn't scheduled while it was on.
+            # Retry once with run-together words split — only after an empty
+            # result, since "SportsCenter" IS one word there.
+            query = str(tool_args.get("query") or "")
+            if name in _TITLE_SEARCHES and _no_match(result) and pr.split_caps(query) != query:
+                again = await super().call_tool(
+                    name, {**tool_args, "query": pr.split_caps(query)}, ctx, tool)
+                again = await self.scope.filter(name, again, only=only)
+                if not _no_match(again):
+                    logger.info("%s: %r found nothing, %r did", name, query, pr.split_caps(query))
+                    return again
         return result
