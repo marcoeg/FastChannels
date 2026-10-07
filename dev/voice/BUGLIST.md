@@ -1,8 +1,8 @@
 # BUGLIST — pending fixes from the 2026-10-04 review
 
 Source: `REVIEW-2026-10-04.md` (72 findings; full analysis, evidence and
-verifier notes per finding). Status as of 2026-10-05: **50 fixed or
-mitigated, 22 open: 11 MEDIUM, 11 LOW, no HIGH.** The fixing commits are in
+verifier notes per finding). Status as of 2026-10-06: **51 fixed or
+mitigated, 21 open: 10 MEDIUM, 11 LOW, no HIGH** (#1 fixed 2026-10-06). The fixing commits are in
 the report's "Fix status" section. Each item below was re-checked against
 the current code on 2026-10-05.
 
@@ -43,7 +43,7 @@ one per batch.
 | 55 | LOW | ytvn-epg | `viewer://titles` cache never evicts; an empty category root is refetched every call | — |
 | 34 | MED | satellite | Half-duplex drops a request that finalizes while a reply is in flight | **yes**: keep half-duplex? |
 | 35 | MED | satellite | Post-speech mute outlasts the device's playout and clips the first word | — |
-| 1 | MED | robustness | A stdio MCP server that dies mid-job is never reconnected | — |
+| 1 | MED | robustness | A stdio MCP server that dies mid-job is never reconnected — **fixed 2026-10-06** | — |
 | 42 | LOW | robustness | Shutdown flushes (memory, rollouts, MCP exits) don't run on a systemd restart | — |
 | 72 | MED | MinnyAgent | Window-argument errors reach the model as a bare error → "catalogue unavailable" | — |
 | 24 | LOW | memory | Satellite job's "Earlier sessions" frozen at job start; pairs straddle sessions | — |
@@ -142,14 +142,37 @@ one per batch.
 
 ### Batch 3 — robustness
 
-**#1 [MEDIUM] Dead stdio MCP server never reconnected** (`pai_agent.py:88`)
-- *Fails when:* the guide server crashes or times out mid-job. Every guide
-  question then fails ("Sorry, something went wrong") until the next
-  restart, though the guide came back minutes later.
-- *Fix:* treat connection-closed / timeouts in `_control`,
-  `LineupScope._call` and the fan-outs as "server down": re-enter
-  (or recreate) the MCPToolset with backoff; give `ResilientToolset.get_tools`
-  a cheap liveness probe instead of relying on cached `list_tools`.
+**#1 [MEDIUM] Dead stdio MCP server never reconnected** (`pai_agent.py`, `MCPGuard` / `ResilientToolset`) — **FIXED 2026-10-06**
+- *Happened:* 2026-10-06 16:52:58 the guide server crashed mid-job (its
+  MCP session had ended; the next request hit `BrokenResourceError`). The
+  satellite then got "I couldn't reach the TV guide" at 16:52 and "Sorry,
+  something went wrong on my side" at 18:30 (`ClosedResourceError` out of
+  `MCPToolset.call_tool`, uncaught) until a manual restart at 18:33; the
+  TV server, a separate process, kept working.
+- *Fix:* `MCPGuard` wraps each stdio MCPToolset. Every path to the raw
+  server goes through it: the model's tool calls (`ResilientToolset.
+  call_tool`, new) and tool listing, the lineup scope's direct calls, the
+  player's resource reads. On a dead connection (anyio closed/broken
+  stream, broken pipe, the MCP client's "Connection closed", also when
+  wrapped in ModelRetry or an ExceptionGroup) one shielded task exits and
+  re-enters the toolset — a fresh subprocess — and callers that failed
+  meanwhile wait for it and retry once; attempts are ≥ 15 s apart. If the
+  respawn fails, the model hears the outage text instead of a crashed
+  turn. The 0.3 s screen-line read starts the respawn in the background.
+  Request timeouts do not trigger it (a slow backend is not a dead server).
+- *Verified:* unit checks of the detector (both SDK error classes, nested
+  groups and causes; timeouts and tool errors excluded). Harness on the
+  real brain, killing the Python servers: the 53-way what's-on fan-out
+  after a guide kill → respawn, 37 rows in 1.2 s; a second kill within the
+  cooldown fails cleanly and recovers after it; a guide question through
+  the model after a kill answers correctly; "what am I watching" after a
+  TV-server kill answers correctly with a fresh server; clean exit.
+  model_bench routing 27/27. Live: agent restarted 19:12, the probe job's
+  guide server killed 3 s after spawn, "What's on KQED right now?" still
+  answered from the guide; log: "dead (ClosedResourceError); respawning"
+  → "respawned".
+- *Left:* why the guide server's session ended (MinnyAgent side; it logs
+  nothing before the BrokenResourceError).
 
 **#42 [LOW] Shutdown flushes don't run on systemd restart** (`voice_agent.py:234`)
 - *Fails when:* a preference said shortly before a restart is lost in the
