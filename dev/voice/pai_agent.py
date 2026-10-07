@@ -19,6 +19,7 @@ import contextvars
 import json
 import logging
 import os
+import time
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -56,6 +57,125 @@ EPG_ALLOW = {"search_memory_facts", "list_memory_facts", "search_nodes",
              "get_episodes", "get_status"}
 
 
+# A stdio MCP server that dies mid-job is respawned on the next call; two
+# attempts are at least this far apart, so a server that dies on start is
+# not hammered by every call that follows.
+RESPAWN_MIN_S = 15.0
+_OUTAGE = {"minny": "The TV guide is unavailable right now (it could not be "
+                    "reached) — say so; don't say nothing is on.",
+           "tv": "The TV isn't reachable right now — say so; don't retry."}
+
+
+def _dead_connection(e: BaseException) -> bool:
+    """The transport to a stdio server is gone: its process exited or its
+    pipes closed. Anything else (a tool error, a slow backend, a request
+    timeout) is not a reason to respawn."""
+    seen: set[int] = set()
+    stack: list[BaseException] = [e]
+    while stack:
+        x = stack.pop()
+        if id(x) in seen:
+            continue
+        seen.add(id(x))
+        name = type(x).__name__
+        if name in ("ClosedResourceError", "BrokenResourceError", "EndOfStream",
+                    "BrokenPipeError", "ConnectionResetError"):
+            return True
+        # The MCP client's own word for a transport that went away while a
+        # request was in flight (McpError in SDK 1.x, MCPError in 2.x).
+        if "connection closed" in str(x).lower():
+            return True
+        stack.extend(getattr(x, "exceptions", None) or [])
+        stack.extend(y for y in (x.__cause__, x.__context__) if y is not None)
+    return False
+
+
+@dataclass
+class MCPGuard:
+    """Respawns a stdio MCP server in place once its process has died.
+
+    MCPToolset enters once per job and never reconnects: when the guide
+    server crashed mid-job (2026-10-06 16:52, after 3½ idle hours), every
+    guide call for the rest of the day raised ClosedResourceError — "I
+    couldn't reach the guide", then "something went wrong" — until the 04:30
+    restart (BUGLIST #1). Every path to the raw toolset goes through a guard:
+    the model's tool calls (ResilientToolset), the lineup scope's direct
+    calls, the player's resource reads. On a dead connection one respawn
+    task exits and re-enters the toolset (a fresh subprocess); callers that
+    failed meanwhile wait for it and retry once. The task is shielded from a
+    caller's cancellation (barge-in), so a respawn is never left half done.
+    """
+
+    raw: MCPToolset
+    svc: str
+    gen: int = field(default=0, init=False)          # bumps on every respawn
+    _task: asyncio.Task | None = field(default=None, init=False, repr=False)
+    _last: float = field(default=0.0, init=False, repr=False)
+
+    def kick(self, gen: int, err: BaseException) -> None:
+        """Start a respawn for a caller that cannot wait for it (the
+        per-request screen line has a 0.3 s budget)."""
+        if _dead_connection(err):
+            self._start(gen, err)
+
+    def _start(self, gen: int, err: BaseException | None) -> asyncio.Task | None:
+        if self.gen != gen:
+            return None                       # respawned since that call failed
+        if self._task is not None and not self._task.done():
+            return self._task
+        if time.monotonic() - self._last < RESPAWN_MIN_S:
+            return None
+        self._last = time.monotonic()
+        self._task = asyncio.create_task(self._respawn(err), name=f"mcp-respawn-{self.svc}")
+        return self._task
+
+    async def recover(self, gen: int, err: BaseException | None = None) -> bool:
+        """True when the toolset has been respawned since `gen`: retry."""
+        task = self._start(gen, err)
+        if task is not None:
+            try:
+                await asyncio.shield(task)
+            except Exception:  # noqa: BLE001 — logged by _respawn
+                pass
+        return self.gen != gen
+
+    async def _respawn(self, err: BaseException | None) -> None:
+        logger.warning("%s MCP connection is dead (%s); respawning the server",
+                       self.svc, type(err).__name__ if err else "?")
+        for _ in range(5):                    # once per nested enter; normally one
+            if not self.raw.is_running:
+                break
+            try:
+                await asyncio.wait_for(self.raw.__aexit__(None, None, None), 15)
+            except Exception:  # noqa: BLE001 — the old process is gone; teardown may complain
+                pass
+        try:
+            await asyncio.wait_for(self.raw.__aenter__(), 30)
+        except Exception as e:  # noqa: BLE001
+            logger.warning("%s MCP respawn failed: %s", self.svc, e)
+            raise
+        self.gen += 1
+        logger.info("%s MCP respawned", self.svc)
+
+    async def direct_call_tool(self, name: str, args: dict, *a, **kw):
+        gen = self.gen
+        try:
+            return await self.raw.direct_call_tool(name, args, *a, **kw)
+        except Exception as e:  # noqa: BLE001
+            if _dead_connection(e) and await self.recover(gen, e):
+                return await self.raw.direct_call_tool(name, args, *a, **kw)
+            raise
+
+    async def read_resource(self, uri: str):
+        gen = self.gen
+        try:
+            return await self.raw.read_resource(uri)
+        except Exception as e:  # noqa: BLE001
+            if _dead_connection(e) and await self.recover(gen, e):
+                return await self.raw.read_resource(uri)
+            raise
+
+
 @dataclass
 class ResilientToolset(WrapperToolset):
     """A dead MCP server yields zero tools instead of a dead assistant.
@@ -67,6 +187,7 @@ class ResilientToolset(WrapperToolset):
     """
 
     svc: str = ""
+    guard: MCPGuard | None = None             # stdio servers: respawn when dead
     _up: bool = field(default=False, init=False, repr=False)
 
     async def __aenter__(self):
@@ -94,9 +215,15 @@ class ResilientToolset(WrapperToolset):
                 logger.info("%s MCP reconnected", self.svc)
             except Exception:  # noqa: BLE001
                 return {}
+        gen = self.guard.gen if self.guard else 0
         try:
             return await self.wrapped.get_tools(ctx)
         except Exception as e:  # noqa: BLE001
+            if self.guard and _dead_connection(e) and await self.guard.recover(gen, e):
+                try:
+                    return await self.wrapped.get_tools(ctx)
+                except Exception as e2:  # noqa: BLE001
+                    e = e2
             logger.warning("%s MCP lost (%s); dropping its tools", self.svc, e)
             self._up = False
             try:
@@ -104,6 +231,20 @@ class ResilientToolset(WrapperToolset):
             except Exception:  # noqa: BLE001
                 pass
             return {}
+
+    async def call_tool(self, name, tool_args, ctx, tool):
+        """A tool call on a dead server respawns it and retries once; if
+        that fails too, the model hears an outage, not a crashed turn."""
+        gen = self.guard.gen if self.guard else 0
+        try:
+            return await super().call_tool(name, tool_args, ctx, tool)
+        except Exception as e:  # noqa: BLE001
+            if self.guard is None or not _dead_connection(e):
+                raise
+            if await self.guard.recover(gen, e):
+                return await super().call_tool(name, tool_args, ctx, tool)
+            self._up = False
+            return _OUTAGE.get(self.svc, f"The {self.svc} server is unavailable right now — say so.")
 
 MAX_TURN_PAIRS = 12
 MAX_HISTORY_TOKENS = 8_000          # chars//4 estimate
@@ -243,11 +384,11 @@ def build_agent(primers: list | None = None) -> Agent:
         # 20 s: play_airing waits on the page (relay pre-flight, one retry).
         prefixed = _stdio_toolsets(
             str(Path(__file__).parent / "mcp-tv-ytvn.json"), read_timeout=20.0)[0]
-        ytvn = prefixed.wrapped
+        ytvn = MCPGuard(prefixed.wrapped, "tv")
         tv = ResilientToolset(
             GatedToolset(prefixed.filtered(lambda ctx, td: td.name not in
                                            {"tv_tune_channel", "tv_tune_number", "tv_play_url"})),
-            svc="tv")
+            svc="tv", guard=ytvn)
     else:
         tv = ResilientToolset(
             MCPToolset(os.environ["TV_MCP_URL"],
@@ -265,16 +406,17 @@ def build_agent(primers: list | None = None) -> Agent:
         minny_cfg = str(Path(__file__).parent / "mcp.json")
         # 10 s: ranked guide searches measure up to ~6 s.
         tv_search = _stdio_toolsets(minny_cfg, read_timeout=10.0)
-        for ts in tv_search:
+        guards = [MCPGuard(ts.wrapped, "minny") for ts in tv_search]
+        for g in guards:
             # Starts the server and its catalogue client, and checks the
             # catalogue answers — what the model used to spend a round trip on.
-            primers.append(lambda raw=ts.wrapped:
+            primers.append(lambda raw=g:
                            raw.direct_call_tool("cluster_status", {}))
         if player == "ytvn":
             # The guide covers the operator's whole catalogue; the ytvn TV
             # carries one lineup. Keep guide answers to the TV's channels.
             from lineup_scope import LineupScope, LineupScopedToolset
-            scopes = [LineupScope(ts.wrapped) for ts in tv_search]
+            scopes = [LineupScope(g) for g in guards]
             primers.extend(sc.channels for sc in scopes)
             # On-demand titles come from the TV's own catalogue (tv_on_demand,
             # tv_watch_title): the guide's VOD index is the operator's, with
@@ -282,7 +424,8 @@ def build_agent(primers: list | None = None) -> Agent:
             tv_search = [LineupScopedToolset(ts, scope=sc).filtered(
                              lambda ctx, td: td.name != "minny_search_vod")
                          for ts, sc in zip(tv_search, scopes)]
-        tv_search = [ResilientToolset(ts, svc="minny") for ts in tv_search]
+        tv_search = [ResilientToolset(ts, svc="minny", guard=g)
+                     for ts, g in zip(tv_search, guards)]
     else:
         tv_search = [ResilientToolset(
             MCPToolset(os.environ["EPG_MCP_URL"],
@@ -612,10 +755,12 @@ def build_agent(primers: list | None = None) -> Agent:
             carries the airing_id of the programme on screen, so "restart
             this" or "what am I watching" need no lookup — older tool results
             are blanked from the history after two exchanges."""
+            gen = ytvn.gen
             try:
-                raw = await asyncio.wait_for(ytvn.read_resource("viewer://state"), 0.3)
+                raw = await asyncio.wait_for(ytvn.raw.read_resource("viewer://state"), 0.3)
                 st = json.loads(raw if isinstance(raw, str) else str(raw))
-            except Exception:  # noqa: BLE001 — no page / slow: just omit the line
+            except Exception as e:  # noqa: BLE001 — no page / slow: just omit the line
+                ytvn.kick(gen, e)             # a dead server respawns in the background
                 return ""
             return format_screen(st)
 
