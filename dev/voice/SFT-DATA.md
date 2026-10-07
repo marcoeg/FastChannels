@@ -232,6 +232,10 @@ the laptop's server reachable for the check):
 
 ## Training: `sft_train.py` (for the laptop; not yet run)
 
+The step-by-step on the laptop — environment, data transfer, dry run,
+training, merge, GGUF, serving on `:8002`, the three gates, promotion —
+is `SFT-RUNBOOK.md`.
+
 QLoRA by default — the 4-bit base is ~5 GB, which leaves a laptop GPU
 room for the 16k-token guide-result examples; `--bf16-lora` for a 24 GB+
 card. Unsloth (`FastModel`) + TRL `SFTTrainer`, or `--no-unsloth` for
