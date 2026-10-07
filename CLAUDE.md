@@ -54,9 +54,12 @@ git commit
 git push                      # bare push is correct: main -> origin/main
 ```
 
-`-f` is only needed on a file's **first** add. `dev/`, `docker-compose.override.yml`
-and `CLAUDE.md` are gitignored upstream, so their initial `git add` needs `-f`;
-once tracked, `.gitignore` no longer applies and a plain `git add` works.
+`dev/`, `docker-compose.override.yml` and `CLAUDE.md` are gitignored
+upstream, so **every** `git add` of a path under them needs `-f` — this
+git (2.43) refuses an explicit path inside an ignored directory even when
+the file is already tracked ("The following paths are ignored by one of
+your .gitignore files"). `git commit -a` and `git add -u` still pick up
+tracked files there without `-f`.
 
 Commit messages end with:
 
