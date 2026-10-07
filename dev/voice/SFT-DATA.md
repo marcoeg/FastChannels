@@ -272,8 +272,40 @@ transformers + peft + bitsandbytes. Prompt-completion format with
   prep counted, eos is `<|im_end|>`; 38.0 M training tokens an epoch, 543
   optimiser steps an epoch, 1,087 for the two, five evaluations.
 
-Keep the eval suite as the test set, `model_bench.py` as the smoke test
-on the served GGUF; regenerate rather than reuse across lineup changes,
-since every system prompt carries the lineup and the clock of the day it
-was made. The training settings are in the fine-tuning plan doc (Stage 1,
-"The SFT run on the laptop").
+## Evaluation: `sft_eval.py` (not yet run)
+
+The cheap, deterministic gate between training and the agent-level
+suites: the served model gets each dev example's prompt as raw text
+through llama-server's `/completion` (temperature 0, the same prompt the
+teacher answered, every tool result already inside), and its continuation
+is compared with the teacher's step. No guide, no TV, no judge needed.
+
+```bash
+./sft_eval.py --models qwen3.5-9b                                  # the base, as the baseline
+./sft_eval.py --models qwen3.5-9b@http://192.168.50.71:8001,qwen3.5-9b-sft1@http://192.168.50.71:8002
+./sft_eval.py --models qwen3.5-9b-sft1 --judge --show 20           # + claude on the text steps
+./sft_eval.py --report ~/news/model-bench/sft-eval-<stamp>.json
+```
+
+Per step: **kind** (tool call vs spoken text), **tool names** in order,
+**args** (keys and values, literals normalised so `False`/`false`,
+`0.5`/`0.50` and case don't count), text steps against the suite's
+forbidden patterns, length relative to the teacher's, truncation, a leaked
+`<think>` block; hygiene counters for Python-style literals (T8) and
+malformed tool-call XML; prompt and generation tokens/s from the server's
+timings. `--judge` asks `claude-opus-5-5` whether a text answer conveys
+the same facts as the teacher's with nothing invented. The report is one
+table per model side by side, then the last model's misses with the
+request, the teacher's step and the model's. Results in
+`~/news/model-bench/sft-eval-<stamp>.json`. It first checks that the
+server parses `<|im_start|>` as one token (special tokens on), and skips
+a model it cannot reach.
+
+The order of the gates: `sft_eval.py` on the dev split (did training do
+what the data asked, and what did it break), `model_bench.py` as the
+smoke test on the served GGUF, then `eval_suite.py` with the frontier,
+the base and the fine-tune in one run (the live guide, the agent, the
+judge). Regenerate rather than reuse across lineup changes, since every
+system prompt carries the lineup and the clock of the day it was made.
+The training settings are in the fine-tuning plan doc (Stage 1, "The SFT
+run on the laptop").
