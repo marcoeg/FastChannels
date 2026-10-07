@@ -145,7 +145,19 @@ class Slots:
         groups: dict[str, list[dict]] = defaultdict(list)
         for ch in self.channels:
             groups[ch["name"].split()[0].lower()].append(ch)
-        self.prefix_groups = [(k, v) for k, v in groups.items() if len(v) >= 2 and len(k) > 2]
+        self.prefix_groups = []
+        for members in groups.values():
+            if len(members) < 2:
+                continue
+            words = [m["name"].split() for m in members]
+            n = 0
+            while all(len(w) > n and w[n].lower() == words[0][n].lower() for w in words):
+                n += 1
+            while n and words[0][n - 1].lower() in ("en", "de", "the", "of", "y", "and"):
+                n -= 1                                               # "World Poker Tour", not "… en"
+            prefix = " ".join(words[0][:n])
+            if len(prefix) > 2 and all(len(w) > n for w in words):   # a real prefix, not a whole name
+                self.prefix_groups.append((prefix, members))
         now = await scope.whats_on_now()
         if isinstance(now, list):
             self.titles_now = sorted({r["title"] for r in now if r.get("title") and len(r["title"]) < 50})
@@ -178,17 +190,21 @@ class Slots:
         if key == "channel":
             ch = r.choice(self.channels)
             bound["_channel"] = ch
-            return r.choice(ch["spellings"][:3])
+            return r.choice([sp for sp in ch["spellings"] if not sp.isdigit()][:3])
+        if key == "channel_name":                 # the lineup's own name, for memory notes
+            ch = bound.get("_channel") or r.choice(self.channels)
+            bound["_channel"] = ch
+            return ch["name"]
         if key == "number":
             ch = bound.get("_channel") or r.choice([c for c in self.channels if c["number"]])
             bound["_channel"] = ch
             return str(ch["number"])
         if key == "channel_prefix":
-            k, group = r.choice(self.prefix_groups) if self.prefix_groups else ("trace", [])
+            k, group = r.choice(self.prefix_groups) if self.prefix_groups else ("Trace", [])
             full = r.choice(group) if group else {"name": "Trace Latina", "spellings": ["Trace Latina"]}
             bound["_channel"] = full
             bound["channel_full"] = full["name"]
-            return k.capitalize() if group else "Trace"
+            return k.title() if k.isupper() else k
         if key == "channel_full":
             return bound.get("channel_full") or r.choice(self.channels)["name"]
         if key == "misheard_text":
@@ -487,7 +503,7 @@ async def generate(convs: list[dict], out: Path, model_name: str, defaults: dict
 
 def validate(tpl: dict) -> list[str]:
     problems = []
-    known = set(tpl["slots"]) | {"channel", "number", "channel_prefix", "channel_full", "misheard_text", "misheard_channel",
+    known = set(tpl["slots"]) | {"channel", "channel_name", "number", "channel_prefix", "channel_full", "misheard_text", "misheard_channel",
                                  "title_now", "title_tonight", "vod_title", "level_frac", "level_pct"}
     for kind in ("single", "multi"):
         for t in tpl[kind]:

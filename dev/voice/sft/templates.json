@@ -25,11 +25,11 @@
     "KQED2": ["KQED Plus", "channel 10", "KQED2"]
   },
   "memory": {
-    "favourite_channel": "The user's favourite channel is {channel}.",
+    "favourite_channel": "The user's favourite channel is {channel_name}.",
     "favourite_show": "The user's favourite show is {title_tonight}.",
     "dislike": "The user does not like {dislike}.",
     "normal_volume": "User's normal volume is {level_frac} ({level_pct}%).",
-    "news_channel": "User's favorite news channel is {channel}."
+    "news_channel": "User's favorite news channel is {channel_name}."
   },
   "single": [
     {"id": "on_now", "weight": 8,
