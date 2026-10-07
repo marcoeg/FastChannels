@@ -27,12 +27,15 @@ would skip them silently).
 
 import argparse
 import json
+import os
 import re
 import sys
 from collections import defaultdict
 from pathlib import Path
 
-SRC = Path.home() / "news" / "voice-rollouts"
+# Same default and override as rollouts.py, so a generator run that wrote
+# elsewhere (VOICE_ROLLOUT_DIR=…/run1/rollouts, or --rollouts) exports as is.
+SRC = Path(os.environ.get("VOICE_ROLLOUT_DIR", str(Path.home() / "news" / "voice-rollouts")))
 # A correction can open with an interjection or the wake word ("Minny, no,
 # I said KQED", "Um, I meant channel nine") — anchored after those.
 CORRECTION = re.compile(
@@ -42,9 +45,9 @@ CORRECTION = re.compile(
     r"actually\b|not (what|the one) i)", re.I)
 
 
-def load(since: str | None, until: str | None) -> list[dict]:
+def load(src: Path, since: str | None, until: str | None) -> list[dict]:
     recs = []
-    for f in sorted(SRC.glob("*.jsonl")):
+    for f in sorted(src.glob("*.jsonl")):
         day = f.stem
         if (since and day < since) or (until and day > until):
             continue
@@ -80,6 +83,7 @@ def valid(rcp: dict) -> bool:
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--out", default="minny-gym", type=Path)
+    ap.add_argument("--rollouts", type=Path, default=SRC, help=f"directory of *.jsonl rollouts (default {SRC})")
     ap.add_argument("--since"), ap.add_argument("--until")
     ap.add_argument("--room", help="voice | speaker | …")
     ap.add_argument("--llm", help="openai | local")
@@ -88,7 +92,7 @@ def main() -> None:
                     help="keep test-room turns (marked \"test\": true; dropped by default)")
     args = ap.parse_args()
 
-    recs = load(args.since, args.until)
+    recs = load(args.rollouts, args.since, args.until)
     add_correction_signal(recs)
     stats = defaultdict(int)
     eval_lines, sft_lines = [], []

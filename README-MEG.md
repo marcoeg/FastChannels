@@ -1203,8 +1203,13 @@ Join keys: `session_id` is on every rollout, every
 ```bash
 cd dev/voice
 ./rollouts_export.py --out ~/minny-gym [--since 2026-10-01] [--until …] \
-    [--room voice|speaker] [--llm openai|local] [--include-interrupted]
+    [--room voice|speaker] [--llm openai|local] [--include-interrupted] \
+    [--rollouts DIR]          # default $VOICE_ROLLOUT_DIR or ~/news/voice-rollouts
 ```
+
+`--rollouts` (or `VOICE_ROLLOUT_DIR`, the same variable the writer uses)
+points it at another directory of rollout files, e.g. the kept turns of an
+SFT generation run (`~/news/voice-sft/run1/rollouts`, see `dev/voice/SFT-DATA.md`).
 
 Writes `eval.jsonl` (prompt + tools, with the OpenAI brain's answer as
 `expected_answer`) and `sft.jsonl` (OpenAI-brain turns as messages + tools).
