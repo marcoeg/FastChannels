@@ -424,3 +424,42 @@ one per batch.
 - *Residual (catalogue side):* 25 rows per feed still bound a long window
   (a 24-hour "upcoming" on a 30-minute-slot channel reaches ~12 h). The
   T5 ordering keeps those 25 from the window's start.
+
+**T7 [HIGH] A title the guide spells as two words is "not scheduled" when STT writes it as one** (`lineup_scope.py`, `LineupScopedToolset.call_tool`) — **FIXED 2026-10-06**
+- *Found:* satellite, 2026-10-06 18:39. "Do we have PBS NewsHour at some
+  point today or tomorrow?" → "No — I checked today and tomorrow, and PBS
+  NewsHour isn't scheduled in this lineup", while PBS News Hour was on
+  KQED at that moment (the next turn, "what is it playing right now?",
+  said so). At 18:38 the same query also denied a catch-up; two recordings
+  existed (yesterday's 6 PM, today's 3 PM).
+- *Cause:* the guide's text search needs every query word to match a word
+  of the title. The catalogue spells it "PBS News Hour"; STT writes
+  "NewsHour". Raw: "PBS NewsHour", "NewsHour", "newshour" → 0 rows;
+  "PBS News Hour", "News Hour", "PBS News" → the KQED airings. The model
+  retried with "NewsHour" alone, which cannot work. `pai_agent.py` already
+  asks both ways for the TV's catch-up lookup (`_aired_recently`:
+  `[title, pr.split_caps(title)]`); the model's direct guide searches had
+  no such retry.
+- *Fix:* in `call_tool`, for `minny_search_live_schedule` and
+  `minny_search_catchup` with a `query`: when the filtered result is one of
+  the wrapper's "nothing matches" results and `pr.split_caps(query)`
+  differs, run the same call once more with the split query and return it
+  if it has rows. Only after an empty result ("SportsCenter" IS one word
+  in the catalogue and splits to a different programme); outage texts do
+  not trigger it.
+- *Verified:* `_no_match` recognises the two no-match texts and `[]`, not
+  the outage texts or row lists. Brain checks (questions only): "search
+  the guide for the title NewsHour" → the KQED airings; the catch-up
+  question twice, with the model's own "PBS NewsHour" + KQED query → both
+  recordings; "PBS NewsHour today or tomorrow" with channel → on now and
+  tomorrow at three and six.
+  model_bench: routing 27/27; no benchmark question has a run-together
+  title, so the retry never ran there (judge 4.89/4.48/4.93 vs 4.93/4.59/
+  5.00 the day before: time of day and variance). Restarted 18:47; the
+  probe asked the exact question, the model queried "PBS NewsHour", the
+  retry fired (logged) and the answer was right.
+- *Also seen in that session (not fixed):* STT heard "Trace" as "trues",
+  "truths", "Truce" three times (Minny recovered on "How about Trace?");
+  "Let's get you back out" was read as stop → the player closed, Minny
+  apologised when told.
+
