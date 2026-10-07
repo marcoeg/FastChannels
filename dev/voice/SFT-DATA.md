@@ -171,14 +171,46 @@ Export for NeMo Gym, verified on this run: `./rollouts_export.py
 --rollouts ~/news/voice-sft/run1/rollouts --out <dir>` (or the
 `VOICE_ROLLOUT_DIR` form above).
 
-## Before training
+## Before training: `sft_train_prep.py`
 
-- Split by conversation id, not by turn, so a scenario's turns stay together.
-- Train on `sft_chat/*.jsonl` with the chat template Qwen serves with on the
-  laptop and the `tools` field rendered by that template; loss on assistant
-  tokens only (tool calls and the final text), not on system, user or tool
-  results.
-- Keep the eval suite as the test set; `model_bench.py` as the smoke test
-  on the served GGUF.
-- Regenerate rather than reuse across lineup changes: the system prompt in
-  every record carries the lineup and the clock of the day it was made.
+Turns `sft_chat/*.jsonl` into prompt/completion pairs rendered through the
+base model's own chat template (`--base Qwen/Qwen3.5-9B`, needs
+`transformers`; written to run on the training machine, **not yet run**):
+
+```bash
+./sft_train_prep.py --run ~/news/voice-sft/run1                      # → run1/train/
+./sft_train_prep.py --run ~/news/voice-sft/run1 --limit 50 --show 3  # a look
+./sft_train_prep.py --run ~/news/voice-sft/run1 --server http://127.0.0.1:8001   # + compare with llama.cpp
+```
+
+- **One example per assistant step of the record's last turn.** The prompt
+  is the conversation up to that step plus the generation prompt with
+  thinking off (`<|im_start|>assistant\n<think>\n\n</think>\n\n` on Qwen3.5);
+  the completion is what the teacher produced at that step — the XML tool
+  call block or the spoken text — ending in `<|im_end|>`. A turn that
+  called a tool and answered gives two examples. The loss goes on the
+  completion only; the trainer masks the prompt (TRL's prompt-completion
+  format does exactly that).
+- **Split by conversation** (`metadata.session_id`), 5 % dev by default.
+- **What the template needs**, read from the served Qwen3.5 template: tool
+  calls are rendered as `<function=…><parameter=…>` XML, and only when
+  `arguments` is a mapping — the records carry it as a JSON string, so it
+  is parsed first; booleans and nulls are written as JSON literals, as
+  llama.cpp's renderer writes them, not Python's `True`/`None`.
+- **Checks**, per example: the template is prefix-stable; the rendered
+  message carries the think block the prompt ends with; the XML block has
+  every call with every argument, in order; the completion ends with the
+  end token; prompt and completion tokenise the same joined as apart
+  (`boundary_ok`); length under `--max-tokens` (12,288 default). Failures
+  go to `dropped.jsonl` with the reason. `--server` renders a sample of the
+  prompts through the live llama.cpp `/apply-template` and reports any
+  difference — the one rendering that matters.
+- Outputs in `<run>/train/`: `train.jsonl`, `dev.jsonl`, `dropped.jsonl`,
+  `prep-summary.json` (counts, token percentiles and totals, drops by
+  reason), `chat_template.jinja`.
+
+Then: keep the eval suite as the test set, `model_bench.py` as the smoke
+test on the served GGUF; regenerate rather than reuse across lineup
+changes, since every system prompt carries the lineup and the clock of the
+day it was made. The training settings are in the fine-tuning plan doc
+(Stage 1, "The SFT run on the laptop").
