@@ -1,8 +1,9 @@
 # BUGLIST — pending fixes from the 2026-10-04 review
 
 Source: `REVIEW-2026-10-04.md` (72 findings; full analysis, evidence and
-verifier notes per finding). Status as of 2026-10-06: **51 fixed or
-mitigated, 21 open: 10 MEDIUM, 11 LOW, no HIGH** (#1 fixed 2026-10-06). The fixing commits are in
+verifier notes per finding). Status as of 2026-10-07: **51 fixed or
+mitigated, 22 open: 11 MEDIUM, 11 LOW, no HIGH** (#1 fixed 2026-10-06; T8
+added 2026-10-07). The fixing commits are in
 the report's "Fix status" section. Each item below was re-checked against
 the current code on 2026-10-05.
 
@@ -485,4 +486,29 @@ one per batch.
   "truths", "Truce" three times (Minny recovered on "How about Trace?");
   "Let's get you back out" was read as stop → the player closed, Minny
   apologised when told.
+
+**T8 [MEDIUM] Local brain: Python-style literals in tool calls reach the tools as text** (`pai_agent.py` local path, llama.cpp) — **OPEN**
+- *Found:* 2026-10-07, preparing the SFT data. The eval suite run of
+  2026-10-07 06:17 recorded the local model's arguments as llama.cpp
+  parsed them: `catchup: 'True'` (8) / `'False'` (6), `channel: 'None'`
+  (6), `year: 'None'` (4), `category: 'None'` — strings. A direct probe
+  of the base model gave a proper `catchup: true` once, so the model mixes
+  both spellings.
+- *Cause:* Qwen3.5's chat template renders tool calls as
+  `<function=…><parameter=…>` XML with scalar values through Jinja's
+  `string` filter, so the model was trained to see (and writes) `True`,
+  `False`, `None`. llama.cpp's parser JSON-decodes a parameter value when
+  it can and otherwise passes the raw text through, so those arrive as
+  strings. pydantic 2.13.5 (the agent's pin) takes `"False"`/`"True"` as
+  booleans in lax mode, but rejects `"None"` for `int | None` (a tool
+  retry, one more model round) and passes it through for `str | None` —
+  `channel="None"` searches for a channel called None.
+- *Fix options:* (a) coerce in the local path before validation: a
+  tool-argument hook that maps `"None"`/`"null"` → `None` and
+  `"True"`/`"False"` → bools where the parameter's schema allows it;
+  (b) the SFT targets (`sft_train_prep.py`) already write booleans as
+  JSON literals and leave null-valued parameters out, so the fine-tuned
+  model stops producing them. (a) protects the base model and any model
+  that slips; both are cheap.
+- *Not the frontier's problem:* the OpenAI path receives JSON arguments.
 

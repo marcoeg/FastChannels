@@ -20,11 +20,20 @@ What the template does that a trainer must not get wrong (read from the
 served Qwen3.5 template): tool calls are rendered as XML
 (``<tool_call>\\n<function=NAME>\\n<parameter=KEY>\\nVALUE\\n</parameter>…``), and
 only when ``arguments`` is a mapping — the chat records carry it as a JSON
-string, as OpenAI does, so it is parsed here first; booleans and nulls are
-written as JSON literals the way llama.cpp's renderer writes them, not
-Python's ``True``/``None``. Every assistant message after the last user
-query is rendered with the empty think block, which matches the generation
-prompt; the script checks that on every example rather than assuming it.
+string, as OpenAI does, so it is parsed here first. Scalar values go
+through the template's ``string`` filter, so a boolean in a HISTORY call is
+``False`` and a null ``None``, in llama.cpp's rendering too (checked
+against its /apply-template); the prompts keep that, being what the model
+is shown. The COMPLETIONS write JSON literals (``false``, ``null``) instead:
+llama.cpp parses those back to typed arguments, while Python-style ones
+reach the agent's tools as the strings "False" and "None" — which is what
+the base model emits today (eval suite run of 2026-10-07: catchup 'True'/
+'False', channel and year 'None', as strings; pydantic takes "False" as a
+bool but rejects "None" for ``int | None`` and keeps it as text for
+``str | None``). Null-valued parameters are left out of the completions
+altogether, which every parser reads the same way. Every assistant message after the last
+user query is rendered with the empty think block, which matches the
+generation prompt; the script checks that on every example.
 
 Outputs, in --out (default <run>/train/):
   train.jsonl, dev.jsonl   {"prompt", "completion", "n_tokens",
@@ -90,21 +99,11 @@ def load_records(run: Path) -> list[dict]:
     return recs
 
 
-def _literal(v):
-    """Argument values as llama.cpp's renderer writes them inside <parameter>:
-    scalars through the template's `string` filter (so JSON literals for
-    bool/null, which Python would print as True/None), containers via tojson
-    by the template itself."""
-    if isinstance(v, bool):
-        return "true" if v else "false"
-    if v is None:
-        return "null"
-    return v
-
-
 def normalise(messages: list[dict]) -> tuple[list[dict], list[str]]:
     """The record's messages as the template expects them: arguments as
-    mappings, literal scalars, string content. Returns the problems met."""
+    mappings (values untouched: the template's `string` filter then writes
+    True/False/None exactly as llama.cpp does), string content. Returns the
+    problems met."""
     out, problems = copy.deepcopy(messages), []
     for m in out:
         if m.get("content") is None:
@@ -121,7 +120,7 @@ def normalise(messages: list[dict]) -> tuple[list[dict], list[str]]:
             if not isinstance(args, dict):
                 problems.append(f"arguments not an object: {fn.get('name')}")
                 args = {}
-            fn["arguments"] = {k: _literal(v) for k, v in args.items()}
+            fn["arguments"] = args
     return out, problems
 
 
@@ -162,6 +161,27 @@ def check_calls(completion: str, message: dict) -> str | None:
     if expected and not completion.endswith(END):
         return "tool_call_render: no end token"
     return None
+
+
+def clean_params(completion: str, message: dict) -> str:
+    """The target's tool-call parameters as they should be generated:
+    booleans as JSON literals, which llama.cpp parses back to typed values
+    (Python-style "False" reaches the tools as a string, accepted by luck),
+    and null-valued parameters left out — "None" as text is rejected by
+    `int | None` and taken literally by `str | None`, a channel named None."""
+    calls = [c.get("function") or {} for c in message.get("tool_calls") or []]
+    out, pos = [], 0
+    for m, fn in zip(XML_CALL.finditer(completion), calls):
+        params = m.group("params")
+        for k, v in (fn.get("arguments") or {}).items():
+            if v is None:
+                params = params.replace(f"<parameter={k}>\nNone\n</parameter>\n", "", 1)
+            elif isinstance(v, bool):
+                params = params.replace(f"<parameter={k}>\n{v}\n</parameter>\n",
+                                        f"<parameter={k}>\n{json.dumps(v)}\n</parameter>\n", 1)
+        out.append(completion[pos:m.start("params")] + params)
+        pos = m.end("params")
+    return "".join(out) + completion[pos:]
 
 
 def examples_for(tok, record: dict, max_tokens: int) -> tuple[list[dict], list[dict]]:
@@ -207,6 +227,7 @@ def examples_for(tok, record: dict, max_tokens: int) -> tuple[list[dict], list[d
         if problem:
             dropped.append({**info, "reason": problem})
             continue
+        completion = clean_params(completion, msgs[j])
         ids_p = tok(prompt, add_special_tokens=False).input_ids
         ids_c = tok(completion, add_special_tokens=False).input_ids
         ids_all = tok(prompt + completion, add_special_tokens=False).input_ids
@@ -299,9 +320,13 @@ def main() -> None:
     ap.add_argument("--run", type=Path, default=DEFAULT_RUN, help="an sft_gen.py output directory (reads sft_chat/)")
     ap.add_argument("--out", type=Path, help="default <run>/train")
     ap.add_argument("--base", default=DEFAULT_BASE, help="the model whose tokenizer and chat template render the examples")
+    ap.add_argument("--template", type=Path, help="render with this chat template instead of the tokenizer's "
+                                                  "(e.g. the one llama-server reports in /props)")
     ap.add_argument("--dev-frac", type=float, default=0.05, help="share of conversations held for dev loss")
     ap.add_argument("--seed", type=int, default=0)
-    ap.add_argument("--max-tokens", type=int, default=12288, help="drop examples longer than this (prompt + completion)")
+    ap.add_argument("--max-tokens", type=int, default=16384,
+                    help="drop examples longer than this (prompt + completion); each example carries n_tokens, "
+                         "so a trainer short of memory can filter lower")
     ap.add_argument("--limit", type=int, help="only the first N records (a quick look)")
     ap.add_argument("--show", type=int, default=0, help="print N examples (prompt tail and completion)")
     ap.add_argument("--server", help="llama.cpp server URL: compare a sample of prompts with its /apply-template")
@@ -315,6 +340,8 @@ def main() -> None:
     except ImportError:
         raise SystemExit("needs transformers (pip install transformers) — the tokenizer of --base renders the examples")
     tok = AutoTokenizer.from_pretrained(args.base)
+    if args.template:
+        tok.chat_template = args.template.read_text(encoding="utf-8")
     if not tok.chat_template:
         raise SystemExit(f"{args.base} has no chat template")
 
@@ -342,6 +369,7 @@ def main() -> None:
     (out / "chat_template.jinja").write_text(tok.chat_template, encoding="utf-8")
     summary = summarise(train, dev, dropped, len(records), len(sessions), len(dev_ids & sessions))
     summary["base"] = args.base
+    summary["template"] = str(args.template) if args.template else "tokenizer's"
     summary["max_tokens"] = args.max_tokens
     summary["generation_prompt"] = render(tok, [{"role": "user", "content": "x"}], [], True).split("x<|im_end|>\n")[-1]
     if args.server and (train or dev):

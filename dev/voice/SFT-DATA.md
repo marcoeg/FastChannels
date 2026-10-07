@@ -175,7 +175,9 @@ Export for NeMo Gym, verified on this run: `./rollouts_export.py
 
 Turns `sft_chat/*.jsonl` into prompt/completion pairs rendered through the
 base model's own chat template (`--base Qwen/Qwen3.5-9B`, needs
-`transformers`; written to run on the training machine, **not yet run**):
+`transformers` — run here on run1 on 2026-10-07 with
+`uv run --no-project --with transformers --with jinja2 python sft_train_prep.py …`,
+the laptop's server reachable for the check):
 
 ```bash
 ./sft_train_prep.py --run ~/news/voice-sft/run1                      # → run1/train/
@@ -195,8 +197,16 @@ base model's own chat template (`--base Qwen/Qwen3.5-9B`, needs
 - **What the template needs**, read from the served Qwen3.5 template: tool
   calls are rendered as `<function=…><parameter=…>` XML, and only when
   `arguments` is a mapping — the records carry it as a JSON string, so it
-  is parsed first; booleans and nulls are written as JSON literals, as
-  llama.cpp's renderer writes them, not Python's `True`/`None`.
+  is parsed first. Scalars go through Jinja's `string` filter, so a boolean
+  in a history call reads `False` and a null `None`, in llama.cpp's
+  rendering too; the prompts keep that, being what the model is shown.
+  The completions differ on purpose: booleans as JSON literals and
+  null-valued parameters left out, because Python-style ones reach the
+  agent's tools as the strings "False"/"None" (BUGLIST T8) — a channel
+  named None — and llama.cpp parses JSON literals back to typed values.
+  Render with `--template sft/chat_template.qwen3.5-served.jinja`, the
+  template llama-server reports; the tokenizer's differs only in the
+  generation-prompt branch.
 - **Checks**, per example: the template is prefix-stable; the rendered
   message carries the think block the prompt ends with; the XML block has
   every call with every argument, in order; the completion ends with the
@@ -208,6 +218,17 @@ base model's own chat template (`--base Qwen/Qwen3.5-9B`, needs
 - Outputs in `<run>/train/`: `train.jsonl`, `dev.jsonl`, `dropped.jsonl`,
   `prep-summary.json` (counts, token percentiles and totals, drops by
   reason), `chat_template.jinja`.
+- **run1, prepared 2026-10-07:** 2,275 records → **4,579 examples** (4,349
+  train / 230 dev from 105 conversations): 2,307 tool-call steps, 2,272
+  text steps; turns with 1/2/3/4 steps: 306/1,651/298/20. Tokens per
+  example p50 8,353, p90 9,057, max 16,009, 40.0 M in total (prompts;
+  completions are 182 k tokens, p50 31). 3 examples dropped over the
+  16,384 cap; 0 boundary or think-block mismatches; 150 of 150 sampled
+  prompts identical to the laptop's `/apply-template` rendering. 393
+  prompts carry Python-style literals in history calls (llama.cpp's
+  rendering), the completions none: 285 JSON booleans, nulls omitted.
+  `train.jsonl` is 153 MB. The trainer can filter on `n_tokens` if 16 k
+  sequences do not fit.
 
 Then: keep the eval suite as the test set, `model_bench.py` as the smoke
 test on the served GGUF; regenerate rather than reuse across lineup
