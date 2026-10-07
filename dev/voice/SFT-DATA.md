@@ -57,8 +57,16 @@ want those kept.) One file per shard: `--workers 4` writes `shard-0-4` … `shar
   it (`memory`), so "put the volume back to normal" always has a level to
   go back to.
 
-Multi-turn scenarios that start from a tuned screen (`"screen": "tuned"`)
-get the first lineup channel on the fake screen.
+**The screen.** Each conversation starts with the TV in a state drawn from
+its id (`sft_gen.screen_for`): 70 % tuned to a lineup channel — never the
+one the conversation names, so "put on X" is not a no-op — and 30 % the
+programme grid with nothing playing, which is what the on-screen line says
+when the household's TV is off. Templates whose request acts on what is
+playing (`"screen": "tuned"`: watching, about this episode, restart, pause,
+resume, stop, mute, volume) always start tuned. (`run1` predates this: the
+eval suite's default screen, KTVU channel 2, reached every conversation, so
+all of its turns were answered with KTVU on screen. They are consistent
+with the prompt the teacher saw; they are just one screen state.)
 
 ## Rejection sampling
 
@@ -109,6 +117,12 @@ cd dev/voice
 ./sft_gen.py --n 2000 --workers 4 --out ~/news/voice-sft/run2
 ./sft_gen.py --n 2000 --out ~/news/voice-sft/run2   # resumes: conversations already in the output are skipped
 ```
+
+A resume re-samples the traffic with the same seed, but the slot values
+come from the guide and the log of the moment, so the conversations are
+not the same set as the first time: the ones already in the output (same
+id = same utterances) are skipped, the rest are generated. It tops the run
+up; it does not replay a plan.
 
 Needs what the eval suite needs: `OPENAI_API_KEY` (the teacher,
 `VOICE_MODEL`), the Minerva VPN (the guide), `ytvn-epg` serving with the

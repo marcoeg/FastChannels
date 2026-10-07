@@ -426,6 +426,30 @@ def to_chat(items: list[dict], tools: list[dict]) -> dict:
 
 
 # ---- generation -------------------------------------------------------------------------
+NO_SCREEN = {"tuned": None, "playing": None, "player": {"state": "idle"}}   # the grid, nothing playing
+UNTUNED_SHARE = 0.3
+
+
+def screen_for(conv: dict, lineup: list) -> dict:
+    """The TV at the start of a conversation: tuned to a lineup channel, or
+    the programme grid with nothing playing (30 %). Drawn from the
+    conversation id, so a resume gives a conversation the same screen and
+    the traffic sampling is untouched. A template that starts tuned
+    ("screen": "tuned") always is; the channel is never the one the
+    conversation names, so "put on X" is not a no-op. (The eval suite's
+    default screen — always KTVU — is what every conversation of run1 saw.)"""
+    r = random.Random(conv["id"])
+    starts_tuned = any(t.get("screen") == "tuned" for t in conv["turns"])
+    if not lineup or (not starts_tuned and r.random() < UNTUNED_SHARE):
+        return dict(NO_SCREEN)
+    said = [str(v).lower() for k, v in conv["slots"].items() if k.startswith("channel") or k == "number"]
+    pool = [ch for ch in lineup
+            if not any(x in ch.name.lower() or ch.name.lower() in x or x == str(ch.number) for x in said)] or lineup
+    ch = r.choice(pool)
+    return {"tuned": {"channel_id": ch.channel_id, "number": ch.number, "name": ch.name, "airing": None},
+            "playing": {"kind": "live", "title": f"{ch.number} {ch.name} · live"}}
+
+
 async def generate(convs: list[dict], out: Path, model_name: str, defaults: dict, shard: str) -> Counter:
     stats = Counter()
     done = set()
@@ -441,22 +465,19 @@ async def generate(convs: list[dict], out: Path, model_name: str, defaults: dict
     stats["skipped_done"] = len(convs) - len(todo)
     model, settings = mb.make_model(model_name)
     brain = VoiceBrain(None)
-    tuned_screen = {"tuned": None, "playing": None}
     async with brain.agent:
         await brain.prime()
-        for ch in await pr.lineup():
+        lineup = [ch for ch in await pr.lineup() if ch.number]
+        for ch in lineup:
             es.LINEUP[ch.channel_id] = (ch.name, ch.number)
             es.LINEUP[str(ch.number)] = (ch.name, ch.number)
-            if tuned_screen["tuned"] is None and ch.number:
-                tuned_screen = {"tuned": {"channel_id": ch.channel_id, "number": ch.number, "name": ch.name, "airing": None},
-                                "playing": {"kind": "live", "title": f"{ch.number} {ch.name} · live"}}
         tag = f"shard-{shard.replace('/', '-')}"       # one file per shard: no interleaved lines
         with open(out / "rollouts" / f"{tag}.jsonl", "a", encoding="utf-8") as kept, \
              open(out / "rejected" / f"{tag}.jsonl", "a", encoding="utf-8") as rejected, \
              open(out / "sft_chat" / f"{tag}.jsonl", "a", encoding="utf-8") as chat:
             for n, conv in enumerate(todo, 1):
-                sc = {"screen": tuned_screen} if any(t.get("screen") == "tuned" for t in conv["turns"]) else {}
-                es.reset_tv(defaults, sc)
+                screen = screen_for(conv, lineup)
+                es.reset_tv(defaults, {"screen": screen, "player": screen.get("player")})
                 brain.history = []
                 deps = TurnDeps(facts_profile=list(conv["memory"]), facts_recent=[])
                 session = f"sft-gen:{conv['id']}"
@@ -485,6 +506,7 @@ async def generate(convs: list[dict], out: Path, model_name: str, defaults: dict
                     record["synthetic"] = True
                     record["gen"] = {"conversation": conv["id"], "source": conv["source"], "template": conv["template"],
                                      "slots": conv["slots"], "memory": conv["memory"], "checks": turn["checks"],
+                                     "screen": (screen.get("tuned") or {}).get("name"),
                                      "fails": fails, "shard": shard, "teacher": model_name}
                     line = json.dumps(record, ensure_ascii=False) + "\n"
                     if fails:
