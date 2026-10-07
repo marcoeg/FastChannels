@@ -30,6 +30,12 @@ The end-to-end gates stay model_bench.py and eval_suite.py (the agent,
 the live guide, the judge); this one says whether training did what the
 data asked, example by example, and what it broke.
 
+Concurrency: llama-server's context (32k on the laptop) is shared by its
+slots, so --workers is 2 — four of these ~8k prompts at once overflow it
+and every request in flight fails with "Context size has been exceeded".
+Decoding also slows while another slot processes a prompt, so the
+latencies here are "under two concurrent requests", not the agent's.
+
   ./sft_eval.py --models qwen3.5-9b                                   # the base, as a baseline
   ./sft_eval.py --models qwen3.5-9b@http://192.168.50.71:8001,qwen3.5-9b-sft1@http://192.168.50.71:8002
   ./sft_eval.py --models qwen3.5-9b-sft1 --judge --show 20
@@ -105,8 +111,16 @@ def forbidden_patterns() -> list[str]:
 def _post(url: str, key: str | None, body: dict, timeout: float) -> dict:
     req = urllib.request.Request(url, data=json.dumps(body).encode(), headers={
         "Content-Type": "application/json", **({"Authorization": f"Bearer {key}"} if key else {})})
-    with urllib.request.urlopen(req, timeout=timeout) as resp:
-        return json.loads(resp.read())
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read())
+    except urllib.error.HTTPError as e:            # keep the server's own words, not just the code
+        detail = e.read().decode("utf-8", "replace")[:300]
+        try:
+            detail = json.loads(detail).get("error", {}).get("message", detail)
+        except (ValueError, AttributeError):
+            pass
+        raise urllib.error.HTTPError(e.url, e.code, f"{e.code}: {detail}", e.headers, None) from None
 
 
 def probe(model: dict, key: str | None, timeout: float) -> str | None:
@@ -186,7 +200,7 @@ def score(expected: str, got: str, stop: str, patterns: list[str]) -> dict:
         s["keys_match"] = all(set(ea) == set(ga) for (_, ea), (_, ga) in zip(e_calls, g_calls))
         s["args_match"] = s["keys_match"] and all(
             all(norm_value(ea[k]) == norm_value(ga[k]) for k in ea) for (_, ea), (_, ga) in zip(e_calls, g_calls))
-        s["args_diff"] = [{"call": name, "key": k, "expected": ea[k], "got": ga.get(k)}
+        s["args_diff"] = [{"call": name, "key": k, "expected": ea.get(k), "got": ga.get(k)}
                           for (name, ea), (_, ga) in zip(e_calls, g_calls) for k in set(ea) | set(ga)
                           if k not in ga or k not in ea or norm_value(ea[k]) != norm_value(ga[k])]
     if e_kind == "text":
@@ -234,7 +248,10 @@ def run_model(model: dict, key: str | None, examples: list[dict], patterns: list
         r = complete(model, key, ex["prompt"], args.n_predict, args.timeout)
         if r.get("error"):
             return {"error": r["error"], "total_ms": r["total_ms"]}
-        s = score(ex["completion"], r["text"], r["stop"], patterns)
+        try:
+            s = score(ex["completion"], r["text"], r["stop"], patterns)
+        except Exception as e:  # noqa: BLE001  keep the text, report the fault
+            return {**r, "error": f"scoring: {type(e).__name__}: {e}"[:200]}
         out = {**r, "score": s}
         if judge_client and s["kind_expected"] == "text" and s["kind_got"] == "text":
             out["judge"] = judge_text(judge_client, last_user(ex["prompt"]), spoken(ex["completion"]), spoken(r["text"]))
@@ -334,7 +351,9 @@ def main() -> None:
     ap.add_argument("--limit", type=int, help="a random subset of this size")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--n-predict", type=int, default=400, help="generation cap in tokens (the teacher's longest step is 257)")
-    ap.add_argument("--workers", type=int, default=4, help="parallel requests per model (the server's slots)")
+    ap.add_argument("--workers", type=int, default=2,
+                    help="parallel requests per model; the laptop's 32k context is shared by its slots, and four "
+                         "8k prompts overflow it (\"Context size has been exceeded\")")
     ap.add_argument("--timeout", type=float, default=300)
     ap.add_argument("--judge", action="store_true", help=f"{JUDGE_MODEL} on the text steps ($ANTHROPIC_API_KEY)")
     ap.add_argument("--show", type=int, default=10, help="misses to print for the last model")

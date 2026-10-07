@@ -301,6 +301,29 @@ request, the teacher's step and the model's. Results in
 server parses `<|im_start|>` as one token (special tokens on), and skips
 a model it cannot reach.
 
+Two requests at a time (`--workers 2`): the laptop's llama-server has a
+32k context shared by its four slots, and four of these ~8k prompts in
+flight overflow it — every request then fails with "Context size has been
+exceeded" (the first baseline attempt lost 228 of 230 steps that way).
+The production agent sends one request at a time and never meets this.
+Decoding also slows while another slot is processing a prompt, so the
+latencies in this report are under two concurrent requests.
+
+**Baseline, the base model (2026-10-07 13:00, `sft-eval-20261007-1300.json`,
+230 steps, 0 errors):** kind accuracy **83.5 %**, exact match 10.9 %;
+tool steps (118): names **58.5 %**, args **29.7 %**, malformed 0, Python
+literals 0.8 %; text steps (112): answered as text 95.5 %, forbidden
+patterns 3.6 %, length ×1.61 the teacher's at the median; truncated 0,
+think leak 0; latency p50 3.2 s / p90 6.6 s under two concurrent
+requests (prompt 500 tok/s, generation 16 tok/s). What the misses show,
+and what SFT has to fix: window values the tool does not have ("tonight",
+"today" for a range with start/end), `group_by` dropped, `channel: 12`
+for "channel 12", a title searched on the tuned channel with
+`whats_on_now` instead of the guide, a channel id from a tool result
+reused as a channel name, "KTVU channel 2 is currently showing a
+programme" with no call at all, markdown asterisks around titles, and
+answers half again as long as the teacher's.
+
 The order of the gates: `sft_eval.py` on the dev split (did training do
 what the data asked, and what did it break), `model_bench.py` as the
 smoke test on the served GGUF, then `eval_suite.py` with the frontier,
