@@ -230,8 +230,50 @@ the laptop's server reachable for the check):
   `train.jsonl` is 153 MB. The trainer can filter on `n_tokens` if 16 k
   sequences do not fit.
 
-Then: keep the eval suite as the test set, `model_bench.py` as the smoke
-test on the served GGUF; regenerate rather than reuse across lineup
-changes, since every system prompt carries the lineup and the clock of the
-day it was made. The training settings are in the fine-tuning plan doc
-(Stage 1, "The SFT run on the laptop").
+## Training: `sft_train.py` (for the laptop; not yet run)
+
+QLoRA by default — the 4-bit base is ~5 GB, which leaves a laptop GPU
+room for the 16k-token guide-result examples; `--bf16-lora` for a 24 GB+
+card. Unsloth (`FastModel`) + TRL `SFTTrainer`, or `--no-unsloth` for
+transformers + peft + bitsandbytes. Prompt-completion format with
+`completion_only_loss`; no chat template is applied (the prep rendered it).
+
+```bash
+./sft_train.py --check                       # data + tokenizer agreement, the step plan; no model
+./sft_train.py --dry-run                     # loads the model, two steps, prints peak GPU memory
+./sft_train.py --out ~/minny-sft/sft1        # 2 epochs, lr 2e-4 cosine, r 32, effective batch 8
+./sft_train.py --merge-only ~/minny-sft/sft1/adapter --out ~/minny-sft/sft1
+```
+
+- **LoRA targets** (`TARGET_MODULES`, a regex over module names): Qwen3.5-9B
+  is `Qwen3_5ForConditionalGeneration` — a vision tower and a 32-layer text
+  model of 24 gated-delta *linear attention* layers (`in_proj_qkv`,
+  `in_proj_z`, `out_proj`) and 8 full-attention layers (`q/k/v/o_proj`),
+  MLPs in all. The adapter goes on those projections inside
+  `model.language_model` only; vision tower and MTP head stay frozen. The
+  stock "q,k,v,o,gate,up,down" list would miss three quarters of the
+  attention.
+- **Hybrid kernels:** install `flash-linear-attention` and `causal-conv1d`
+  on the laptop or the linear-attention layers train on slow fallbacks.
+- Dev loss and a checkpoint every `--eval-steps` (200); the best checkpoint
+  by dev loss is loaded at the end; `adapter/` and `train-summary.json`
+  (args, data stats, trainable parameters, peak memory, log history) go to
+  `--out`. `--resume DIR` continues from a checkpoint.
+- **Merge** applies the adapter to a fresh bf16 base (never to the
+  dequantised 4-bit weights it was trained against) and writes `merged/`
+  with the tokenizer, chat template and preprocessor files, on the CPU by
+  default (~20 GB RAM). Then llama.cpp: `convert_hf_to_gguf.py merged
+  --outtype q8_0`, `llama-server --alias qwen3.5-9b-sft1 --jinja -c 32768
+  -np 4`, and the eval suite with all three models in one run.
+- On a 16 GB card that runs out of memory: `--max-tokens 12288` (drops 230
+  of the 4,579 examples, the longest guide-result answers).
+- `--check` was run here on run1 (2026-10-07; a tokenizer, no model): all
+  4,349 + 230 examples usable, 200 of 200 sampled tokenise exactly as the
+  prep counted, eos is `<|im_end|>`; 38.0 M training tokens an epoch, 543
+  optimiser steps an epoch, 1,087 for the two, five evaluations.
+
+Keep the eval suite as the test set, `model_bench.py` as the smoke test
+on the served GGUF; regenerate rather than reuse across lineup changes,
+since every system prompt carries the lineup and the clock of the day it
+was made. The training settings are in the fine-tuning plan doc (Stage 1,
+"The SFT run on the laptop").
