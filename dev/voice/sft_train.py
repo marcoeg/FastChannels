@@ -188,6 +188,7 @@ def training_kwargs(args, out: Path, dry: bool, has_dev: bool) -> dict:
     """What SFTConfig is asked for; sft_config() maps the names."""
     return dict(
         output_dir=str(out / "checkpoints"), seed=args.seed, report_to="none",
+        disable_tqdm=True,                       # a nohup log wants lines, not a bar rewritten in place
         per_device_train_batch_size=1, per_device_eval_batch_size=1,
         gradient_accumulation_steps=args.grad_accum,
         num_train_epochs=args.epochs, max_steps=3 if dry else -1,
@@ -270,6 +271,8 @@ def main() -> None:
     ap.add_argument("--merge-device", default="cpu", help="cpu (needs ~20 GB RAM) or cuda")
     args = ap.parse_args()
     try:
+        if not (args.check or args.merge_only or args.no_unsloth):
+            import unsloth  # noqa: F401  before transformers, or its patches are skipped (it warns)
         import transformers  # noqa: F401  the shebang takes whatever python3 the shell has
     except ImportError as e:
         raise SystemExit(f"transformers is not importable from {sys.executable} ({e});\n"
