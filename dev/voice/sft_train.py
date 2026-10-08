@@ -105,6 +105,13 @@ def check_tokenizer(tok, rows: list[dict], sample: int, seed: int) -> dict:
 
 
 # ---- model ---------------------------------------------------------------------------------
+def _tokenizer_of(tok):
+    """A multimodal checkpoint comes with a Processor (images, text); its
+    text tokenizer is what this text-only training wants — a Processor
+    called on a string tries to decode it as an image."""
+    return tok.tokenizer if hasattr(tok, "tokenizer") else tok
+
+
 def load_model(args):
     """(model with LoRA attached, tokenizer)."""
     if not args.no_unsloth:
@@ -121,7 +128,7 @@ def load_model(args):
             except (TypeError, ValueError) as e:     # a version that wants its own target list
                 print(f"unsloth get_peft_model refused the target regex ({e}); using peft directly", file=sys.stderr)
                 model = _peft(model, args)
-            return model, tok
+            return model, _tokenizer_of(tok)
         except ImportError as e:
             print(f"unsloth not usable ({e}); falling back to transformers + peft", file=sys.stderr)
     import torch
@@ -139,7 +146,7 @@ def load_model(args):
         model = prepare_model_for_kbit_training(model, use_gradient_checkpointing=True)
     else:
         model.gradient_checkpointing_enable()
-    return _peft(model, args), tok
+    return _peft(model, args), _tokenizer_of(tok)
 
 
 def _peft(model, args):
