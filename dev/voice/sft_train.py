@@ -166,7 +166,28 @@ def trainable_report(model) -> dict:
 
 
 # ---- config ------------------------------------------------------------------------------------
-RENAMES = {"max_length": ["max_seq_length"], "eval_strategy": ["evaluation_strategy"]}
+# transformers 5 dropped warmup_ratio: warmup_steps takes a float ratio instead.
+RENAMES = {"max_length": ["max_seq_length"], "eval_strategy": ["evaluation_strategy"],
+           "warmup_ratio": ["warmup_steps"]}
+
+
+def training_kwargs(args, out: Path, dry: bool, has_dev: bool) -> dict:
+    """What SFTConfig is asked for; sft_config() maps the names."""
+    return dict(
+        output_dir=str(out / "checkpoints"), seed=args.seed, report_to="none",
+        per_device_train_batch_size=1, per_device_eval_batch_size=1,
+        gradient_accumulation_steps=args.grad_accum,
+        num_train_epochs=args.epochs, max_steps=2 if dry else -1,
+        learning_rate=args.lr, lr_scheduler_type="cosine", warmup_ratio=0.03,
+        weight_decay=0.0, max_grad_norm=1.0, bf16=True,
+        optim="adamw_8bit" if not args.bf16_lora else "adamw_torch",
+        logging_steps=1 if dry else 10,
+        eval_strategy="no" if dry or not has_dev else "steps", eval_steps=args.eval_steps,
+        save_strategy="no" if dry else "steps", save_steps=args.eval_steps, save_total_limit=3,
+        load_best_model_at_end=not dry and has_dev, metric_for_best_model="eval_loss", greater_is_better=False,
+        max_length=args.max_tokens, packing=False, completion_only_loss=True,
+        dataset_num_proc=2, gradient_checkpointing=args.no_unsloth,
+    )
 
 
 def sft_config(SFTConfig, **wanted):
@@ -285,22 +306,7 @@ def main() -> None:
     train_ds = Dataset.from_list([{"prompt": r["prompt"], "completion": r["completion"]} for r in train_rows])
     dev_ds = Dataset.from_list([{"prompt": r["prompt"], "completion": r["completion"]} for r in dev_rows]) if dev_rows else None
     dry = args.dry_run
-    cfg = sft_config(
-        SFTConfig,
-        output_dir=str(out / "checkpoints"), seed=args.seed, report_to="none",
-        per_device_train_batch_size=1, per_device_eval_batch_size=1,
-        gradient_accumulation_steps=args.grad_accum,
-        num_train_epochs=args.epochs, max_steps=2 if dry else -1,
-        learning_rate=args.lr, lr_scheduler_type="cosine", warmup_ratio=0.03,
-        weight_decay=0.0, max_grad_norm=1.0, bf16=True,
-        optim="adamw_8bit" if not args.bf16_lora else "adamw_torch",
-        logging_steps=1 if dry else 10,
-        eval_strategy="no" if dry or dev_ds is None else "steps", eval_steps=args.eval_steps,
-        save_strategy="no" if dry else "steps", save_steps=args.eval_steps, save_total_limit=3,
-        load_best_model_at_end=not dry and dev_ds is not None, metric_for_best_model="eval_loss", greater_is_better=False,
-        max_length=args.max_tokens, packing=False, completion_only_loss=True,
-        dataset_num_proc=2, gradient_checkpointing=args.no_unsloth,
-    )
+    cfg = sft_config(SFTConfig, **training_kwargs(args, out, dry, dev_ds is not None))
     dev_sub = (dev_ds.shuffle(seed=args.seed).select(range(min(args.eval_examples, len(dev_ds))))
                if dev_ds is not None else None)
     trainer = SFTTrainer(model=model, processing_class=tok, args=cfg, train_dataset=train_ds, eval_dataset=dev_sub)
