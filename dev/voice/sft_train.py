@@ -216,6 +216,8 @@ def main() -> None:
     ap.add_argument("--lora-r", type=int, default=32)
     ap.add_argument("--lora-alpha", type=int, help="default 2 × r")
     ap.add_argument("--eval-steps", type=int, default=200, help="dev loss and a checkpoint every N steps")
+    ap.add_argument("--eval-examples", type=int, default=60,
+                    help="dev examples for the periodic eval (a full dev pass is ~2 M tokens); the final eval uses all of dev")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--bf16-lora", action="store_true", help="LoRA on the bf16 base instead of QLoRA (24 GB+)")
     ap.add_argument("--no-unsloth", action="store_true", help="transformers + peft (+ bitsandbytes) instead of Unsloth")
@@ -287,7 +289,9 @@ def main() -> None:
         max_length=args.max_tokens, packing=False, completion_only_loss=True,
         dataset_num_proc=2, gradient_checkpointing=args.no_unsloth,
     )
-    trainer = SFTTrainer(model=model, processing_class=tok, args=cfg, train_dataset=train_ds, eval_dataset=dev_ds)
+    dev_sub = (dev_ds.shuffle(seed=args.seed).select(range(min(args.eval_examples, len(dev_ds))))
+               if dev_ds is not None else None)
+    trainer = SFTTrainer(model=model, processing_class=tok, args=cfg, train_dataset=train_ds, eval_dataset=dev_sub)
     if not getattr(trainer, "completion_only_loss", True):
         raise SystemExit("the trainer did not take completion_only_loss; the prompt would be trained on")
 
@@ -298,11 +302,17 @@ def main() -> None:
                         "peak_gpu_gb": round(torch.cuda.max_memory_allocated() / 2**30, 2),
                         "log_history": trainer.state.log_history[-200:]}
     if dry:
-        print(json.dumps(summary["train"], indent=1))
-        print(f"dry run: {summary['train']['peak_gpu_gb']} GB peak for {args.max_tokens}-token sequences")
+        # the projection is pessimistic: two steps carry the warm-up and kernel compilation
+        mean_tokens = train_stats["tokens"] / len(train_rows)
+        runtime = result.metrics.get("train_runtime") or 1.0
+        tps = 2 * args.grad_accum * mean_tokens / runtime
+        print(json.dumps({k: v for k, v in summary["train"].items() if k != "log_history"}, indent=1))
+        print(f"dry run: {summary['train']['peak_gpu_gb']} GB peak for {args.max_tokens}-token sequences; "
+              f"~{tps:.0f} training tokens/s → ~{train_stats['tokens'] / tps / 3600:.1f} h per epoch "
+              f"of {train_stats['tokens'] / 1e6:.1f} M tokens (an upper bound: the first steps include warm-up)")
         return
     if dev_ds is not None:
-        summary["train"]["final_eval"] = trainer.evaluate()
+        summary["train"]["final_eval"] = trainer.evaluate(dev_ds)
     adapter = out / "adapter"
     model.save_pretrained(adapter)
     tok.save_pretrained(adapter)

@@ -14,15 +14,29 @@ as `qwen3.5-9b-sft1`, with three gates passed or failed in writing.
 
 ```bash
 nvidia-smi                      # the card and its memory — this decides --max-tokens
-ps -o args= -C llama-server     # keep this line: the flags to reuse in step 8
+ps -o args= -C llama-server     # keep this line: the flags to reuse in step 6
 ```
 
-- 16 GB: QLoRA at 16k tokens is tight; plan on `--max-tokens 12288`.
-- 24 GB+: the defaults (16,384) should fit; the dry run in step 4 says.
-- **The served model holds ~13 GB of VRAM.** Stop llama-server for the
-  training hours (`systemctl --user stop …` or kill it; the household
-  brain is the frontier, only local-model tests lose it) and restart it
-  afterwards with the line you kept.
+Read on 2026-10-07 20:15: **NVIDIA RTX 5000 Ada Generation Laptop GPU,
+16 GB** (16,376 MiB), driver **535.171.04 / CUDA 12.2**, 130 MiB in use
+(Xorg) — llama-server not loaded. So:
+
+- QLoRA, and start with `--max-tokens 12288`; the dry run in step 3
+  decides. The Unsloth path is required on 16 GB: Qwen3.5's 248k
+  vocabulary makes a plain transformers run materialise sequence × vocab
+  logits (6–12 GB at 12k tokens); Unsloth's chunked loss does not. The
+  embeddings and LM head stay 16-bit under QLoRA (2 GB each), so the fixed
+  cost is ~8.5 GB of weights plus ~1 GB adapter and optimiser; the rest is
+  activations.
+- **Upgrade the driver before step 1.** 535 (CUDA 12.2) is older than
+  current PyTorch wheels (cu126/cu128) expect; a 550+ series driver from
+  Ubuntu's repository (`ubuntu-drivers list`, `sudo apt install
+  nvidia-driver-5xx`, reboot, `nvidia-smi` showing CUDA 12.4 or later)
+  removes the "CUDA driver version is insufficient" class of failures.
+- **The served model holds ~13 GB of VRAM.** Keep llama-server stopped for
+  the training hours (the household brain is the frontier; only
+  local-model tests lose it) and restart it afterwards with the line you
+  kept.
 
 ## 1. Code and environment (once)
 
@@ -75,11 +89,22 @@ an epoch, 1,087 for two.
 ./sft_train.py --dry-run --out ~/minny-sft/sft1
 ```
 
-Two optimiser steps, then `dry run: N GB peak for 16384-token sequences`.
-Out of memory → `--max-tokens 12288` and dry-run again (that cap drops 230
-of the 4,579 examples, the longest guide-result answers — acceptable, not
-free). Everything else is already at its memory minimum (micro-batch 1,
-8-bit optimiser, Unsloth checkpointing, 4-bit base).
+Two optimiser steps, then `dry run: N GB peak for 12288-token sequences;
+~T training tokens/s → ~H h per epoch`. Out of memory → a lower
+`--max-tokens` and dry-run again (12,288 drops 230 of the 4,579 examples,
+the longest guide-result answers — acceptable, not free). Everything else
+is already at its memory minimum (micro-batch 1, 8-bit optimiser, Unsloth
+checkpointing, 4-bit base).
+
+**Read H before training.** 38 M tokens an epoch on a 90 W laptop GPU is
+of the order of 10–25 hours; the two-step projection is an upper bound
+(it includes warm-up and kernel compilation), but if it says a day, plan
+for a day. The levers, in order of cost: `--epochs 1` (dev loss at the
+end says whether a second was needed; the checkpoints are kept either
+way); rent an H100 for an hour or two an epoch (the data is 161 MB and
+leaves no trace once the box is destroyed); halve the tokens with one
+example per turn instead of per step (the two steps of a turn share the
+same 8k prompt) — a pre-tokenised two-span mask, not written yet.
 
 ## 4. Train
 
@@ -89,8 +114,9 @@ tail -f ~/minny-sft/sft1.log
 ```
 
 Two epochs, lr 2e-4 cosine, LoRA r 32 on the language model's projections,
-effective batch 8; dev loss and a checkpoint every 200 steps (five in all),
-the best by dev loss loaded at the end; expect hours. Watch `eval_loss` in
+effective batch 8; dev loss on a 60-example subset and a checkpoint every
+200 steps (five in all), the best by that loss loaded at the end, a full
+dev pass at the end; the dry run's H tells you how long. Watch `eval_loss` in
 the log — it should fall through the first epoch and flatten in the
 second; rising again means stop at the best checkpoint (it is kept). A
 crash or a reboot: `--resume ~/minny-sft/sft1/checkpoints/checkpoint-NNN`.
@@ -184,9 +210,10 @@ or fail.
 
 ## Time, roughly
 
-Environment 1–2 h (the kernels may compile); data and checks 10 min; dry
-run 10 min; training an afternoon; merge and GGUF 30 min; the three gates
-an hour. If `eval_loss` is flat from the start or the fine-tune scores
+Driver upgrade and reboot 20 min; environment 1–2 h (the kernels may
+compile); data and checks 10 min; dry run 10 min; training as the dry run
+projects — on this card hours to a day an epoch; merge and GGUF 30 min;
+the three gates an hour. If `eval_loss` is flat from the start or the fine-tune scores
 below the base on names and args, the first suspects are the loss mask
 (`--check`'s boundary test), the template (`chat_template.jinja` in
 `train/` against the served one) and a learning rate too high for the
