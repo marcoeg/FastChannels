@@ -228,6 +228,11 @@ def main() -> None:
     ap.add_argument("--merge-only", type=Path, metavar="ADAPTER", help="only merge this adapter into --out/merged")
     ap.add_argument("--merge-device", default="cpu", help="cpu (needs ~20 GB RAM) or cuda")
     args = ap.parse_args()
+    try:
+        import transformers  # noqa: F401  the shebang takes whatever python3 the shell has
+    except ImportError as e:
+        raise SystemExit(f"transformers is not importable from {sys.executable} ({e});\n"
+                         "activate the training venv first: source ~/minny-sft/.venv/bin/activate")
     args.lora_alpha = args.lora_alpha or 2 * args.lora_r
     args.lr = args.lr or (1e-4 if args.bf16_lora else 2e-4)
     out = args.out

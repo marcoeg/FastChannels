@@ -41,7 +41,7 @@ Read on 2026-10-07 20:15: **NVIDIA RTX 5000 Ada Generation Laptop GPU,
 ## 1. Code and environment (once)
 
 ```bash
-cd ~/Development/FastChannels && git pull        # sft_train.py, sft_eval.py, sft/, SFT-DATA.md
+cd ~/Development/fastchannels-private && git pull     # sft_train.py, sft_eval.py, sft/, SFT-DATA.md
 mkdir -p ~/minny-sft && cd ~/minny-sft
 uv venv .venv --python 3.12 && source .venv/bin/activate      # or python -m venv
 uv pip install unsloth                                        # torch (CUDA), trl, peft, bitsandbytes, transformers
@@ -74,7 +74,8 @@ The scripts default to `--run ~/news/voice-sft/run1`, so the path is
 mirrored on purpose. Then, on the laptop, the check that needs no GPU:
 
 ```bash
-cd ~/Development/FastChannels/dev/voice && source ~/minny-sft/.venv/bin/activate
+source ~/minny-sft/.venv/bin/activate          # in EVERY shell that runs the scripts: the shebang takes the shell's python3
+cd ~/Development/fastchannels-private/dev/voice
 ./sft_train.py --check
 ```
 
@@ -85,7 +86,7 @@ an epoch, 1,087 for two.
 ## 3. Stop the server, dry-run
 
 ```bash
-# llama-server stopped (step 0)
+# llama-server stopped (step 0); the venv active
 ./sft_train.py --dry-run --out ~/minny-sft/sft1
 ```
 
@@ -167,7 +168,7 @@ rendered with:
 ```bash
 curl -s -H "Authorization: Bearer $LOCAL_LLM_API_KEY" http://127.0.0.1:8002/props \
   | python3 -c 'import sys,json; print(json.load(sys.stdin)["chat_template"], end="")' \
-  | diff - ~/Development/FastChannels/dev/voice/sft/chat_template.qwen3.5-served.jinja && echo "template identical"
+  | diff - ~/Development/fastchannels-private/dev/voice/sft/chat_template.qwen3.5-served.jinja && echo "template identical"
 ```
 
 ## 7. The gates, in order
