@@ -259,10 +259,15 @@ transformers + peft + bitsandbytes. Prompt-completion format with
   attention.
 - **Hybrid kernels:** install `flash-linear-attention` and `causal-conv1d`
   on the laptop or the linear-attention layers train on slow fallbacks.
-- Dev loss and a checkpoint every `--eval-steps` (200); the best checkpoint
-  by dev loss is loaded at the end; `adapter/` and `train-summary.json`
-  (args, data stats, trainable parameters, peak memory, log history) go to
-  `--out`. `--resume DIR` continues from a checkpoint.
+- A checkpoint every `--eval-steps` (200), `--keep` of them kept; **no
+  dev loss during the run** — an in-loop eval materialises the
+  `[1, seq, 248k]` logit tensor in fp32 (~8 GB) and OOMs a 16 GB card.
+  `--pick-best` scores the checkpoints afterwards on 60 dev examples with
+  the LM head run on the completion span only (`logits_to_keep`) and
+  picks the lowest loss (`pick-best.json`); `--pick-best-only OUT` reruns
+  that without training. `adapter/` and `train-summary.json` (args, data
+  stats, trainable parameters, peak memory, step times, log history) go
+  to `--out`. `--resume DIR` continues from a checkpoint.
 - **Merge** applies the adapter to a fresh bf16 base (never to the
   dequantised 4-bit weights it was trained against) and writes `merged/`
   with the tokenizer, chat template and preprocessor files, on the CPU by

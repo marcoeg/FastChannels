@@ -114,24 +114,38 @@ a pre-tokenised two-span mask, not written yet.
 ## 4. Train
 
 ```bash
-nohup ./sft_train.py --epochs 1 --max-tokens 12288 --out ~/minny-sft/sft1 --merge > ~/minny-sft/sft1.log 2>&1 &
+nohup ./sft_train.py --epochs 1 --max-tokens 12288 --out ~/minny-sft/sft1 --pick-best --merge > ~/minny-sft/sft1.log 2>&1 &
 tail -f ~/minny-sft/sft1.log
 ```
 
 One epoch first (~9 h here), lr 2e-4 cosine, LoRA r 32 on the language
-model's projections, effective batch 8; dev loss on a 60-example subset
-and a checkpoint every 200 steps, the best by that loss loaded at the
-end, a full dev pass at the end. A second epoch is a second night, taken
-only if the first epoch's dev loss was still falling at its end and the
-gates say the model is short of the teacher rather than past it. Watch `eval_loss` in
+model's projections, effective batch 8; a checkpoint every 200 steps
+(`--keep 8` kept). **No dev loss during the run**: an in-loop eval
+builds the `[1, seq, 248k]` logit tensor in fp32 (~8 GB) and OOMs this
+card. The log shows the training loss every 10 steps only. After the
+epoch, `--pick-best` loads a clean 4-bit base, scores every kept
+checkpoint and the final adapter on 60 dev examples with the LM head run
+on the completion span alone (`logits_to_keep`, no full logit tensor),
+writes `pick-best.json`, and `--merge` merges the best. Scoring can be
+rerun or done separately:
+
+```bash
+./sft_train.py --pick-best-only ~/minny-sft/sft1 --merge      # scores checkpoints/ + adapter/, merges the best
+```
+
+A second epoch is a second night, taken only if `pick-best.json` shows
+the loss still falling at the last checkpoint and the gates say the
+model is short of the teacher rather than past it. Watch `eval_loss` in
 the log — it should fall through the first epoch and flatten in the
 second; rising again means stop at the best checkpoint (it is kept). A
 crash or a reboot: `--resume ~/minny-sft/sft1/checkpoints/checkpoint-NNN`.
 
-Outputs: `adapter/`, `train-summary.json` (args, data, trainable
-parameters, peak memory, log history, final eval), and with `--merge` the
-`merged/` bf16 model — the adapter applied to a fresh bf16 base on the
-CPU (~20 GB RAM, several minutes). Without `--merge`, or to redo it:
+Outputs: `checkpoints/checkpoint-N/` (each a complete adapter),
+`adapter/` (the end of the run), `train-summary.json` (args, data,
+trainable parameters, peak memory, step times, log history),
+`pick-best.json`, and with `--merge` the `merged/` bf16 model — the chosen
+adapter applied to a fresh bf16 base on the CPU (~20 GB RAM, several
+minutes). Without `--merge`, or to redo it:
 
 ```bash
 ./sft_train.py --merge-only ~/minny-sft/sft1/adapter --out ~/minny-sft/sft1
