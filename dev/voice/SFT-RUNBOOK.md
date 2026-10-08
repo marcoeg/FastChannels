@@ -90,34 +90,40 @@ an epoch, 1,087 for two.
 ./sft_train.py --dry-run --out ~/minny-sft/sft1
 ```
 
-Two optimiser steps, then `dry run: N GB peak for 12288-token sequences;
-~T training tokens/s → ~H h per epoch`. Out of memory → a lower
-`--max-tokens` and dry-run again (12,288 drops 230 of the 4,579 examples,
-the longest guide-result answers — acceptable, not free). Everything else
-is already at its memory minimum (micro-batch 1, 8-bit optimiser, Unsloth
-checkpointing, 4-bit base).
+Three optimiser steps, then `dry run: N GB peak …; steps took [a, b, c] s;
+at the last step's rate ~T tokens/s → ~H h per epoch`. The first step is
+kernel compilation and does not count. Out of memory → a lower
+`--max-tokens` and dry-run again. Everything else is already at its memory
+minimum (micro-batch 1, 8-bit optimiser, Unsloth checkpointing, 4-bit base).
 
-**Read H before training.** 38 M tokens an epoch on a 90 W laptop GPU is
-of the order of 10–25 hours; the two-step projection is an upper bound
-(it includes warm-up and kernel compilation), but if it says a day, plan
-for a day. The levers, in order of cost: `--epochs 1` (dev loss at the
-end says whether a second was needed; the checkpoints are kept either
-way); rent an H100 for an hour or two an epoch (the data is 161 MB and
-leaves no trace once the box is destroyed); halve the tokens with one
-example per turn instead of per step (the two steps of a turn share the
-same 8k prompt) — a pre-tokenised two-span mask, not written yet.
+**Measured 2026-10-08 on this laptop at 12,288:** peak **10.2 GB**;
+first step 534 s, second **57 s** → ~1,200 training tokens/s →
+**~8.6 h an epoch** of 543 steps (35.0 M tokens; 216 train and 11 dev
+examples over the cap). Tokenising the examples adds ~8 min at the start
+of every run. 16,384 would likely fit in memory and costs ~10 % more
+time for the 216 longest guide-result answers.
+
+**Read H before training.** The levers, in order of cost: `--epochs 1`
+(a full cosine schedule in one night; the dev-loss trend at the end and
+the gates say whether a second epoch is worth another night); rent an
+H100 for an hour or two an epoch (the data is 161 MB and leaves no trace
+once the box is destroyed); halve the tokens with one example per turn
+instead of per step (the two steps of a turn share the same 8k prompt) —
+a pre-tokenised two-span mask, not written yet.
 
 ## 4. Train
 
 ```bash
-nohup ./sft_train.py --out ~/minny-sft/sft1 --merge > ~/minny-sft/sft1.log 2>&1 &
+nohup ./sft_train.py --epochs 1 --max-tokens 12288 --out ~/minny-sft/sft1 --merge > ~/minny-sft/sft1.log 2>&1 &
 tail -f ~/minny-sft/sft1.log
 ```
 
-Two epochs, lr 2e-4 cosine, LoRA r 32 on the language model's projections,
-effective batch 8; dev loss on a 60-example subset and a checkpoint every
-200 steps (five in all), the best by that loss loaded at the end, a full
-dev pass at the end; the dry run's H tells you how long. Watch `eval_loss` in
+One epoch first (~9 h here), lr 2e-4 cosine, LoRA r 32 on the language
+model's projections, effective batch 8; dev loss on a 60-example subset
+and a checkpoint every 200 steps, the best by that loss loaded at the
+end, a full dev pass at the end. A second epoch is a second night, taken
+only if the first epoch's dev loss was still falling at its end and the
+gates say the model is short of the teacher rather than past it. Watch `eval_loss` in
 the log — it should fall through the first epoch and flatten in the
 second; rising again means stop at the best checkpoint (it is kept). A
 crash or a reboot: `--resume ~/minny-sft/sft1/checkpoints/checkpoint-NNN`.

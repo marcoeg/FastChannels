@@ -157,6 +157,19 @@ def _peft(model, args):
     return model
 
 
+class StepTimer:
+    """Seconds per optimiser step; the last one is the rate, the first one
+    is kernel compilation (534 s against 57 s on the laptop)."""
+    def __init__(self):
+        self.t0, self.seconds = None, []
+
+    def on_step_begin(self, args, state, control, **kw):
+        self.t0 = time.monotonic()
+
+    def on_step_end(self, args, state, control, **kw):
+        self.seconds.append(round(time.monotonic() - self.t0, 1))
+
+
 def trainable_report(model) -> dict:
     total = trainable = 0
     for p in model.parameters():
@@ -177,7 +190,7 @@ def training_kwargs(args, out: Path, dry: bool, has_dev: bool) -> dict:
         output_dir=str(out / "checkpoints"), seed=args.seed, report_to="none",
         per_device_train_batch_size=1, per_device_eval_batch_size=1,
         gradient_accumulation_steps=args.grad_accum,
-        num_train_epochs=args.epochs, max_steps=2 if dry else -1,
+        num_train_epochs=args.epochs, max_steps=3 if dry else -1,
         learning_rate=args.lr, lr_scheduler_type="cosine", warmup_ratio=0.03,
         weight_decay=0.0, max_grad_norm=1.0, bf16=True,
         optim="adamw_8bit" if not args.bf16_lora else "adamw_torch",
@@ -309,7 +322,12 @@ def main() -> None:
     cfg = sft_config(SFTConfig, **training_kwargs(args, out, dry, dev_ds is not None))
     dev_sub = (dev_ds.shuffle(seed=args.seed).select(range(min(args.eval_examples, len(dev_ds))))
                if dev_ds is not None else None)
-    trainer = SFTTrainer(model=model, processing_class=tok, args=cfg, train_dataset=train_ds, eval_dataset=dev_sub)
+    from transformers import TrainerCallback
+    timer = StepTimer()
+    callback = type("StepTimerCallback", (TrainerCallback,), {"on_step_begin": lambda self, *a, **k: timer.on_step_begin(*a, **k),
+                                                            "on_step_end": lambda self, *a, **k: timer.on_step_end(*a, **k)})()
+    trainer = SFTTrainer(model=model, processing_class=tok, args=cfg, train_dataset=train_ds, eval_dataset=dev_sub,
+                         callbacks=[callback])
     if not getattr(trainer, "completion_only_loss", True):
         raise SystemExit("the trainer did not take completion_only_loss; the prompt would be trained on")
 
@@ -318,16 +336,17 @@ def main() -> None:
     result = trainer.train(resume_from_checkpoint=str(args.resume) if args.resume else None)
     summary["train"] = {"seconds": round(time.monotonic() - t0), "metrics": result.metrics,
                         "peak_gpu_gb": round(torch.cuda.max_memory_allocated() / 2**30, 2),
-                        "log_history": trainer.state.log_history[-200:]}
+                        "step_seconds": timer.seconds[:50], "log_history": trainer.state.log_history[-200:]}
     if dry:
-        # the projection is pessimistic: two steps carry the warm-up and kernel compilation
         mean_tokens = train_stats["tokens"] / len(train_rows)
-        runtime = result.metrics.get("train_runtime") or 1.0
-        tps = 2 * args.grad_accum * mean_tokens / runtime
+        last = timer.seconds[-1] if timer.seconds else (result.metrics.get("train_runtime") or 1.0)
+        tps = args.grad_accum * mean_tokens / last
+        steps = len(train_rows) // args.grad_accum
         print(json.dumps({k: v for k, v in summary["train"].items() if k != "log_history"}, indent=1))
         print(f"dry run: {summary['train']['peak_gpu_gb']} GB peak for {args.max_tokens}-token sequences; "
-              f"~{tps:.0f} training tokens/s → ~{train_stats['tokens'] / tps / 3600:.1f} h per epoch "
-              f"of {train_stats['tokens'] / 1e6:.1f} M tokens (an upper bound: the first steps include warm-up)")
+              f"steps took {timer.seconds} s (the first is kernel compilation); at the last step's rate "
+              f"~{tps:.0f} training tokens/s → ~{steps * last / 3600:.1f} h per epoch of {steps} steps, "
+              f"{train_stats['tokens'] / 1e6:.1f} M tokens")
         return
     if dev_ds is not None:
         summary["train"]["final_eval"] = trainer.evaluate(dev_ds)
