@@ -196,9 +196,12 @@ def training_kwargs(args, out: Path, dry: bool, has_dev: bool) -> dict:
         weight_decay=0.0, max_grad_norm=1.0, bf16=True,
         optim="adamw_8bit" if not args.bf16_lora else "adamw_torch",
         logging_steps=1 if dry else 10,
-        eval_strategy="no" if dry or not has_dev else "steps", eval_steps=args.eval_steps,
-        save_strategy="no" if dry else "steps", save_steps=args.eval_steps, save_total_limit=3,
-        load_best_model_at_end=not dry and has_dev, metric_for_best_model="eval_loss", greater_is_better=False,
+        # No in-loop eval: a dev forward on Qwen3.5's 248k-vocab logit tensor at long
+        # context OOMs a 16 GB card (accelerate upcasts [1, seq, 248k] to fp32). Instead
+        # save checkpoints through the run and score them afterwards — see --pick-best.
+        eval_strategy="no",
+        save_strategy="no" if dry else "steps", save_steps=args.eval_steps, save_total_limit=args.keep,
+        load_best_model_at_end=False,            # nothing to select on in-loop; --pick-best does it after
         max_length=args.max_tokens, packing=False, completion_only_loss=True,
         dataset_num_proc=2, gradient_checkpointing=args.no_unsloth,
     )
@@ -245,6 +248,88 @@ def merge(args, adapter: Path, out: Path) -> Path:
     return dest
 
 
+# ---- checkpoint scoring ------------------------------------------------------------------------
+def _dev_loss(model, tok, rows, max_ctx: int) -> float:
+    """Mean per-token NLL on the completion only. The LM head runs on the
+    completion span alone (logits_to_keep), so the [seq, 248k-vocab] logits that
+    OOM the in-loop eval are never built. Sequences longer than max_ctx keep
+    their tail — the completion and as much preceding prompt as fits — so this is
+    a consistent score for ranking checkpoints, not the exact training loss."""
+    import torch
+    import torch.nn.functional as F
+    model.eval()
+    tot_loss, tot_tok = 0.0, 0
+    for r in rows:
+        p = tok(r["prompt"], add_special_tokens=False).input_ids
+        full = tok(r["prompt"] + r["completion"], add_special_tokens=False).input_ids
+        ids = full[-max_ctx:] if len(full) > max_ctx else full      # keep the tail → keep the completion
+        n_comp = min(len(full) - len(p), len(ids) - 1)              # ≥1 token must precede the completion
+        if n_comp <= 0:
+            continue
+        input_ids = torch.tensor([ids], device=model.device)
+        with torch.no_grad():
+            try:
+                logits = model(input_ids=input_ids, logits_to_keep=n_comp + 1).logits
+            except TypeError:                                       # older forward without logits_to_keep
+                logits = model(input_ids=input_ids).logits[:, -(n_comp + 1):, :]
+        pred = logits[:, :-1, :].reshape(-1, logits.size(-1))       # positions predicting each completion token
+        targets = input_ids[:, -n_comp:].reshape(-1)
+        for i in range(0, pred.size(0), 256):                       # chunk the fp32 upcast to bound memory
+            tot_loss += F.cross_entropy(pred[i:i + 256].float(), targets[i:i + 256], reduction="sum").item()
+        tot_tok += n_comp
+    return tot_loss / max(tot_tok, 1)
+
+
+def checkpoints_under(out: Path) -> list[Path]:
+    """Saved checkpoints oldest-first, plus out/adapter (the end-of-run state)."""
+    ckpts = sorted((out / "checkpoints").glob("checkpoint-*"),
+                   key=lambda p: int(p.name.split("-")[1]) if p.name.split("-")[1].isdigit() else 0)
+    if (out / "adapter" / "adapter_config.json").exists():
+        ckpts.append(out / "adapter")
+    return ckpts
+
+
+def score_checkpoints(args, out: Path) -> Path | None:
+    """Load a clean 4-bit base once, score every checkpoint's dev loss by swapping
+    its adapter in, and return the best (lowest-loss) adapter directory."""
+    import torch
+    from peft import PeftModel
+    from transformers import AutoModelForImageTextToText, AutoTokenizer, BitsAndBytesConfig
+    ckpts = checkpoints_under(out)
+    if not ckpts:
+        print(f"no checkpoints under {out/'checkpoints'}", file=sys.stderr)
+        return None
+    dev_rows, _ = load_examples(args.run / "train" / "dev.jsonl", args.max_tokens)
+    rows = random.Random(args.seed).sample(dev_rows, k=min(args.eval_examples, len(dev_rows)))
+    max_ctx = args.eval_max_tokens or args.max_tokens
+    tok = _tokenizer_of(AutoTokenizer.from_pretrained(args.base))
+    base = AutoModelForImageTextToText.from_pretrained(
+        args.base, torch_dtype=torch.bfloat16, device_map={"": 0},
+        quantization_config=BitsAndBytesConfig(
+            load_in_4bit=True, bnb_4bit_quant_type="nf4", bnb_4bit_use_double_quant=True,
+            bnb_4bit_compute_dtype=torch.bfloat16))
+    print(f"scoring {len(ckpts)} checkpoints on {len(rows)} dev examples (context ≤{max_ctx})", file=sys.stderr)
+    pm, scores = None, {}
+    for i, ckpt in enumerate(ckpts):
+        name = f"c{i}"
+        if pm is None:
+            pm = PeftModel.from_pretrained(base, str(ckpt), adapter_name=name)
+        else:
+            pm.load_adapter(str(ckpt), adapter_name=name)
+        pm.set_adapter(name)
+        scores[str(ckpt)] = _dev_loss(pm, tok, rows, max_ctx)
+        print(f"  {ckpt.name}: dev_loss {scores[str(ckpt)]:.4f}", file=sys.stderr)
+        if name != "c0":
+            pm.delete_adapter(name)                                 # keep only one extra adapter resident
+    best = min(scores, key=scores.get)
+    (out / "pick-best.json").write_text(json.dumps(
+        {"eval_max_tokens": max_ctx, "eval_examples": len(rows), "scores": scores, "best": best}, indent=1))
+    print(f"best: {Path(best).name} (dev_loss {scores[best]:.4f}) → {out}/pick-best.json")
+    del pm, base
+    torch.cuda.empty_cache()
+    return Path(best)
+
+
 # ---- main ----------------------------------------------------------------------------------------
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
@@ -257,9 +342,16 @@ def main() -> None:
     ap.add_argument("--grad-accum", type=int, default=8, help="effective batch (micro-batch is 1)")
     ap.add_argument("--lora-r", type=int, default=32)
     ap.add_argument("--lora-alpha", type=int, help="default 2 × r")
-    ap.add_argument("--eval-steps", type=int, default=200, help="dev loss and a checkpoint every N steps")
+    ap.add_argument("--eval-steps", type=int, default=200, help="save a checkpoint every N steps")
+    ap.add_argument("--keep", type=int, default=8, help="save_total_limit: how many recent checkpoints to keep for --pick-best")
     ap.add_argument("--eval-examples", type=int, default=60,
-                    help="dev examples for the periodic eval (a full dev pass is ~2 M tokens); the final eval uses all of dev")
+                    help="dev examples used to score checkpoints in --pick-best")
+    ap.add_argument("--pick-best", action="store_true",
+                    help="after training, score every kept checkpoint's dev loss and merge/keep the best")
+    ap.add_argument("--pick-best-only", type=Path, metavar="OUT",
+                    help="skip training: score the checkpoints already under OUT/checkpoints and report the best")
+    ap.add_argument("--eval-max-tokens", type=int, default=0,
+                    help="context cap when scoring checkpoints (0 = use --max-tokens); lower it only if scoring OOMs")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--bf16-lora", action="store_true", help="LoRA on the bf16 base instead of QLoRA (24 GB+)")
     ap.add_argument("--no-unsloth", action="store_true", help="transformers + peft (+ bitsandbytes) instead of Unsloth")
@@ -285,6 +377,13 @@ def main() -> None:
     if args.merge_only:
         dest = merge(args, args.merge_only, out)
         print(f"merged → {dest}\nnext: python convert_hf_to_gguf.py {dest} --outtype q8_0 --outfile {out}/qwen3.5-9b-sft.Q8_0.gguf")
+        return
+
+    if args.pick_best_only:
+        best = score_checkpoints(args, args.pick_best_only)
+        if best and args.merge:
+            dest = merge(args, best, args.pick_best_only)
+            print(f"merged {best.name} → {dest}\nnext: python convert_hf_to_gguf.py {dest} --outtype q8_0 --outfile {args.pick_best_only}/qwen3.5-9b-sft.Q8_0.gguf")
         return
 
     data = args.run / "train"
@@ -323,13 +422,11 @@ def main() -> None:
     dev_ds = Dataset.from_list([{"prompt": r["prompt"], "completion": r["completion"]} for r in dev_rows]) if dev_rows else None
     dry = args.dry_run
     cfg = sft_config(SFTConfig, **training_kwargs(args, out, dry, dev_ds is not None))
-    dev_sub = (dev_ds.shuffle(seed=args.seed).select(range(min(args.eval_examples, len(dev_ds))))
-               if dev_ds is not None else None)
     from transformers import TrainerCallback
     timer = StepTimer()
     callback = type("StepTimerCallback", (TrainerCallback,), {"on_step_begin": lambda self, *a, **k: timer.on_step_begin(*a, **k),
                                                             "on_step_end": lambda self, *a, **k: timer.on_step_end(*a, **k)})()
-    trainer = SFTTrainer(model=model, processing_class=tok, args=cfg, train_dataset=train_ds, eval_dataset=dev_sub,
+    trainer = SFTTrainer(model=model, processing_class=tok, args=cfg, train_dataset=train_ds, eval_dataset=None,
                          callbacks=[callback])
     if not getattr(trainer, "completion_only_loss", True):
         raise SystemExit("the trainer did not take completion_only_loss; the prompt would be trained on")
@@ -351,18 +448,20 @@ def main() -> None:
               f"~{tps:.0f} training tokens/s → ~{steps * last / 3600:.1f} h per epoch of {steps} steps, "
               f"{train_stats['tokens'] / 1e6:.1f} M tokens")
         return
-    if dev_ds is not None:
-        summary["train"]["final_eval"] = trainer.evaluate(dev_ds)
     adapter = out / "adapter"
     model.save_pretrained(adapter)
     tok.save_pretrained(adapter)
     (out / "train-summary.json").write_text(json.dumps(summary, indent=1, default=str), encoding="utf-8")
     print(f"adapter → {adapter}; summary → {out}/train-summary.json")
-    if args.merge:
-        del trainer, model
+    chosen = adapter
+    if args.pick_best or args.merge:
+        del trainer, model                       # free the training model before a clean base is loaded
         torch.cuda.empty_cache()
-        dest = merge(args, adapter, out)
-        print(f"merged → {dest}\nnext: python convert_hf_to_gguf.py {dest} --outtype q8_0 --outfile {out}/qwen3.5-9b-sft.Q8_0.gguf")
+    if args.pick_best:
+        chosen = score_checkpoints(args, out) or adapter
+    if args.merge:
+        dest = merge(args, chosen, out)
+        print(f"merged {chosen.name} → {dest}\nnext: python convert_hf_to_gguf.py {dest} --outtype q8_0 --outfile {out}/qwen3.5-9b-sft.Q8_0.gguf")
 
 
 if __name__ == "__main__":
