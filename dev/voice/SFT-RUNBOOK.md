@@ -158,14 +158,30 @@ tensor layout match what `:8001` serves:
 
 ```bash
 cd ~/minny-sft && git clone https://github.com/ggml-org/llama.cpp && cd llama.cpp && git checkout b11340
-uv pip install -r requirements/requirements-convert_hf_to_gguf.txt
-python convert_hf_to_gguf.py ~/minny-sft/sft1/merged --outtype q8_0 \
+uv pip install -r requirements/requirements-convert_hf_to_gguf.txt   # see the venv note below
+python convert_hf_to_gguf.py ~/minny-sft/sft1/merged --outtype q8_0 --no-nextn \
     --outfile ~/minny-sft/sft1/qwen3.5-9b-sft1-Q8_0.gguf
 ```
+
+**`--no-nextn` is required.** Qwen3.5 carries a NextN/MTP speculative head
+(`text_config.mtp_num_hidden_layers = 1`). Without the flag the converter
+writes MTP metadata — `block_count` bumped to 33, a 33-long
+`recurrent_layers`, `blk.*.nextn.*` tensors expected — but the merged model
+(from `AutoModelForImageTextToText.merge_and_unload`) carries no MTP
+weights, so the GGUF is inconsistent and the server refuses it
+(`check_tensor_dims: tensor 'blk.32.attn_norm.weight' not found`, then
+`blk.31.nextn.eh_proj.weight not found`). `--no-nextn` drops the head
+entirely and yields a clean 32-layer model matching what `:8001` serves.
 
 Q8_0 is the level served today (the base is Unsloth's `UD-Q8_K_XL`, a
 dynamic Q8; plain Q8_0 is near-lossless and enough). The vision tower is
 not needed: no `--mmproj`.
+
+The convert requirements pin older, CPU builds — installing them into the
+training venv downgrades it (`torch …+cu126 → …+cpu`, `transformers 5 → 4`),
+so it can no longer train. Either use a throwaway venv for the conversion
+(`uv venv ~/minny-sft/.convert && source …/bin/activate`), or reinstall the
+cu126 stack (step 1's CUDA-version trap) before the next training run.
 
 ## 6. Serve the fine-tune
 
