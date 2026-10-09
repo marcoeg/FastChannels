@@ -3,9 +3,8 @@
 The laptop is `192.168.50.71` (llama-server b11340 on `:8001`, alias
 `qwen3.5-9b`, four slots sharing a 32k context, API key
 `LOCAL_LLM_API_KEY`). Everything below runs there unless marked **nucbox**.
-The data and the scripts are ready; nothing in this list has been run yet
-except the data preparation and the base model's baseline (both from
-nucbox). Written 2026-10-07.
+Written 2026-10-07; run through once on 2026-10-08/09 (sft1 — the
+corrections and the gate results are at the end).
 
 What you end up with: `~/minny-sft/sft1/qwen3.5-9b-sft1-Q8_0.gguf`, served
 as `qwen3.5-9b-sft1`, with three gates passed or failed in writing.
@@ -312,15 +311,31 @@ The plan above mostly held; the corrections, in the order they bit:
 
 The result: `sft1/qwen3.5-9b-sft1-Q8_0.gguf` (8.9 GB, 32 layers,
 `block_count=32`) loads on build b11340 and generates at ~43 tok/s on this
-card. The gates (step 7) have not been run yet.
+card.
+
+- **The gates, 2026-10-09 (from nucbox, `:8001` down so the fine-tune
+  alone against the saved baselines).** Gate 1: kind 93.5 % (base 83.5),
+  tool names 78.0 % (58.5), args 55.9 % (29.7), text ×0.99 the teacher's
+  length (1.61) with no forbidden patterns, hygiene rows all 0, judge
+  same-facts 79 % of 110 text steps. Gate 2: 27/27, routed 100 % (base
+  88 %), judge 4.52 / 4.41 / 4.78 (base 4.08 / 3.96 / 4.42). Gate 3:
+  routed / checks / meets 97 / 93 / 78 % (base 91 / 82 / 64, frontier in
+  the same run 97 / 96 / 86), judge 4.62 / 4.26 / 4.73. Weak where the
+  guide result is long (catch-up and schedule categories); tuning, memory
+  and robustness at or above the frontier's. The table and the reading
+  are in `SFT-DATA.md`. Gate 1 taught the eval two things on the way:
+  retry the steps a server error loses (12 of 230 failed on "Context
+  size has been exceeded" at the start of the run), and give the judge
+  room for its notes (38 verdicts were cut off at 200 tokens).
 
 ## Time, roughly
 
-Driver upgrade and reboot 20 min; environment 1–2 h (the kernels may
-compile); data and checks 10 min; dry run 10 min; training as the dry run
-projects — on this card hours to a day an epoch; merge and GGUF 30 min;
-the three gates an hour. If `eval_loss` is flat from the start or the fine-tune scores
-below the base on names and args, the first suspects are the loss mask
-(`--check`'s boundary test), the template (`chat_template.jinja` in
-`train/` against the served one) and a learning rate too high for the
-adapter — in that order.
+Environment 1–2 h (the kernels may compile; no driver upgrade was needed
+with the cu126 wheels); data and checks 10 min; dry run 10 min; training
+as the dry run projects — 8.5 h an epoch on this card; scoring, merge and
+GGUF 30 min; the three gates an hour and a half. If `pick-best.json` is
+flat from the first checkpoint or the fine-tune scores below the base on
+names and args, the first suspects are the loss mask (`--check`'s
+boundary test), the template (`chat_template.jinja` in `train/` against
+the served one) and a learning rate too high for the adapter — in that
+order.

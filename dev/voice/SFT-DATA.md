@@ -341,3 +341,50 @@ judge). Regenerate rather than reuse across lineup changes, since every
 system prompt carries the lineup and the clock of the day it was made.
 The training settings are in the fine-tuning plan doc (Stage 1, "The SFT
 run on the laptop").
+
+## sft1 — the first fine-tune and its gates (2026-10-09)
+
+One epoch of QLoRA on run1 (4,133 examples at 12,288 tokens, 517 steps,
+~8.5 h on the laptop's RTX 5000 Ada 16 GB; the last checkpoint won the
+post-hoc dev-loss ranking at 0.134; details in `SFT-RUNBOOK.md`), merged
+and served as `qwen3.5-9b-sft1` (Q8_0, 8.9 GB) on `:8002`. All three
+gates run the same morning; the base's figures are its baselines (gate 1
+and 2 from their own runs, gate 3 from 2026-10-07 06:17 — a different
+day, so its volatile scenarios are not strictly comparable).
+
+| Gate | metric | base | **sft1** | frontier |
+| --- | --- | --- | --- | --- |
+| 1 `sft_eval` (230 dev steps, `sft-eval-20261009-0630.json`) | kind accuracy | 83.5 % | **93.5 %** | — |
+| | tool names / args | 58.5 / 29.7 % | **78.0 / 55.9 %** | — |
+| | exact match | 10.9 % | **33.5 %** | — |
+| | text: forbidden / length vs teacher | 3.6 % / ×1.61 | **0 / ×0.99** | — |
+| | judge same facts (110 text steps) | — | **79 %** | — |
+| | malformed XML / Python literals / truncated / think leak | 0 / 0.8 % / 0 / 0 | **0 / 0 / 0 / 0** | — |
+| | latency p50 / p90 (two concurrent) | 3.2 / 6.6 s | **2.6 / 6.5 s** | — |
+| 2 `model_bench` (27 questions, `20261009-0639.json`) | routed | 88 % (2026-10-02) | **100 %** | 100 % |
+| | faithful / helpful / voice | 4.08 / 3.96 / 4.42 | **4.52 / 4.41 / 4.78** | ~4.9 / 4.6 / 4.95 |
+| | first text p50 | 2.7 s | 3.1 s | 2.3 s |
+| 3 `eval_suite` (92 turns, `suite-20261009-0651.json`) | routed / checks / meets | 91 / 82 / 64 % | **97 / 93 / 78 %** | 97 / 96 / 86 % |
+| | faithful / helpful / voice | 4.14 / 3.84 / 4.27 | **4.62 / 4.26 / 4.73** | 4.77 / 4.53 / 4.89 |
+| | first text p50 / p90 | 2.5 s / — | 2.7 / 5.9 s | 2.3 / 2.8 s |
+
+Reading it: routing now equals the frontier's; the tool arguments and
+the spoken form (no markdown, the teacher's length, JSON literals, no
+"None" channels) are what one epoch bought. Where the fine-tune still
+reads as a smaller model is the long guide result: suite categories
+catch-up (meets 43 % against the frontier's 71 %) and schedule (58 %
+against 92 %) — a follow-on programme misread off a multi-airing result,
+dish names paraphrased where the titles were asked for, an on-demand
+check skipped — and gate 1's 23 judge disagreements are the same thing
+on the dev set (dropped newscasts and channels, a swapped channel name).
+Tuning (100 %), memory (100 %) and robustness (80 %) are at or above the
+frontier's in this run. Two misses of a different kind: "Hey Wanda" was
+answered without the name (the identity rule), and a volume step landed
+at the wrong level.
+
+What to do with it: as the **local** brain it replaces the base
+outright (`LOCAL_LLM_MODEL=qwen3.5-9b-sft1`); the household brain stays
+the frontier. The next gain is not a second epoch over the same data —
+the dev loss was flat over the last hundred steps — but more examples
+where it is weak: schedule follow-ups over long results and catch-up
+turns, generated with the same pipeline, then a run2.
