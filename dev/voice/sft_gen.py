@@ -196,6 +196,11 @@ class Slots:
             ch = r.choice(self.channels)
             bound["_channel"] = ch
             return r.choice([sp for sp in ch["spellings"] if not sp.isdigit()][:3])
+        if key == "bcast_channel":                # broadcast channels (numbers under 100): the ones with catch-up
+            pool = [c for c in self.channels if c["number"] and c["number"] < 100] or self.channels
+            ch = r.choice(pool)
+            bound["_channel"] = ch
+            return r.choice([sp for sp in ch["spellings"] if not sp.isdigit()][:3])
         if key == "channel_name":                 # the lineup's own name, for memory notes
             ch = bound.get("_channel") or r.choice(self.channels)
             bound["_channel"] = ch
@@ -247,7 +252,7 @@ class Slots:
 
     def regex_for(self, key: str, bound: dict) -> str:
         """A regex accepting every spelling of the bound value (tool_args)."""
-        if key in ("channel", "channel_full", "misheard_channel"):
+        if key in ("channel", "bcast_channel", "channel_full", "misheard_channel"):
             ch = bound.get("_channel")
             spell = (ch or {}).get("spellings") or [bound.get(key, "")]
             return "(?i)" + "|".join(re.escape(s) for s in spell if s)
@@ -588,7 +593,7 @@ def recheck(out: Path, defaults: dict, retry_errors: bool) -> Counter:
 def validate(tpl: dict) -> list[str]:
     problems = []
     known = set(tpl["slots"]) | {"channel", "channel_name", "number", "channel_prefix", "channel_full", "misheard_text", "misheard_channel",
-                                 "title_now", "title_tonight", "vod_title", "level_frac", "level_pct"}
+                                 "title_now", "title_tonight", "vod_title", "level_frac", "level_pct", "bcast_channel"}
     for kind in ("single", "multi"):
         for t in tpl[kind]:
             turns = t["turns"] if kind == "multi" else [t]
@@ -620,6 +625,8 @@ async def main() -> None:
     ap.add_argument("--shard", help="internal: i/k")
     ap.add_argument("--check", action="store_true", help="validate templates and the held-out overlap, offline")
     ap.add_argument("--plan", action="store_true", help="sample and print the traffic; reads only, no model")
+    ap.add_argument("--focus", help="comma-separated template ids: sample only these, no log utterances "
+                                    "(a targeted run; the single/multi shares follow the ids' weights)")
     ap.add_argument("--recheck", type=Path, metavar="DIR", help="re-apply the current checks to a run; no model calls")
     ap.add_argument("--retry-errors", action="store_true", help="with --recheck: drop errored conversations so a resume regenerates them")
     args = ap.parse_args()
@@ -643,6 +650,17 @@ async def main() -> None:
         return
     if problems:
         raise SystemExit("templates invalid:\n  " + "\n  ".join(problems))
+    if args.focus:
+        ids = {x.strip() for x in args.focus.split(",") if x.strip()}
+        unknown = ids - {t["id"] for t in tpl["single"] + tpl["multi"]}
+        if unknown:
+            raise SystemExit(f"--focus: unknown template ids {sorted(unknown)}")
+        tpl["single"] = [t for t in tpl["single"] if t["id"] in ids]
+        tpl["multi"] = [t for t in tpl["multi"] if t["id"] in ids]
+        w_single = sum(t.get("weight", 1) for t in tpl["single"])
+        w_multi = sum(t.get("weight", 1) for t in tpl["multi"])
+        tpl["mix"] = {**tpl["mix"], "log": 0.0,
+                      "single": w_single / (w_single + w_multi), "multi": w_multi / (w_single + w_multi)}
     if args.recheck:
         defaults = json.loads(SUITE.read_text()).get("defaults") or {}
         stats = recheck(args.recheck, defaults, args.retry_errors)

@@ -4,7 +4,11 @@ The laptop is `192.168.50.71` (llama-server b11340 on `:8001`, alias
 `qwen3.5-9b`, four slots sharing a 32k context, API key
 `LOCAL_LLM_API_KEY`). Everything below runs there unless marked **nucbox**.
 Written 2026-10-07; run through once on 2026-10-08/09 (sft1 — the
-corrections and the gate results are at the end).
+corrections and the gate results are at the end). The decision after
+sft1 (2026-10-09): stay on the 9B; next a targeted run2 of data where
+it is short (schedule follow-ups over long results, catch-up turns),
+then RLVR with grounding and coverage rewards — "Next: run2 and RLVR"
+at the end.
 
 What you end up with: `~/minny-sft/sft1/qwen3.5-9b-sft1-Q8_0.gguf`, served
 as `qwen3.5-9b-sft1`, with three gates passed or failed in writing.
@@ -50,11 +54,9 @@ Read on 2026-10-07 20:15: **NVIDIA RTX 5000 Ada Generation Laptop GPU,
   embeddings and LM head stay 16-bit under QLoRA (2 GB each), so the fixed
   cost is ~8.5 GB of weights plus ~1 GB adapter and optimiser; the rest is
   activations.
-- **Upgrade the driver before step 1.** 535 (CUDA 12.2) is older than
-  current PyTorch wheels (cu126/cu128) expect; a 550+ series driver from
-  Ubuntu's repository (`ubuntu-drivers list`, `sudo apt install
-  nvidia-driver-5xx`, reboot, `nvidia-smi` showing CUDA 12.4 or later)
-  removes the "CUDA driver version is insufficient" class of failures.
+- **The driver (535, CUDA 12.2) is fine as it is** — pin the cu126 build
+  of torch (step 1 as it was actually done, in the first-run notes);
+  the cu130 wheel uv picks by default is the one that fails on it.
 - **The served model holds ~13 GB of VRAM.** Keep llama-server stopped for
   the training hours (the household brain is the frontier; only
   local-model tests lose it) and restart it afterwards with the line you
@@ -261,11 +263,13 @@ not only the percentages.
 
 If the gates pass: in `dev/voice/.env` on nucbox set
 `LOCAL_LLM_MODEL=qwen3.5-9b-sft1` and `LOCAL_LLM_BASE_URL` to the port it
-is served on. The household's brain stays the frontier (`VOICE_MODEL`)
-until the local path is switched on deliberately; nothing restarts by
-itself. Copy `train-summary.json` and the `sft-eval-*.json` results back
-to nucbox and put the numbers in `SFT-DATA.md` next to the baseline, pass
-or fail.
+is served on. That changes the **local brain** only — the model the agent
+uses when `VOICE_LLM=local`; the household's brain stays the frontier
+(`VOICE_LLM=openai`, `VOICE_MODEL`) until that switch is flipped
+deliberately; nothing restarts by itself. Copy `train-summary.json` and
+the `sft-eval-*.json` results back to nucbox and put the numbers in
+`SFT-DATA.md` next to the baseline, pass or fail. (sft1: recommended as
+the local brain on 2026-10-09; the results are in `SFT-DATA.md`.)
 
 ## First run — sft1, 2026-10-08/09 (what actually happened)
 
@@ -339,3 +343,44 @@ names and args, the first suspects are the loss mask (`--check`'s
 boundary test), the template (`chat_template.jinja` in `train/` against
 the served one) and a learning rate too high for the adapter — in that
 order.
+
+## Next: run2 and RLVR (decided 2026-10-09)
+
+Why not a bigger model yet: routing and format are solved at 9B; what is
+short is reading a long guide result (catch-up 43 % and schedule 58 %
+meets against the frontier's 71 and 92). A 27B would likely close that
+but cannot be served on this laptop at voice latency (Q4 is ~17 GB), so
+it is a purchase, not an experiment. The 9B path first:
+
+1. **run2 — targeted data** (nucbox, the generator): new templates in
+   `sft/templates.json` for schedule follow-ups over long results ("what's
+   on X tonight → and after that → when does it end", "any comedies
+   tonight → tell me about the second one → put it on") and catch-up turns
+   ("what can I catch up on from X → play the second one", "is there a
+   catch-up of Y → play it from the beginning"), generated with
+   `./sft_gen.py --focus <those ids> --n 800 --workers 4 --out
+   ~/news/voice-sft/run2`, rechecked, prepared with `sft_train_prep.py`
+   into `run2/train/`. Gate 1 of sft1 on run2's dev split is the new
+   baseline for the weak categories.
+2. **sft2** (laptop): one epoch from the base over run1 + run2
+   (`sft_train.py --run ~/news/voice-sft/run1 ~/news/voice-sft/run2`,
+   ~12 h), `--pick-best-only`, merge, GGUF with `--no-nextn`, the three
+   gates. Continuing from sft1's adapter on run2 alone is faster (~4 h)
+   but drifts from run1's coverage; from the base over both is the clean
+   comparison.
+3. **RLVR** (rented 80 GB cards; the laptop cannot sample 8 trajectories
+   of 8k tokens at a useful rate): step-wise GRPO with TRL's
+   `GRPOTrainer` and vLLM, the policy initialised from the merged sft2,
+   KL to it as the reference. Prompts are the training prompts as they
+   are (the tool results are already inside them), so no environment
+   server is needed; a trajectory is one completion. Rewards, all code,
+   none a model: format and hygiene (parseable XML, no Python literals,
+   end token, no think block); routing and arguments from the templates'
+   checks where the prompt has them; **grounding** — every title, channel
+   and time spoken must occur in the turn's tool results; **coverage** —
+   a schedule or catch-up answer names the first airings of the result in
+   order; no claimed action or narrated result without a call; length
+   near the teacher's. Held out as before: the suite and the dev splits.
+   The reward code, the prompt-set builder and the GRPO script come next,
+   validated offline on run1's dev (the teacher's completions must score
+   high, sft1's known misses low) before any GPU is rented.
