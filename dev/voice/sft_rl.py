@@ -137,6 +137,8 @@ def training_kwargs(args, out: Path, dry: bool) -> dict:
         max_steps=2 if dry else args.max_steps, num_train_epochs=1,
         logging_steps=1 if dry else 5, log_completions=not dry,
         save_strategy="no" if dry else "steps", save_steps=args.eval_steps,
+        eval_strategy="no" if dry else "steps", eval_steps=args.eval_steps,
+        per_device_eval_batch_size=args.num_generations,        # TRL: the eval batch must hold whole groups
         use_vllm=True, vllm_mode=args.vllm_mode, vllm_gpu_memory_utilization=args.vllm_gpu_mem,
         vllm_max_model_length=args.max_tokens + args.max_completion,
     )
@@ -154,7 +156,10 @@ def main() -> None:
     ap.add_argument("--batch", type=int, default=4, help="per-device micro-batch (completions)")
     ap.add_argument("--grad-accum", type=int, default=2, help="batch × accum must be a multiple of --num-generations")
     ap.add_argument("--max-steps", type=int, default=300)
-    ap.add_argument("--eval-steps", type=int, default=25, help="checkpoint and dev-reward curve every N steps")
+    ap.add_argument("--eval-steps", type=int, default=100, help="checkpoint and dev-reward curve every N steps")
+    ap.add_argument("--eval-examples", type=int, default=48,
+                    help="dev prompts for the in-loop reward curve; each costs --num-generations samples, so 48 every "
+                         "100 steps is ~10 min per evaluation; the full dev set is scored offline afterwards")
     ap.add_argument("--lr", type=float, default=1e-5)
     ap.add_argument("--beta", type=float, default=0.02, help="KL to the start model; TRL's default is 0")
     ap.add_argument("--loss-type", default="dapo", help="dapo (TRL default), grpo or dr_grpo")
@@ -205,7 +210,7 @@ def main() -> None:
                           target_modules=TARGET_MODULES, task_type="CAUSAL_LM")
     random.Random(args.seed).shuffle(train_rows)
     train_ds = Dataset.from_list(train_rows[:64] if args.dry_run else train_rows)
-    dev_ds = Dataset.from_list(dev_rows)
+    dev_ds = Dataset.from_list(random.Random(args.seed).sample(dev_rows, k=min(args.eval_examples, len(dev_rows))))
     trainer = GRPOTrainer(model=args.base, reward_funcs=[make_reward_fn(vocab)], args=cfg,
                           train_dataset=train_ds, eval_dataset=dev_ds, processing_class=tok, peft_config=peft_cfg)
     torch.cuda.reset_peak_memory_stats()
