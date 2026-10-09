@@ -66,7 +66,13 @@ TARGET_MODULES = (r"model\.language_model\.layers\.\d+\."
                   r"(self_attn\.(q_proj|k_proj|v_proj|o_proj)"
                   r"|linear_attn\.(in_proj_qkv|in_proj_z|out_proj)"
                   r"|mlp\.(gate_proj|up_proj|down_proj))")
-BASE_FILES = ("chat_template.jinja", "preprocessor_config.json", "video_preprocessor_config.json")
+# Qwen3.5's served/trained chat template is the Unsloth one in sft/, NOT the
+# base repo's HF chat_template.jinja (they differ in the thinking default and
+# tool-call rendering). merge() embeds this so the GGUF matches what :8001
+# serves and what the data was rendered with. chat_template.jinja is therefore
+# NOT copied from the base below.
+SERVED_TEMPLATE = Path(__file__).resolve().parent / "sft" / "chat_template.qwen3.5-served.jinja"
+BASE_FILES = ("preprocessor_config.json", "video_preprocessor_config.json")
 
 
 # ---- data ----------------------------------------------------------------------------------
@@ -223,11 +229,31 @@ def sft_config(SFTConfig, **wanted):
 
 
 # ---- merge -------------------------------------------------------------------------------------
+def embed_served_template(dest: Path) -> None:
+    """Write the served/trained chat template into the merged model. The base's
+    HF chat_template.jinja is not what :8001 serves or what the data was rendered
+    with; convert_hf_to_gguf reads tokenizer_config.json's chat_template first and
+    only then chat_template.jinja (llama.cpp gguf/vocab.py), so set both — else the
+    GGUF carries the wrong template and the served fine-tune mismatches training."""
+    if not SERVED_TEMPLATE.is_file():
+        print(f"  WARNING: served template {SERVED_TEMPLATE} missing; the GGUF will carry the "
+              f"base's HF template — re-embed the served one before serving", file=sys.stderr)
+        return
+    tmpl = SERVED_TEMPLATE.read_text(encoding="utf-8")
+    (dest / "chat_template.jinja").write_text(tmpl, encoding="utf-8")
+    tc = dest / "tokenizer_config.json"
+    if tc.is_file():
+        cfg = json.loads(tc.read_text(encoding="utf-8"))
+        cfg["chat_template"] = tmpl
+        tc.write_text(json.dumps(cfg, indent=2, ensure_ascii=False), encoding="utf-8")
+    print(f"  chat template: embedded served template ({len(tmpl)} B) from {SERVED_TEMPLATE.name}", file=sys.stderr)
+
+
 def merge(args, adapter: Path, out: Path) -> Path:
     """The adapter applied to a fresh bf16 base — never to the dequantised
     4-bit weights the adapter was trained against — saved as merged/ with
-    the tokenizer and the base's template and preprocessor files, ready for
-    convert_hf_to_gguf.py."""
+    the tokenizer, the served chat template and the base's preprocessor files,
+    ready for convert_hf_to_gguf.py."""
     import torch
     from huggingface_hub import hf_hub_download
     from peft import PeftModel
@@ -240,6 +266,7 @@ def merge(args, adapter: Path, out: Path) -> Path:
     dest.mkdir(parents=True, exist_ok=True)
     model.save_pretrained(dest, safe_serialization=True, max_shard_size="4GB")
     AutoTokenizer.from_pretrained(args.base).save_pretrained(dest)
+    embed_served_template(dest)
     for name in BASE_FILES:
         try:
             shutil.copy(hf_hub_download(args.base, name), dest / name)
