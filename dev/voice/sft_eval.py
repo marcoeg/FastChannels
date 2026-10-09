@@ -233,11 +233,18 @@ CANDIDATE: %s"""
 
 def judge_text(client, request: str, reference: str, candidate: str) -> dict:
     try:
-        msg = client.messages.create(model=JUDGE_MODEL, max_tokens=200,
+        msg = client.messages.create(model=JUDGE_MODEL, max_tokens=600,
                                      messages=[{"role": "user", "content": JUDGE_PROMPT % (request, reference, candidate)}])
         raw = "".join(b.text for b in msg.content if getattr(b, "type", "") == "text")
         m = re.search(r"\{.*\}", raw, re.S)
-        return json.loads(m.group(0)) if m else {"same": None, "note": raw[:200]}
+        if m:
+            try:
+                return json.loads(m.group(0))
+            except ValueError:
+                pass
+        verdict = re.search(r'"same"\s*:\s*(true|false)', raw)        # a truncated reply still carries the verdict
+        return {"same": verdict.group(1) == "true" if verdict else None,
+                "note": raw[:300] or f"empty reply (stop_reason {getattr(msg, 'stop_reason', '?')})"}
     except Exception as e:  # noqa: BLE001  the judge is optional
         return {"same": None, "note": f"{type(e).__name__}: {e}"[:200]}
 
@@ -286,7 +293,7 @@ def judge_file(path: Path, client, show: int) -> None:
     for m in data["models"]:
         res = data["results"][m["alias"]]
         todo = [(ex, r) for ex, r in zip(data["examples"], res)
-                if not r.get("error") and not r.get("judge")
+                if not r.get("error") and (not r.get("judge") or r["judge"].get("same") is None)
                 and r["score"]["kind_expected"] == "text" and r["score"]["kind_got"] == "text"]
         print(f"{m['alias']}: judging {len(todo)} text steps", file=sys.stderr)
         for n, (ex, r) in enumerate(todo, 1):
