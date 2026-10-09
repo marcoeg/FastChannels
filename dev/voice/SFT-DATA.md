@@ -388,3 +388,52 @@ the frontier. The next gain is not a second epoch over the same data —
 the dev loss was flat over the last hundred steps — but more examples
 where it is weak: schedule follow-ups over long results and catch-up
 turns, generated with the same pipeline, then a run2.
+
+## RLVR: `rlvr_rewards.py` and `sft_rl.py` (written 2026-10-09; not run)
+
+Reinforcement learning with verifiable rewards on top of the SFT model,
+for the residue SFT imitates but does not learn to judge — which tool,
+which arguments, when to answer from the result and when to look again,
+and not inventing or dropping what a long result holds.
+
+**The trajectory is one step**, the same unit the prep makes: a prompt
+exactly as llama.cpp serves it, the turn's tool results already inside,
+and one sampled completion. So there is no environment to run: GRPO
+samples eight completions per prompt with vLLM, the rewards score each,
+and the policy moves toward the better ones within the group.
+
+**The rewards** (`rlvr_rewards.py`, code only, no model):
+
+| component | what it checks | weight |
+| --- | --- | --- |
+| format | parseable tool-call XML with nothing after it, no `<think>`, no Python literals, spoken part ≤ 400 chars; a failure floors the total | 1.5 |
+| routing | as the suite's `routed`: a call step's tool belongs to one of the template's `tools_any_of` sets (a helper such as `search_memory` counts half); a text step needs a set already met by the turn's calls, `[]` meaning no tool at all | 1.0 |
+| args | the template's `tool_args` (regex or value within ±0.05) on the step's calls | 1.0 |
+| grounding | every title, channel and time the answer speaks occurs in the turn's tool results, the on-screen line, the request or the earlier conversation | 1.0 |
+| coverage | a listing answer names two of the first three rows of the result | 0.5 |
+| fabrication | specifics, a result or a TV action asserted with no tool result behind them | −1.5 |
+| length | near the teacher's; decays past ×1.3 of it | 0.5 |
+| kind | the teacher's tool-vs-text decision on the same prompt, a weak prior | 0.25 |
+
+`rlvr_rewards.py build --runs run1 run2 --out ~/news/voice-sft/rl` writes
+the prompt set (prompts, teacher completions, checks, the listing flag)
+and the channel vocabulary; `score-eval RESULTS.json` runs the components
+over an `sft_eval` results file. On run1's dev set the components order
+the three sources as a reward should — teacher grounding 0.977 and
+fabrication 0.018, sft1 0.986 / 0.016 with length 0.89 and kind 0.94,
+the base 0.95 / 0.057 with length 0.52 and kind 0.84 — after three rounds
+of fixes to the title extractor (contractions, sentence-initial words,
+raw tool text as a source, accents). Coverage is the one place the
+teacher does not score near 1 (0.61: it summarises by relevance, not
+order), which is why its weight is half.
+
+**The trainer** (`sft_rl.py`): TRL `GRPOTrainer` with the one reward
+function (components logged as metrics), vLLM colocated on the training
+card or on a second one, a fresh LoRA on the SFT merge's language-model
+projections as the policy and a KL (`--beta 0.02`) to it, dapo loss,
+temperature 1, 300-token completions, prompts over 10k tokens dropped.
+`--check` scores the teacher's completions and builds the config for the
+installed TRL (verified here against 1.13); `--dry-run` is two small steps
+for the memory. For rented 80 GB cards — the laptop cannot sample eight
+8k-token trajectories per prompt at a useful rate. The eval suite and the
+dev splits stay held out; the gates after RL are the same three.
