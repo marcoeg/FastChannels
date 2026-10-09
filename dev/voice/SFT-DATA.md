@@ -389,6 +389,42 @@ the dev loss was flat over the last hundred steps — but more examples
 where it is weak: schedule follow-ups over long results and catch-up
 turns, generated with the same pipeline, then a run2.
 
+## run2 — the targeted data (2026-10-09)
+
+Two runs came out of it, because the first attempt's shard subprocesses
+rebuilt their plan without `--focus` (fixed the same day: the shards now
+get the flag):
+
+- **run2-general** — 800 conversations, seed 2, the ordinary mix (318 log,
+  358 single, 124 multi) under the screen policy: 988 turns kept, 20
+  rejected. Prepared: 1,686 train / 93 dev examples, 16.5 M tokens, 89
+  over the 16k cap. Not what was ordered, but new coverage of the whole
+  distribution on a different day's guide, so it trains too. sft1 on its
+  dev split (a second held-out sample): kind 96.8 %, tool names 89.4 %,
+  args 61.7 %, exact 39.8 %, length ×1.0, forbidden 0, hygiene rows 0 —
+  a touch above its run1 numbers.
+- **run2** — 600 conversations, seed 3, `--focus` on the 19 templates for
+  schedule follow-ups over long results and catch-up turns (14 new in
+  `sft/templates.json`: `channel_lineup`, `whats_after_title`, `ends_at`,
+  `catchup_browse`, `catchup_title`, `catchup_news`,
+  `m_channel_evening_followups`, `m_genre_tonight_pick`,
+  `m_title_then_after`, `m_now_then_next`, `m_time_slot_channel`,
+  `m_catchup_pick`, `m_catchup_title_play`, `m_missed`; the catch-up ones
+  draw `{bcast_channel}`, a broadcast channel, since FAST channels have
+  no recordings). 400 single / 200 multi, no log utterances; **955 turns
+  kept, 26 rejected** (routing 15, nine `channel_lineup` answers over 400
+  characters, two claimed actions, one API error dropped). Prepared:
+  **1,686 train / 96 dev examples**, 18.4 M tokens, prompts p50 8.9k and
+  p90 13.8k tokens (the follow-ups carry more history and results), 111
+  over the 16k cap; 671 two-step and 115 three-step turns.
+
+**sft2's training set** is the three runs together (`sft_train.py --run
+run1 run2-general run2`): at the 12,288 cap **6,756 train / 367 dev
+examples, 57.9 M tokens, 844 steps an epoch** — about 14 hours on the
+laptop. The RL prompt set rebuilt over the three runs holds 8,140 prompts
+(6,405 train / 346 dev under 10k tokens); the teacher scores grounding
+0.97, fabrication 0.021, routing 0.969, coverage 0.71 on its dev part.
+
 ## RLVR: `rlvr_rewards.py` and `sft_rl.py` (written 2026-10-09; not run)
 
 Reinforcement learning with verifiable rewards on top of the SFT model,

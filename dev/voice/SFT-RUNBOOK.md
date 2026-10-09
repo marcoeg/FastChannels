@@ -352,22 +352,32 @@ meets against the frontier's 71 and 92). A 27B would likely close that
 but cannot be served on this laptop at voice latency (Q4 is ~17 GB), so
 it is a purchase, not an experiment. The 9B path first:
 
-1. **run2 — targeted data** (nucbox, the generator): new templates in
-   `sft/templates.json` for schedule follow-ups over long results ("what's
-   on X tonight → and after that → when does it end", "any comedies
-   tonight → tell me about the second one → put it on") and catch-up turns
-   ("what can I catch up on from X → play the second one", "is there a
-   catch-up of Y → play it from the beginning"), generated with
-   `./sft_gen.py --focus <those ids> --n 800 --workers 4 --out
-   ~/news/voice-sft/run2`, rechecked, prepared with `sft_train_prep.py`
-   into `run2/train/`. Gate 1 of sft1 on run2's dev split is the new
-   baseline for the weak categories.
-2. **sft2** (laptop): one epoch from the base over run1 + run2
-   (`sft_train.py --run ~/news/voice-sft/run1 ~/news/voice-sft/run2`,
-   ~12 h), `--pick-best-only`, merge, GGUF with `--no-nextn`, the three
-   gates. Continuing from sft1's adapter on run2 alone is faster (~4 h)
-   but drifts from run1's coverage; from the base over both is the clean
-   comparison.
+1. **run2 — targeted data** (nucbox, the generator) — **done 2026-10-09.**
+   Fourteen new templates in `sft/templates.json` for schedule follow-ups
+   over long results and catch-up turns, `sft_gen.py --focus`, a
+   `bcast_channel` slot. The first attempt's shards ignored `--focus` and
+   produced a general run (kept as `run2-general`, 988 turns); the focused
+   `run2` is 600 conversations → 955 turns kept, 26 rejected. Both
+   prepared; numbers in `SFT-DATA.md`.
+2. **sft2** (laptop): one epoch from the base over the three runs,
+   6,756 examples at the 12,288 cap, 844 steps, **~14 h** at the measured
+   rate:
+
+   ```bash
+   # nucbox → laptop: the two new train/ directories
+   rsync -av ~/news/voice-sft/run2-general/train/ marco@192.168.50.71:news/voice-sft/run2-general/train/
+   rsync -av ~/news/voice-sft/run2/train/ marco@192.168.50.71:news/voice-sft/run2/train/
+   # laptop, venv active, llama-server stopped
+   cd ~/Development/fastchannels-private && git pull
+   cd dev/voice && ./sft_train.py --check --max-tokens 12288 --run ~/news/voice-sft/run1 ~/news/voice-sft/run2-general ~/news/voice-sft/run2
+   nohup ./sft_train.py --run ~/news/voice-sft/run1 ~/news/voice-sft/run2-general ~/news/voice-sft/run2 \
+       --epochs 1 --max-tokens 12288 --out ~/minny-sft/sft2 > ~/minny-sft/sft2.log 2>&1 &
+   ./sft_train.py --pick-best-only ~/minny-sft/sft2 --merge --run ~/news/voice-sft/run1 ~/news/voice-sft/run2-general ~/news/voice-sft/run2   # afterwards, its own process
+   ```
+
+   then the GGUF with `--no-nextn`, serving as `qwen3.5-9b-sft2`, and the
+   three gates — gate 1 on run1's dev against sft1 (kind 93.5 / names 78.0
+   / args 55.9) and on run2's dev for the targeted categories.
 3. **RLVR** (rented 80 GB cards; the laptop cannot sample 8 trajectories
    of 8k tokens at a useful rate): step-wise GRPO with TRL's
    `GRPOTrainer` and vLLM, the policy initialised from the merged sft2,
@@ -381,6 +391,14 @@ it is a purchase, not an experiment. The 9B path first:
    a schedule or catch-up answer names the first airings of the result in
    order; no claimed action or narrated result without a call; length
    near the teacher's. Held out as before: the suite and the dev splits.
-   The reward code, the prompt-set builder and the GRPO script come next,
-   validated offline on run1's dev (the teacher's completions must score
-   high, sft1's known misses low) before any GPU is rented.
+   **Written and verified 2026-10-09:** `rlvr_rewards.py` (the rewards,
+   the prompt set over the three runs — 6,405 train / 346 dev prompts —
+   and `score-eval`; on run1's dev the teacher scores grounding 0.977 and
+   fabrication 0.018, sft1 0.986 / 0.016, the base 0.95 / 0.057) and
+   `sft_rl.py` (GRPO, config built against TRL 1.13, `--check` and
+   `--dry-run`). On the rented box: the training venv's stack plus vLLM
+   (`uv pip install vllm` matching the torch build), the merged sft2
+   rsynced over, `./sft_rl.py --check`, `--dry-run --base <merged>`, then
+   `--base <merged> --out ~/minny-rl/rl1 --max-steps 300`; merge with
+   `sft_train.py --merge-only … --base <merged>`, GGUF, the gates against
+   sft2.
