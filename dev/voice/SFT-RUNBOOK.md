@@ -245,6 +245,52 @@ itself. Copy `train-summary.json` and the `sft-eval-*.json` results back
 to nucbox and put the numbers in `SFT-DATA.md` next to the baseline, pass
 or fail.
 
+## First run — sft1, 2026-10-08/09 (what actually happened)
+
+The plan above mostly held; the corrections, in the order they bit:
+
+- **No driver upgrade was needed.** Step 0 suggests moving to a 550+
+  driver; we didn't, and 535 was fine. `uv pip install` first pulled a
+  `cu130` PyTorch, which `torch.cuda.is_available()` rejects on driver 535
+  ("driver too old, found 12020"). The fix is to pin the **cu126** build
+  of the same version — `uv pip install --index-strategy unsafe-best-match
+  --index-url https://download.pytorch.org/whl/cu126 --extra-index-url
+  https://pypi.org/simple "torch==2.14.1+cu126"` — which runs on 535 under
+  CUDA 12.x minor-version compatibility. `causal-conv1d` then compiles
+  against the system **nvcc 12.2** only with `--no-build-isolation` (else
+  uv's build sandbox reinstalls cu130 torch and the build aborts on the
+  12.2-vs-13.0 major mismatch); `uv pip install ninja` first and set
+  `CAUSAL_CONV1D_FORCE_BUILD=TRUE`.
+
+- **543 → 517 steps.** `--check` projected 543 an epoch on the full 4,349;
+  at `--max-tokens 12288`, 216 long examples drop, leaving 4,133 → 517
+  steps. Measured **~59.5 s/step** (the dry run said 57), **~8.5 h** for
+  the epoch, peak ~12.6 GB. Reruns start faster — the CUDA kernels are
+  cached after the first build. Final training loss ~0.156.
+
+- **pick-best curve** (dev loss, 60 examples, context ≤12288):
+  100 → 0.218, 200 → 0.184, 300 → 0.161, 400 → 0.135, 500 → 0.134,
+  517 → 0.134. Monotonic, the **last** checkpoint wins, and it is flat
+  over the final ~100 steps — a second epoch is into diminishing returns;
+  let the gates, not the loss, decide.
+
+- **Run `--pick-best-only` as its own process.** The inline
+  `--pick-best --merge` tail OOMs: after training, Unsloth keeps ~8.5 GB
+  resident that `del model; torch.cuda.empty_cache()` does not release, so
+  loading the scoring base on the same card fails. Training, the
+  checkpoints and `adapter/` are all saved before that point, so just
+  rerun in a fresh process — `./sft_train.py --pick-best-only
+  ~/minny-sft/sft1 --merge` — with the whole card free. (Scoring + CPU
+  merge took ~10 min.)
+
+- **GGUF needed `--no-nextn`, and the convert step clobbers the venv** —
+  both covered in step 5. Restoring the training venv afterwards is the
+  cu126 reinstall above plus `transformers==5.17.0`.
+
+The result: `sft1/qwen3.5-9b-sft1-Q8_0.gguf` (8.9 GB, 32 layers,
+`block_count=32`) loads on build b11340 and generates at ~43 tok/s on this
+card. The gates (step 7) have not been run yet.
+
 ## Time, roughly
 
 Driver upgrade and reboot 20 min; environment 1–2 h (the kernels may
