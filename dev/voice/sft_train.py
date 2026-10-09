@@ -46,6 +46,7 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import json
+from collections import Counter
 import os
 import random
 import shutil
@@ -326,7 +327,7 @@ def score_checkpoints(args, out: Path) -> Path | None:
     if not ckpts:
         print(f"no checkpoints under {out/'checkpoints'}", file=sys.stderr)
         return None
-    dev_rows, _ = load_examples(args.run / "train" / "dev.jsonl", args.max_tokens)
+    dev_rows = [r for run in args.run for r in load_examples(run / "train" / "dev.jsonl", args.max_tokens)[0]]
     rows = random.Random(args.seed).sample(dev_rows, k=min(args.eval_examples, len(dev_rows)))
     max_ctx = args.eval_max_tokens or args.max_tokens
     tok = _tokenizer_of(AutoTokenizer.from_pretrained(args.base))
@@ -360,7 +361,8 @@ def score_checkpoints(args, out: Path) -> Path | None:
 # ---- main ----------------------------------------------------------------------------------------
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("--run", type=Path, default=DEFAULT_RUN, help="an sft_gen run; reads <run>/train/")
+    ap.add_argument("--run", type=Path, nargs="+", default=[DEFAULT_RUN],
+                    help="one or more sft_gen runs; reads each <run>/train/ (train and dev concatenated)")
     ap.add_argument("--base", default=DEFAULT_BASE)
     ap.add_argument("--out", type=Path, default=Path.home() / "minny-sft" / time.strftime("sft-%Y%m%d-%H%M"))
     ap.add_argument("--max-tokens", type=int, default=16384, help="drop longer examples; also the sequence cap")
@@ -413,10 +415,19 @@ def main() -> None:
             print(f"merged {best.name} → {dest}\nnext: python convert_hf_to_gguf.py {dest} --outtype q8_0 --outfile {args.pick_best_only}/qwen3.5-9b-sft.Q8_0.gguf")
         return
 
-    data = args.run / "train"
-    train_rows, train_stats = load_examples(data / "train.jsonl", args.max_tokens)
-    dev_rows, dev_stats = load_examples(data / "dev.jsonl", args.max_tokens)
-    summary = {"args": {k: str(v) if isinstance(v, Path) else v for k, v in vars(args).items()},
+    train_rows, dev_rows = [], []
+    train_stats, dev_stats = Counter(), Counter()
+    for run in args.run:
+        tr, ts = load_examples(run / "train" / "train.jsonl", args.max_tokens)
+        dv, ds = load_examples(run / "train" / "dev.jsonl", args.max_tokens)
+        train_rows += tr
+        dev_rows += dv
+        train_stats.update(ts)
+        dev_stats.update(ds)
+    train_stats, dev_stats = dict(train_stats), dict(dev_stats)
+    data = args.run[0] / "train"
+    summary = {"args": {k: [str(x) for x in v] if isinstance(v, list) else str(v) if isinstance(v, Path) else v
+                        for k, v in vars(args).items()},
                "data": {"train": train_stats, "dev": dev_stats}, "target_modules": TARGET_MODULES}
     print(json.dumps(summary["data"]), file=sys.stderr)
     if not train_rows:
@@ -429,7 +440,7 @@ def main() -> None:
         steps = int(len(train_rows) / args.grad_accum * args.epochs)
         summary["plan"] = {"optimiser_steps": steps, "steps_per_epoch": len(train_rows) // args.grad_accum,
                            "evals": steps // args.eval_steps, "train_tokens_per_epoch": train_stats["tokens"]}
-        print(json.dumps(summary, indent=1))
+        print(json.dumps(summary, indent=1, default=str))
         bad = summary["tokenizer"]
         if bad["length_mismatch"] or bad["boundary_mismatch"] or bad.get("adds_special_tokens") or not bad["eos_is_end"]:
             raise SystemExit("tokenizer check failed — the prep and this tokenizer disagree; do not train on this")
