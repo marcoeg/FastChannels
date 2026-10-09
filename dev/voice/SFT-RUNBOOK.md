@@ -10,6 +10,29 @@ nucbox). Written 2026-10-07.
 What you end up with: `~/minny-sft/sft1/qwen3.5-9b-sft1-Q8_0.gguf`, served
 as `qwen3.5-9b-sft1`, with three gates passed or failed in writing.
 
+## The words: three models, a set of numbers, two data splits
+
+Three models are in play — and two terms below are *not* models:
+
+- **Teacher** — the frontier model whose answers are the training targets
+  and the top-line quality bar: `gpt-5.6-terra`, the household brain. SFT
+  trains the student to imitate it, so it is both the label source and the
+  reference the fine-tune is measured against.
+- **Base** — stock `Qwen/Qwen3.5-9B`, before any tuning, served as
+  `qwen3.5-9b` on `:8001`.
+- **Fine-tune** (the student) — what this runbook produces,
+  `qwen3.5-9b-sft1` on `:8002`.
+
+- **Baseline** is not a third model: it is the *base* model's saved gate
+  scores (step 7, 2026-10-07: kind 83.5 %, tool names 58.5 %, args 29.7 %,
+  text ×1.61 the teacher's length, forbidden 3.6 %) — the numbers the
+  fine-tune has to beat.
+- **Held-out** is data, not a model: `dev.jsonl` is kept out of training
+  (`train.jsonl` is what the model sees), so scoring on it measures
+  generalisation rather than memorisation. The `--pick-best` dev loss and
+  gate 1 both evaluate the fine-tune on this held-out set against the
+  teacher.
+
 ## 0. Before anything: the GPU and the server
 
 ```bash
