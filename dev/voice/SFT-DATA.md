@@ -416,7 +416,16 @@ get the flag):
   characters, two claimed actions, one API error dropped). Prepared:
   **1,686 train / 96 dev examples**, 18.4 M tokens, prompts p50 8.9k and
   p90 13.8k tokens (the follow-ups carry more history and results), 111
-  over the 16k cap; 671 two-step and 115 three-step turns.
+  over the 16k cap; 671 two-step and 115 three-step turns. **sft1 on its
+  dev split — the baseline for the targeted categories:** kind 95.8 %,
+  tool names **73.5 %**, args **42.9 %**, exact 22.9 %, text answered
+  93.6 %, length ×1.0, forbidden 0, hygiene rows 0, latency 4.6 / 8.8 s
+  (longer prompts). Lower than on the other two dev splits (names 78 and
+  89 %, args 56 and 62 %), which is the point: a follow-up "what about on
+  channel 5?" answered with `whats_on_now` instead of the evening's range,
+  "put that on" for a programme airing later tuned the channel instead of
+  saying it has not started, `group_by` and a genre parameter dropped, a
+  time-slot window placed differently from the teacher's.
 
 **sft2's training set** is the three runs together (`sft_train.py --run
 run1 run2-general run2`): at the 12,288 cap **6,756 train / 367 dev
