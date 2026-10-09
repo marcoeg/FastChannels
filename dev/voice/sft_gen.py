@@ -703,7 +703,8 @@ async def main() -> None:
     elif args.workers > 1:
         procs = [await asyncio.create_subprocess_exec(
             sys.executable, __file__, "--n", str(args.n), "--seed", str(args.seed), "--model", args.model,
-            "--out", str(out), "--shard", f"{i}/{args.workers}") for i in range(args.workers)]
+            "--out", str(out), "--shard", f"{i}/{args.workers}",
+            *(["--focus", args.focus] if args.focus else [])) for i in range(args.workers)]   # the shards plan for themselves
         codes = await asyncio.gather(*(p.wait() for p in procs))
         print("shards exited:", codes)
         return

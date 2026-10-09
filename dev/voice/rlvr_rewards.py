@@ -20,9 +20,9 @@ Components (each 0–1, or None when it does not apply to the step):
   grounding    every title, channel and time the answer speaks occurs in the
                turn's tool results, the on-screen line, the request or the
                earlier conversation — the reward against inventions and swaps
-  coverage     a listing answer (schedule, catch-up, on now) names the first
-               three rows of the result, in any order — the reward against
-               dropping what was asked for
+  coverage     a listing answer (schedule, catch-up, on now) names two of
+               the first three rows of the result, in any order — the reward
+               against dropping what was asked for
   fabrication  a spoken answer that asserts titles, times or an outcome with
                no tool result behind it (1 = fabricated → penalty)
   length       near the teacher's length; long answers decay to 0
@@ -336,17 +336,25 @@ def coverage(spoken: str, src: Sources, k: int = 3) -> tuple[float | None, dict]
         start = parse_clock(r.get("start_local") or "")
         s_ok = start in times if start else False
         covered.append(t_ok or (c_ok and s_ok))
-    return sum(covered) / len(rows), {"rows": len(rows), "covered": covered}
+    return min(1.0, sum(covered) / min(2, len(rows))), {"rows": len(rows), "covered": covered}   # two of the first three is the bar
+
+
+HELPERS = {"search_memory", "tv_get_state", "minny_find_channels"}
 
 
 def routing(calls: list, checks: dict, src: Sources) -> float | None:
+    """As the suite's `routed`: a set is met when all its tools were called,
+    extra calls allowed, `[]` meaning no tool at all. A call step counts
+    when its tool belongs to some set (a helper half); a text step when a
+    set is already met by the turn's calls."""
     sets = checks.get("tools_any_of")
     if sets is None:
         return None
-    done = list(src.called_so_far) + [n for n, _ in calls]
     if calls:
-        return 1.0 if any(s and set(done) <= set(s) for s in sets) else 0.0
-    return 1.0 if any(set(s) <= set(src.called_so_far) for s in sets) else 0.0
+        wanted = {t for s in sets for t in s}
+        return min(1.0 if n in wanted else 0.5 if n in HELPERS else 0.0 for n, _ in calls)
+    done = set(src.called_so_far)
+    return 1.0 if any((set(s) <= done) if s else not done for s in sets) else 0.0
 
 
 def args_ok(calls: list, checks: dict) -> float | None:
