@@ -75,7 +75,7 @@ def load_env(path: Path) -> None:
     if not path.exists():
         return
     for line in path.read_text(encoding="utf-8").splitlines():
-        line = line.strip()
+        line = line.strip().removeprefix("export ")
         if not line or line.startswith("#") or "=" not in line:
             continue
         k, v = line.split("=", 1)
@@ -265,7 +265,37 @@ def run_model(model: dict, key: str | None, examples: list[dict], patterns: list
             done += 1
             if done % 25 == 0:
                 print(f"  {model['alias']}: {done}/{len(examples)}", file=sys.stderr)
+    # A server error is a hole, not a miss: "Context size has been exceeded"
+    # comes from the slots' shared KV being full of earlier prompts, and
+    # passes once they are evicted. One more try each, one at a time.
+    failed = [i for i, r in enumerate(results) if r.get("error") and not r["error"].startswith("scoring")]
+    if failed:
+        print(f"  {model['alias']}: retrying {len(failed)} errored steps one at a time", file=sys.stderr)
+        for i in failed:
+            results[i] = one(examples[i])
+        still = sum(1 for i in failed if results[i].get("error"))
+        if still:
+            print(f"  {model['alias']}: {still} still failing", file=sys.stderr)
     return results
+
+
+def judge_file(path: Path, client, show: int) -> None:
+    """Add the judge's verdicts to a results file's text steps (those not
+    judged yet), recompute the summaries, save and reprint."""
+    data = json.loads(path.read_text(encoding="utf-8"))
+    for m in data["models"]:
+        res = data["results"][m["alias"]]
+        todo = [(ex, r) for ex, r in zip(data["examples"], res)
+                if not r.get("error") and not r.get("judge")
+                and r["score"]["kind_expected"] == "text" and r["score"]["kind_got"] == "text"]
+        print(f"{m['alias']}: judging {len(todo)} text steps", file=sys.stderr)
+        for n, (ex, r) in enumerate(todo, 1):
+            r["judge"] = judge_text(client, last_user(ex["prompt"]), spoken(ex["completion"]), spoken(r["text"]))
+            if n % 25 == 0:
+                print(f"  {n}/{len(todo)}", file=sys.stderr)
+        data["summary"][m["alias"]] = summarise(data["examples"], res)
+    path.write_text(json.dumps(data, ensure_ascii=False, indent=1), encoding="utf-8")
+    report(data, show)
 
 
 def _p(xs, q):
@@ -359,21 +389,33 @@ def main() -> None:
     ap.add_argument("--show", type=int, default=10, help="misses to print for the last model")
     ap.add_argument("--out", type=Path, default=DEFAULT_OUT)
     ap.add_argument("--report", type=Path, help="reprint this results file")
+    ap.add_argument("--judge-file", type=Path, metavar="RESULTS", help="run the judge over an existing results file's text steps")
     args = ap.parse_args()
-    load_env(HERE / ".env")
+    for env in (HERE / ".env", Path.home() / ".env"):      # as model_bench: the judge's key may live in ~/.env
+        load_env(env)
     key = args.key or os.environ.get("LOCAL_LLM_API_KEY")
 
     if args.report:
         report(json.loads(args.report.read_text(encoding="utf-8")), args.show)
         return
+    if args.judge_file:
+        args.judge = True
 
     models = parse_models(args.models, args.server)
     examples = load_examples(args.run / "train" / f"{args.split}.jsonl", args.limit, args.seed)
     patterns = forbidden_patterns()
     judge_client = None
     if args.judge:
-        import anthropic
+        try:
+            import anthropic
+        except ImportError:
+            raise SystemExit("--judge needs the anthropic package: run as  uv run --no-project --with anthropic python sft_eval.py …")
+        if not os.environ.get("ANTHROPIC_API_KEY"):
+            raise SystemExit("--judge needs ANTHROPIC_API_KEY (dev/voice/.env or ~/.env)")
         judge_client = anthropic.Anthropic()
+    if args.judge_file:
+        judge_file(args.judge_file, judge_client, args.show)
+        return
     live = []
     for m in models:
         problem = probe(m, key, args.timeout)
