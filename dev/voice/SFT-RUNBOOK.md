@@ -378,6 +378,14 @@ it is a purchase, not an experiment. The 9B path first:
    then the GGUF with `--no-nextn`, serving as `qwen3.5-9b-sft2`, and the
    three gates — gate 1 on run1's dev against sft1 (kind 93.5 / names 78.0
    / args 55.9) and on run2's dev for the targeted categories.
+   **Done 2026-10-09/10:** sft2 trained on the laptop and served on
+   `:8002`; gates from nucbox — run1 dev names 84.7 / args 66.1 %, run2
+   dev 91.8 / 49.0 %, model_bench 100 % routed and 5.00 / 4.52 / 5.00, the
+   suite 98 / 96 / 77 % against the frontier's 98 / 97 / 86 in the same
+   run, schedule meets 58 → 92. Table and reading in `SFT-DATA.md`. The
+   evening's gate 3 attempt found the guide's tunnel without its
+   `172.23.0.0/16` route (all guide calls timed out); fixed on the network
+   side, rerun clean the next morning.
 
    **Done 2026-10-09.** 845 steps, ~58 s/step; pick-best picked
    checkpoint-845 (dev loss 0.283 at the ≤16384 default cap — not

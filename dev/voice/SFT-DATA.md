@@ -439,10 +439,10 @@ laptop. The RL prompt set rebuilt over the three runs holds 8,140 prompts
 One epoch of QLoRA from the base over run1 + run2-general + run2 (6,756
 examples at 12,288 tokens; trained on the laptop, gate 1 passed there),
 served as `qwen3.5-9b-sft2` (Q8_0) on `:8002`. Gates 1 and 2 from nucbox
-the same evening; gate 3 was interrupted after two scenarios by the
-guide's tunnel losing its `172.23.0.0/16` route (every guide call timed
-out; the household agent's guide was down by the same cause) and is
-rerun once the route is back.
+the same evening; gate 3 the next morning (2026-10-10 04:12, 0 errors,
+0 guide timeouts) after the guide's tunnel had lost its `172.23.0.0/16`
+route the evening before — every guide call timed out, for the suite and
+for the household agent alike — and was brought back through `tun0`.
 
 | Gate | metric | sft1 | **sft2** |
 | --- | --- | --- | --- |
@@ -458,7 +458,9 @@ rerun once the route is back.
 | | hygiene rows | all 0 | all 0 |
 | 2 `model_bench` (27, `20261009-2311.json`) | routed | 100 % | 100 % |
 | | faithful / helpful / voice | 4.52 / 4.41 / 4.78 | **5.00 / 4.52 / 5.00** |
-| 3 `eval_suite` | routed / checks / meets | 97 / 93 / 78 % | pending the guide |
+| 3 `eval_suite` (92 turns, `suite-20261010-0412.json`) | routed / checks / meets | 97 / 93 / 78 % | **98 / 96 / 77 %** (frontier in the same run 98 / 97 / 86; base 91 / 82 / 64) |
+| | faithful / helpful / voice | 4.62 / 4.26 / 4.73 | **4.63 / 4.34 / 4.86** (frontier 4.78 / 4.51 / 4.91) |
+| | first text p50 / p90 | 2.7 / 5.9 s | 2.7 / 5.9 s (frontier 2.1 / 2.8 s) |
 
 Reading it: the targeted data did what it was for — on the follow-up and
 catch-up split the tool choice went from 73.5 to 91.8 % and the
@@ -470,6 +472,33 @@ whole evening for "at nine tonight", the student the hour asked) and a
 title's trailing "7AM" dropped — conventions, not wrong calls. Gate 2's
 timings were inflated by the guide timeouts of that hour; its grades
 stand.
+
+**Gate 3 by category** (checks / meets; sft2 · frontier in the same run ·
+sft1 in its own run): schedule **100 / 92 · 100 / 92 · 100 / 58** — the
+targeted category reached the frontier; catch-up 86 / 43 · 86 / 57 ·
+86 / 43 — unchanged, and the misses are shared with the frontier (D1 and
+D3 never say the catch-up plays from the start, D5 is the misheard
+"Clay") plus one of sft2's own: D2 restarted with an airing id it never
+looked up; on now 100 / 57 · 100 / 100 · 100 / 71 — a 4 AM guide of paid
+programming and reruns, where sft2 offered no alternatives (A2),
+contradicted itself on "national news" (A5) and called a FAST rerun live
+(A6); tuning 92 / 69 · 100 / 85 · 85 / 100 — "turn that channel on" took
+the third channel named instead of the first (C8), and "tune on the next
+channel" ended in an on-demand title called Next (C10); limits & identity
+88 / 62 · 100 / 88 — "Hey Wanda" still unanswered by name (J5, since
+sft1), the capability list short of volume and playback (J1); memory
+100 / 83 — "what did I tell you last time?" ignored a recall that had the
+facts (H3); robustness **90 / 90 · 80 / 60** — sft2 asks when the
+frontier acts on a misheard request (K2, K4). Routing and checks are at
+the frontier's level (98 / 96 against 98 / 97); the nine points of
+"meets" that remain are wording the criteria demand ("from the
+beginning", naming itself), reading a long on-now result for the right
+framing, and two reference errors.
+
+**What sft2 settles:** the local brain moves from sft1 to sft2
+(`LOCAL_LLM_MODEL=qwen3.5-9b-sft2`). The next data should carry the
+confirmation wording for catch-up and restart, the identity line, and
+restart flows that look the airing up; the rest is the RLVR residue.
 
 ## RLVR: `rlvr_rewards.py` and `sft_rl.py` (written 2026-10-09; not run)
 
