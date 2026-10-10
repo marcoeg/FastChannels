@@ -262,14 +262,17 @@ not only the percentages.
 ## 8. Promote, or not
 
 If the gates pass: in `dev/voice/.env` on nucbox set
-`LOCAL_LLM_MODEL=qwen3.5-9b-sft1` and `LOCAL_LLM_BASE_URL` to the port it
+`LOCAL_LLM_MODEL=qwen3.5-9b-sft2` and `LOCAL_LLM_BASE_URL` to the port it
 is served on. That changes the **local brain** only — the model the agent
 uses when `VOICE_LLM=local`; the household's brain stays the frontier
 (`VOICE_LLM=openai`, `VOICE_MODEL`) until that switch is flipped
 deliberately; nothing restarts by itself. Copy `train-summary.json` and
 the `sft-eval-*.json` results back to nucbox and put the numbers in
-`SFT-DATA.md` next to the baseline, pass or fail. (sft1: recommended as
-the local brain on 2026-10-09; the results are in `SFT-DATA.md`.)
+`SFT-DATA.md` next to the baseline, pass or fail. (sft1 recommended
+2026-10-09; **sft2 promoted 2026-10-10** after all three gates — schedule
+reached the frontier, routing/checks at frontier level, judge scores up
+on every axis; the remaining 9-point "meets" gap and the unmoved catch-up
+category are in `SFT-DATA.md`.)
 
 ## First run — sft1, 2026-10-08/09 (what actually happened)
 
@@ -453,32 +456,69 @@ troubleshooting on the box costs nine cents.
 
 ### R1. Rent
 
-One **H200 141 GB** (an H100 80 GB works, with `--vllm-gpu-mem 0.25` and a
-tighter fit), an Ubuntu 22.04/24.04 image with a **550+ driver** (CUDA
-12.4 or later — `nvidia-smi` first thing), at least 100 GB of disk and
-32 GB of RAM, your SSH key. Note the price and the clock when it starts.
+One **H200 141 GB** — strongly preferred, and what the commands below
+assume. An H100 80 GB is **too tight for colocate**: `--vllm-gpu-mem 0.25`
+starves vLLM (it cannot fit the 18 GB weights + KV → "No available memory
+for the cache blocks"), and 0.3 then OOMs the policy backward by a hair —
+141 GB removes the squeeze. **Not a B200** — Blackwell (`sm_100`) forces a
+cu128 stack and reopens the CUDA-build fight; stay on Hopper (same stack
+as the laptop). An Ubuntu 22.04/24.04 image with a **550+ driver** (CUDA
+12.4 or later — `nvidia-smi` first). Two disk facts that cost hours
+(2026-10-10): the pod's **local overlay (`/`) is small** (~30 GB) and the
+mounted **network volume (`/workspace`) is huge but cannot `chmod`** — so
+wheel builds and the venv must live on the overlay (`/root`), big data on
+the volume, and the 18 GB model loads much faster staged into **`/dev/shm`**
+(RAM) than off the volume — check `df -h / /dev/shm /workspace` first.
+Register your SSH key on the account **before** creating the pod (it is
+injected at creation; otherwise paste it into `authorized_keys` by hand).
+Note the price and the clock when it starts.
 
 ### R2. Environment (~20 min; the kernels may compile)
 
 ```bash
-nvidia-smi                                            # driver, memory free
+nvidia-smi ; df -h / /dev/shm /workspace              # driver/memory; overlay vs tmpfs vs the no-chmod volume
+# builds + venv on the LOCAL overlay — the volume cannot chmod .so files; its UV_CACHE_DIR preset must be overridden
+export UV_CACHE_DIR=/root/.cache/uv TMPDIR=/root/tmp && mkdir -p /root/tmp
+export HF_HOME=/root/.cache/huggingface               # small metadata; the 18 GB model goes to --local-dir on the volume (R3)
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 mkdir -p ~/minny-rl && cd ~/minny-rl
 curl -LsSf https://astral.sh/uv/install.sh | sh && source ~/.local/bin/env
 uv venv .venv --python 3.12 && source .venv/bin/activate
-uv pip install vllm                                   # brings its own torch; let it choose
+uv pip install "vllm==0.28.0"                         # PIN: TRL 1.13 supports vLLM 0.19.1–0.28.0, Qwen3.5 needs ≥0.17. NOT latest — see note.
 uv pip install "transformers==5.17.0" "trl==1.13.0" "peft==0.21.2" datasets accelerate requests
-uv pip install flash-linear-attention                 # Qwen3.5's linear-attention layers
+uv pip install flash-linear-attention                 # Qwen3.5's linear-attention layers (pure Triton, no compile)
+# causal_conv1d compiles CUDA — nvcc's MAJOR must equal torch.version.cuda's major:
+python -c "import torch; print('torch', torch.__version__, '-> need nvcc major', torch.version.cuda.split('.')[0])"
+ls -d /usr/local/cuda-* 2>/dev/null ; nvcc --version 2>/dev/null   # missing the right major? apt-get install -y 'cuda-toolkit-<major>-<minor>*'
+export CUDA_HOME=/usr/local/cuda-<major.minor> && export PATH=$CUDA_HOME/bin:$PATH
 uv pip install ninja && CAUSAL_CONV1D_FORCE_BUILD=TRUE uv pip install --no-build-isolation causal-conv1d
 python -c 'import torch, vllm, trl, transformers; from transformers import AutoConfig; import fla, causal_conv1d; \
-print(torch.__version__, torch.cuda.get_device_name(0), "vllm", vllm.__version__, "trl", trl.__version__, "transformers", transformers.__version__); \
+print(torch.__version__, torch.cuda.get_device_name(0), "vllm", vllm.__version__); \
 print("model type:", AutoConfig.from_pretrained("Qwen/Qwen3.5-9B").model_type, "| hybrid kernels ok")'
 ```
 
-`model type` must print `qwen3_5`. If `uv pip install vllm` pins a
-transformers older than 5.17 and the type no longer resolves, install the
-newest vLLM that allows transformers 5 — vLLM's support for Qwen3.5's
-hybrid layers is the one real version risk, and the dry run in R4
-settles it in two minutes.
+`model type` must print `qwen3_5`.
+
+**The version bind — what cost a day (2026-10-10).** `uv pip install vllm`
+unpinned took the latest (**0.31.0**); TRL 1.13 only supports vLLM
+**0.19.1–0.28.0**, and 0.31 **deadlocks** its colocate init — the trainer
+hangs in `futex_wait` with weights loaded and the GPU at 0 %, in both
+`colocate` and `server` mode. Qwen3.5's gated-delta layers are supported
+from vLLM **0.17**, so **`vllm==0.28.0` satisfies both** (that is the pin
+above). Three follow-ons, each of which bit once:
+- **`nvcc` major must match torch's CUDA major.** vLLM pulls its own
+  torch; `causal_conv1d` failed with `12.8 vs 13.0` and `12.2 vs 13.0`
+  until `CUDA_HOME` pointed at a toolkit of torch's major. Install the
+  toolkit for torch's major; do **not** downgrade torch to match an old
+  toolkit (breaks vLLM).
+- **The `/workspace` volume cannot `chmod`.** The pod presets
+  `UV_CACHE_DIR` onto it, so every compiled wheel dies with `Operation not
+  permitted` until `UV_CACHE_DIR`/`TMPDIR` are moved to `/root` (above).
+  Keep *builds* on the overlay, *data* on the volume.
+- **The overlay is small** (~30 GB, ~3–6 GB free after the stack). Purge
+  the CUDA toolkit once `causal_conv1d` is built (`apt-get remove --purge
+  'cuda-toolkit-*'`) if you need room; the 18 GB model never goes on the
+  overlay — `--local-dir` to the volume, or `/dev/shm` for fast loads.
 
 ### R3. Model, prompts, scripts (~10 min)
 
@@ -497,9 +537,16 @@ scp nucbox:minny-rl-kit.tgz . && tar xzf minny-rl-kit.tgz    # sft_rl.py rlvr_re
 
 Two optimiser steps with four short generations, then `dry run: N GB
 peak`. It loads the policy in bf16 (~18 GB), attaches the LoRA, starts
-vLLM colocated with 30 % of the card, samples, scores, steps. Out of
-memory: `--vllm-gpu-mem 0.25`, then `--batch 2 --grad-accum 4`. vLLM
-refusing the architecture: R2's version note.
+vLLM colocated with 30 % of the card, samples, scores, steps. On the H200
+it just runs. Out of memory on a tighter card: keep
+`PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` (above) and cut the
+**training** side — `--batch 1`, then lower `--num-generations` /
+`--max-completion`. Do **not** drop `--vllm-gpu-mem` below ~0.3: vLLM
+needs ~0.3 of the card for the 18 GB weights + KV and errors "No available
+memory for the cache blocks" below it. A **hang** with the GPU at 0 % and
+the process in `futex_wait` is **not** memory — it is the vLLM-version
+bind (R2), so check `vllm.__version__ == 0.28.0` first. vLLM refusing the
+architecture: R2's version note.
 
 ### R5. Train (~3 h a run)
 
