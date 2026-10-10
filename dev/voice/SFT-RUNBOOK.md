@@ -421,9 +421,153 @@ it is a purchase, not an experiment. The 9B path first:
    and `score-eval`; on run1's dev the teacher scores grounding 0.977 and
    fabrication 0.018, sft1 0.986 / 0.016, the base 0.95 / 0.057) and
    `sft_rl.py` (GRPO, config built against TRL 1.13, `--check` and
-   `--dry-run`). On the rented box: the training venv's stack plus vLLM
-   (`uv pip install vllm` matching the torch build), the merged sft2
-   rsynced over, `./sft_rl.py --check`, `--dry-run --base <merged>`, then
-   `--base <merged> --out ~/minny-rl/rl1 --max-steps 300`; merge with
-   `sft_train.py --merge-only … --base <merged>`, GGUF, the gates against
-   sft2.
+   `--dry-run`). The step-by-step for the rented box is the last section
+   of this file, "RLVR on the rented H200".
+
+## RLVR on the rented H200 — runbook
+
+The policy starts from **sft2's merged bf16 model** (`~/minny-sft/sft2/merged`
+on the laptop); the box only trains. Merging, GGUF, serving and the gates
+happen at home afterwards, so the meter runs for the training alone.
+Budget at $5.48/h: ~10–11 GPU-hours for setup, two runs of 300–400 steps
+and a buffer — $55–65 (in-loop evaluation on 48 dev prompts every 100
+steps, ~10 min each, is what keeps it there).
+
+### R0. Before renting (free, at home)
+
+```bash
+# laptop — stage the policy where the box can pull it at datacentre speed
+uv pip install -U "huggingface_hub[cli]"             # in any venv; the `hf` CLI
+hf auth login                                         # a write token
+hf upload <you>/minny-sft2-merged ~/minny-sft/sft2/merged --private      # ~18 GB, once
+
+# nucbox — the prompt set and the scripts the box needs, in one archive
+ls -la ~/news/voice-sft/rl/                           # prompts.jsonl (~300 MB), vocab.json; built over run1 + run2-general + run2
+cd ~/Development/FastChannels/dev/voice && ./sft_rl.py --check | head -40    # teacher rewards; the config builds
+tar czf ~/minny-rl-kit.tgz -C ~/Development/FastChannels/dev/voice sft_rl.py rlvr_rewards.py sft_train.py sft \
+    -C ~/news/voice-sft rl
+```
+
+Rehearse the install (R2) on the laptop once; every minute of
+troubleshooting on the box costs nine cents.
+
+### R1. Rent
+
+One **H200 141 GB** (an H100 80 GB works, with `--vllm-gpu-mem 0.25` and a
+tighter fit), an Ubuntu 22.04/24.04 image with a **550+ driver** (CUDA
+12.4 or later — `nvidia-smi` first thing), at least 100 GB of disk and
+32 GB of RAM, your SSH key. Note the price and the clock when it starts.
+
+### R2. Environment (~20 min; the kernels may compile)
+
+```bash
+nvidia-smi                                            # driver, memory free
+mkdir -p ~/minny-rl && cd ~/minny-rl
+curl -LsSf https://astral.sh/uv/install.sh | sh && source ~/.local/bin/env
+uv venv .venv --python 3.12 && source .venv/bin/activate
+uv pip install vllm                                   # brings its own torch; let it choose
+uv pip install "transformers==5.17.0" "trl==1.13.0" "peft==0.21.2" datasets accelerate requests
+uv pip install flash-linear-attention                 # Qwen3.5's linear-attention layers
+uv pip install ninja && CAUSAL_CONV1D_FORCE_BUILD=TRUE uv pip install --no-build-isolation causal-conv1d
+python -c 'import torch, vllm, trl, transformers; from transformers import AutoConfig; import fla, causal_conv1d; \
+print(torch.__version__, torch.cuda.get_device_name(0), "vllm", vllm.__version__, "trl", trl.__version__, "transformers", transformers.__version__); \
+print("model type:", AutoConfig.from_pretrained("Qwen/Qwen3.5-9B").model_type, "| hybrid kernels ok")'
+```
+
+`model type` must print `qwen3_5`. If `uv pip install vllm` pins a
+transformers older than 5.17 and the type no longer resolves, install the
+newest vLLM that allows transformers 5 — vLLM's support for Qwen3.5's
+hybrid layers is the one real version risk, and the dry run in R4
+settles it in two minutes.
+
+### R3. Model, prompts, scripts (~10 min)
+
+```bash
+export HF_TOKEN=...                                   # a read token for the private repo
+hf download <you>/minny-sft2-merged --local-dir ~/minny-sft/sft2/merged
+scp nucbox:minny-rl-kit.tgz . && tar xzf minny-rl-kit.tgz    # sft_rl.py rlvr_rewards.py sft_train.py sft/ rl/
+./sft_rl.py --check --prompts ./rl                    # teacher rewards as at home; GRPOConfig builds on this TRL
+```
+
+### R4. Dry run (~5 min)
+
+```bash
+./sft_rl.py --dry-run --prompts ./rl --base ~/minny-sft/sft2/merged --out ~/minny-rl/rl1
+```
+
+Two optimiser steps with four short generations, then `dry run: N GB
+peak`. It loads the policy in bf16 (~18 GB), attaches the LoRA, starts
+vLLM colocated with 30 % of the card, samples, scores, steps. Out of
+memory: `--vllm-gpu-mem 0.25`, then `--batch 2 --grad-accum 4`. vLLM
+refusing the architecture: R2's version note.
+
+### R5. Train (~3 h a run)
+
+```bash
+nohup ./sft_rl.py --prompts ./rl --base ~/minny-sft/sft2/merged --out ~/minny-rl/rl1 --max-steps 300 > ~/minny-rl/rl1.log 2>&1 &
+tail -f ~/minny-rl/rl1.log
+```
+
+Defaults: 8 generations of up to 300 tokens per prompt, temperature 1,
+LoRA r 32 on the language model's projections, lr 1e-5 constant after a
+5 % warm-up, KL to the start model (`--beta 0.02`), dapo loss, a
+checkpoint (a complete adapter) and a 48-prompt dev evaluation every 100
+steps. Prompts over 10k tokens are dropped; one optimiser step is one
+group of eight (`--batch 4 --grad-accum 2`), about 29 s on an H200.
+
+What the log should show, every 5 steps: `reward` rising from the first
+tens of steps (the components come as `reward/format`, `reward/routing`,
+`reward/args`, `reward/grounding`, `reward/coverage`,
+`reward/fabrication`, `reward/length`, `reward/kind`); `reward/format`
+pinned at 1.0 throughout; `kl` small and stable (under ~0.2 at this
+beta); completion length steady — not collapsing to one line, not
+growing to the cap. Signs to stop and read: format below 1.0 (the policy
+found a shape the parser rejects); kl climbing (lower the lr or raise
+beta); coverage rising while length falls to 0 (it is listing everything
+— raise the length weight in `rlvr_rewards.WEIGHTS`); nothing moving
+after 100 steps (`--lr 2e-5`, or `--num-generations 16` for a sharper
+group signal). A second run with the adjustment is the plan, not a
+surprise.
+
+### R6. Bring the adapter home, stop the meter (~5 min)
+
+```bash
+# from the laptop
+rsync -av box:minny-rl/rl1/adapter/ ~/minny-rl/rl1/adapter/              # ~300 MB
+rsync -av box:minny-rl/rl1/train-summary.json box:minny-rl/rl1.log ~/minny-rl/rl1/
+rsync -av box:minny-rl/rl1/checkpoints/ ~/minny-rl/rl1/checkpoints/      # optional: every 100-step adapter
+```
+
+Then **terminate the instance**. Nothing else lives on it.
+
+### R7. At home: merge, GGUF, serve, gates
+
+```bash
+# laptop, training venv
+./sft_train.py --merge-only ~/minny-rl/rl1/adapter --out ~/minny-rl/rl1 --base ~/minny-sft/sft2/merged
+# the throwaway convert venv, as in step 5
+python ~/minny-sft/llama.cpp/convert_hf_to_gguf.py ~/minny-rl/rl1/merged --outtype q8_0 --no-nextn \
+    --outfile ~/minny-rl/rl1/qwen3.5-9b-rl1-Q8_0.gguf
+llama-server [the kept flags] -m ~/minny-rl/rl1/qwen3.5-9b-rl1-Q8_0.gguf --alias qwen3.5-9b-rl1 --port 8002
+```
+
+The gates, from nucbox, against **sft2's** numbers: gate 1
+`sft_eval.py` on run1's dev (sft2: names 84.7 / args 66.1 %) and run2's
+dev (91.8 / 49.0 %), plus `rlvr_rewards.py score-eval RESULTS.json
+--vocab ~/news/voice-sft/rl/vocab.json` for the full-dev reward
+comparison against the teacher's; gate 2 `model_bench.py`; gate 3
+`eval_suite.py --models gpt-5.6-terra,qwen3.5-9b-rl1` (sft2: 98 / 96 /
+77 % against the frontier's 98 / 97 / 86; the misses to watch are the
+on-now framing, the two tuning references, the ignored recall, "Hey
+Wanda"). Promote through `.env` only if it beats sft2 on gates 1 and 3
+without a hygiene regression, and record the result in `SFT-DATA.md`.
+
+### What RL can and cannot fix here
+
+The rewards are code, so they move what code can verify: the tool and
+its arguments, answering from a result already in hand, not inventing or
+dropping titles, channels and times, the spoken form. They cannot teach
+the wording a criterion wants ("from the beginning", the name Minny) or
+a judgement the judge makes about framing — those are data (the next
+templates) or prompt. Read a run's gain in gate 1's args and the
+grounding/coverage columns first; the suite's "meets" moves last.

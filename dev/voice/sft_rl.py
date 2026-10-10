@@ -174,7 +174,8 @@ def main() -> None:
     if (args.batch * args.grad_accum) % (4 if args.dry_run else args.num_generations):
         raise SystemExit("--batch × --grad-accum must be a multiple of --num-generations (whole groups per step)")
     out = args.out
-    out.mkdir(parents=True, exist_ok=True)
+    if not args.check:
+        out.mkdir(parents=True, exist_ok=True)       # --check writes nothing
 
     vocab = rr.Vocab.load(args.prompts / "vocab.json") if (args.prompts / "vocab.json").exists() else None
     train_rows = load_prompts(args.prompts, args.max_tokens, "train")
