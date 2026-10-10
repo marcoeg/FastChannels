@@ -690,6 +690,64 @@ one general + focused generation under the new layout and compaction
 rebuilt from it. Order of work: fix 2 (half a day with the gates), fix 3
 (half a day), run3 and sft3 (a day, mostly the laptop's), RLVR after.
 
+**Status 2026-10-10, fixes 2 and 3 implemented** (`--cache-reuse` turned
+out not to be supported for this model, as feared):
+
+- The context block is in (`pai_agent.CONTEXT_HEADER` / `CONTEXT_END`,
+  `VoiceBrain.user_prompt`, `strip_context`): the viewer's words first,
+  then a blank line, the block, `[end of context]`. The first placement
+  (block first) made sft2 answer *about the screen line* in four suite
+  turns ("Remember that my favorite channel is KQED" → "KTVU channel two
+  is on right now…") — the fine-tune reads the opening of the user message
+  as the request, as every training example had it; words first cured
+  three of the four, the fourth (C5) was failing before. The three dynamic
+  instruction hooks are gone, so the system prompt is byte-identical per
+  deployment. Every run site goes through `user_prompt` — the worker
+  (`pai_llm`), `eval_suite`, `sft_gen`, `model_bench`, `minny_brain_check`;
+  `sft_eval` and `rlvr_rewards` strip the block when they show or judge
+  the request.
+- History: tool returns counted at chars ÷ 3, a 6,000-token budget, and
+  **every exchange abridged once, at its own commit** — its last tool
+  result to eight rows with airing ids (what "the second one" or "what's
+  after that" refer to, still playable), the others to three — so a
+  rewrite only ever lands at the tail. The first version abridged results
+  two exchanges later, in the middle of the history, and the server lost
+  the whole history's cache at every turn start (the household session
+  showed request 1 of a turn at a 75 % hit while request 2 was at 96 %).
+  Rows (`row_shape pacific-iso-lean/2026-10-10`): `kind`, `program_type`,
+  `duration_s` dropped, description ≤ 120 chars, two genres, `MAX_ROWS`
+  15; the lineup-wide what's-on-now is an overview row (title, channel,
+  number, end, airing id, one genre, 60 chars of description). Payloads:
+  the 52-row on-now 27.8k → ~14k chars, a 13-row evening 7.7k → 6.5k.
+- Measured on the local brain, four turns through the real agent and the
+  dry-run TV while the gates were also running on the laptop: first text
+  **3.5 / 2.7 / 2.2 / 2.3 s**, the first request of a turn re-reading
+  400–600 tokens instead of 3–10k (the same turns before any change: 7.6 /
+  12.8 / 7.1 / 0.7; the morning's household session 7–14 s on long
+  conversations). The four regressed suite scenarios re-run alone answered
+  in ~0.5 s. What remains at a turn boundary is Qwen's template rendering
+  the previous turn's assistant message with the empty think block only
+  while it is the latest — a few hundred tokens now that results are
+  digests.
+- Gates on the new layout: `model_bench` 27/27, routed 96 %, judge 4.74 /
+  4.56 / 5.00 (before the layout 100 %, 5.00 / 4.52 / 5.00 — within the
+  bench's run-to-run spread). The suite, words-first, frontier and sft2 in
+  one run (10:44, `suite-20261010-1044.json`): **sft2 96 / 92 / 78 %
+  against the frontier's 96 / 95 / 83 %**, judge 4.60 / 4.24 / 4.87 against
+  4.73 / 4.46 / 4.95 — the same gap as the morning's old-layout run (98 /
+  96 / 77 against 98 / 97 / 86), both models lower by the mid-morning
+  guide (on-now 43 % meets for both; the frontier lost ten turns to the
+  time of day, sft2 lost eight and gained nine). sft2's first text in the
+  suite **2.2 s p50, the frontier's 2.2 s**, from 2.7. One earlier suite run
+  had skipped the frontier because the benches inherited the production
+  switch's local settings (`extra_body chat_template_kwargs`, which OpenAI
+  rejects); `model_bench` now pins the agent's default brain to OpenAI.
+- Left for run3 (both need retraining, so they travel with the next data):
+  a served template that renders the empty think block for every
+  assistant turn (stable bytes across turns; a `--chat-template-file` on
+  llama-server and the same file for the prep), and a text row format in
+  place of JSON rows (the key overhead is now most of a payload).
+
 ### What RL can and cannot fix here
 
 The rewards are code, so they move what code can verify: the tool and

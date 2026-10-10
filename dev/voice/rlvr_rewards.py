@@ -162,6 +162,9 @@ class Sources:
         self.prompt = prompt
         users = USER_TURN.findall(prompt)
         self.request = users[-1].strip() if users else ""
+        i = self.request.find("\n\n[context for this turn — not spoken by the viewer]")   # the block is a source, not the request
+        if i >= 0:
+            self.request = self.request[:i].strip()
         self.earlier = " ".join(users[:-1]) + " " + " ".join(ASSISTANT_TURN.findall(prompt))
         sys_end = prompt.find(END)
         system = prompt[:sys_end] if sys_end > 0 else ""

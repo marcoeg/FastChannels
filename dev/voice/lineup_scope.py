@@ -52,7 +52,9 @@ MAP_TTL_S = 3600
 MAP_RETRY_S = 60
 # Rows handed to the model. 40 full rows were ~9.4k tokens, more than the
 # whole history budget (MAX_HISTORY_TOKENS 8000), and the turn was trimmed.
-MAX_ROWS = 25
+MAX_ROWS = 15                       # the window ranking puts the relevant rows first; 25 cost ~2k tokens a result
+DESCRIPTION_CHARS = 120             # a row's description, cut at a word
+OVERVIEW_DESCRIPTION_CHARS = 60     # in the lineup-wide what's-on-now
 # Row fields the model never uses: guide ids (it plays by airing_id and
 # searches by channel name), ranking internals, empty series stats.
 _DROP = {"id", "series_id", "season_id", "score", "matched", "external",
@@ -428,7 +430,34 @@ class LineupScope:
                 row["on_now"] = True
         except (TypeError, ValueError):
             pass
+        # Lean rows (row shape 2026-10-10): what the model never used goes —
+        # kind "live", program_type, duration_s — and the description is cut
+        # to a sentence, genres to two. A 13-row evening was ~2.6k tokens; the
+        # whole of it is re-read by the local brain at the next turn.
+        if row.get("kind") == "live":
+            row.pop("kind", None)
+        for k in ("program_type", "duration_s"):
+            row.pop(k, None)
+        desc = row.get("description")
+        if isinstance(desc, str) and len(desc) > DESCRIPTION_CHARS:
+            row["description"] = desc[:DESCRIPTION_CHARS].rsplit(" ", 1)[0] + "…"
+        if isinstance(row.get("genres"), list):
+            row["genres"] = row["genres"][:2]
         return row
+
+    @staticmethod
+    def _overview(row: dict) -> dict:
+        """A lineup-wide "what's on now" is 52 rows; the overview keeps what a
+        summary across channels needs (title, channel, times, airing id, a
+        genre, a clause of description). Per-channel calls keep full rows."""
+        out = {k: row[k] for k in ("title", "channel_name", "channel_number", "end_local", "airing_id")
+               if row.get(k) is not None}                       # it is on now: the end is what matters
+        if row.get("genres"):
+            out["genres"] = row["genres"][:1]
+        desc = row.get("description")
+        if isinstance(desc, str) and desc:
+            out["description"] = desc if len(desc) <= OVERVIEW_DESCRIPTION_CHARS else desc[:OVERVIEW_DESCRIPTION_CHARS].rsplit(" ", 1)[0] + "…"
+        return out
 
     async def whats_on_now(self, genre: str | None = None) -> list | str:
         """Every lineup station's current programme; `genre`: only rows
@@ -452,7 +481,7 @@ class LineupScope:
                     and (not genre or genre_hit(genre, r.get("genres")))]
 
         per = await asyncio.gather(*(one(g) for g in self._names))
-        rows = [r for rs in per for r in rs]
+        rows = [self._overview(r) for rs in per for r in rs]
         # A bare [] (every call failed in a VPN outage) was read as either
         # "nothing is on" or "couldn't check", at random.
         if failures and len(failures) * 2 >= len(self._names):

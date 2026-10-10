@@ -174,10 +174,12 @@ class PydanticLLMStream(llm.LLMStream):
         RUN_GATE.set(self._pai.gate_for(user_text))
         async with self._pai.turn_lock:
             try:
+                deps = brain.make_deps(recall)
+                prompt = await brain.user_prompt(user_text, deps)   # context block + the words
                 async with brain.agent.run_stream_events(
-                        user_text,
+                        prompt,
                         message_history=list(brain.history),
-                        deps=brain.make_deps(recall),
+                        deps=deps,
                         conversation_id=self._pai.session_id,
                         capabilities=[trace] if trace else None) as events:
                     async for ev in events:

@@ -210,9 +210,14 @@ def score(expected: str, got: str, stop: str, patterns: list[str]) -> dict:
     return s
 
 
+CONTEXT_HEADER = "[context for this turn — not spoken by the viewer]"
+
+
 def last_user(prompt: str) -> str:
     m = LAST_USER.findall(prompt)
-    return m[-1].strip() if m else ""
+    text = m[-1].strip() if m else ""
+    i = text.find("\n\n" + CONTEXT_HEADER)         # the per-turn context block follows the words in the user message
+    return text[:i].strip() if i >= 0 else text
 
 
 # ---- the judge, for text steps -------------------------------------------------------------------

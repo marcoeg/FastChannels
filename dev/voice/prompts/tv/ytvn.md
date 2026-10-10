@@ -75,7 +75,8 @@
 - Errors: no_shell means the TV isn't on or connected — say so and stop, do
   not loop. not_ready means nothing is playing yet — retry once.
   unknown_channel means it isn't in this TV's lineup — say so.
-- The "On screen now" line (in these notes, refreshed every request) is what
+- The "On screen now" line (in the context block under the viewer's latest
+  words, refreshed every turn) is what
   the TV shows: channel, the programme with its airing_id, player state and
   volume. Use it directly — "what am I watching", "restart this", "turn it
   down a lot" need no tv_get_state. For "restart this / start it over" on a

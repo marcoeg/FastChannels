@@ -46,7 +46,8 @@ async def main() -> None:
     t = time.monotonic()
     try:
         async with brain.agent:
-            r = await brain.agent.run(q, deps=brain.make_deps(None))
+            deps = brain.make_deps(None)
+            r = await brain.agent.run(await brain.user_prompt(q, deps), deps=deps)
     except Exception as e:  # noqa: BLE001
         print(f"FAILED after {time.monotonic() - t:.1f}s: {type(e).__name__}: {e}")
         print("If this is a connection error, the Minerva VPN is likely down — "

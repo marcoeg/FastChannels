@@ -247,8 +247,29 @@ class ResilientToolset(WrapperToolset):
             return _OUTAGE.get(self.svc, f"The {self.svc} server is unavailable right now — say so.")
 
 MAX_TURN_PAIRS = 12
-MAX_HISTORY_TOKENS = 8_000          # chars//4 estimate
-KEEP_TOOL_RESULTS_FOR = 2           # most recent exchanges keep raw payloads
+MAX_HISTORY_TOKENS = 6_000          # estimated: chars//4 for text, chars//3 for tool returns; digests keep it rarely binding
+KEEP_TOOL_RESULTS_FOR = 1           # the finished exchange keeps its last raw payload; the rest are digests
+DIGEST_ROWS = 3                     # rows an abridged earlier result keeps
+DIGEST_ROWS_LAST = 8                # … and the exchange's last result, which follow-ups refer to
+
+# The per-turn context (clock, on-screen line, memory notes) rides at the top
+# of the viewer's message, under this header, instead of inside the system
+# prompt: the system prompt is then byte-identical for every request of a
+# deployment and the server's prefix cache covers it and the whole history —
+# llama.cpp re-processed everything after the first changed line (6–11k
+# tokens a request on the 9B). Qwen's template allows one system message,
+# which is why the block is in the user turn.
+CONTEXT_HEADER = "[context for this turn — not spoken by the viewer]"
+CONTEXT_END = "[end of context]"
+
+
+def strip_context(text: str) -> str:
+    """The viewer's words without the context block (for logs, memory, judges).
+    The words come first and the block after them, so a model that reads the
+    opening of the message as the request — as every training example had
+    it — is not answering the clock or the screen line."""
+    i = text.find("\n\n" + CONTEXT_HEADER)
+    return text[:i] if i >= 0 else text
 
 
 @dataclass
@@ -350,7 +371,7 @@ def _stdio_toolsets(cfg_path: str, read_timeout: float) -> list:
     return out
 
 
-def build_agent(primers: list | None = None) -> Agent:
+def build_agent(primers: list | None = None, hooks: dict | None = None) -> Agent:
     """primers collects async callables to run once at session start, off
     the voice path (VoiceBrain.prime), so no turn pays for them."""
     primers = primers if primers is not None else []
@@ -452,14 +473,8 @@ def build_agent(primers: list | None = None) -> Agent:
         deps_type=TurnDeps,
     )
 
-    @agent.instructions
-    def time_context(ctx: RunContext[TurnDeps]) -> str:
-        return format_time_context(tz=tz, backend=backend)
-
-    @agent.instructions
-    def memory_context(ctx: RunContext[TurnDeps]) -> str:
-        return format_memory_context(ctx.deps.facts_profile,
-                                     ctx.deps.facts_recent)
+    hooks = hooks if hooks is not None else {}
+    hooks["time"] = lambda: format_time_context(tz=tz, backend=backend)   # VoiceBrain.user_prompt reads these
 
     if backend == "falkordb":
         @agent.tool_plain
@@ -748,13 +763,12 @@ def build_agent(primers: list | None = None) -> Agent:
                                      for t in titles)
                     + ". Other categories: " + ", ".join(c for c in cats[:20]))
 
-        @agent.instructions
-        async def screen_context(ctx: RunContext[TurnDeps]) -> str:
-            """What the TV shows, fresh per model request from the MCP
-            server's cached viewer state (no round trip to the page). It
-            carries the airing_id of the programme on screen, so "restart
-            this" or "what am I watching" need no lookup — older tool results
-            are blanked from the history after two exchanges."""
+        async def read_screen() -> str:
+            """What the TV shows, fresh per turn from the MCP server's cached
+            viewer state (no round trip to the page). It carries the
+            airing_id of the programme on screen, so "restart this" or "what
+            am I watching" need no lookup — older tool results are abridged
+            in the history after two exchanges."""
             gen = ytvn.gen
             try:
                 raw = await asyncio.wait_for(ytvn.raw.read_resource("viewer://state"), 0.3)
@@ -763,6 +777,7 @@ def build_agent(primers: list | None = None) -> Agent:
                 ytvn.kick(gen, e)             # a dead server respawns in the background
                 return ""
             return format_screen(st)
+        hooks["screen"] = read_screen
 
     @agent.tool_plain
     async def web_lookup(query: str) -> str:
@@ -799,9 +814,33 @@ class VoiceBrain:
 
     def __init__(self, memory: "VoiceMemory | None" = None) -> None:
         self._primers: list = []
-        self.agent = build_agent(self._primers)
+        self._hooks: dict = {}
+        self.agent = build_agent(self._primers, self._hooks)
         self.memory = memory
         self.history: list[ModelMessage] = []
+
+    async def user_prompt(self, say: str, deps: "TurnDeps") -> str:
+        """The viewer's words with the turn's context block on top: clock,
+        on-screen line, memory notes. Every run goes through here, so the
+        system prompt stays static (see CONTEXT_HEADER)."""
+        lines = [CONTEXT_HEADER]
+        time_hook = self._hooks.get("time")
+        if time_hook:
+            lines.append(time_hook())
+        screen_hook = self._hooks.get("screen")
+        if screen_hook:
+            try:
+                line = await screen_hook()
+            except Exception:  # noqa: BLE001  the hook already logs and respawns
+                line = ""
+            if line:
+                lines.append(line)
+        mem = format_memory_context(deps.facts_profile, deps.facts_recent)
+        if mem:
+            lines.append(mem)
+        block = "\n".join(ln.strip("\n") for ln in lines if ln)
+        block = re.sub(r"\n{2,}", "\n", block)       # one blank line separates the words from the block
+        return f"{say}\n\n{block}\n{CONTEXT_END}"
 
     async def prime(self) -> None:
         """Session-start work (catalogue check, lineup map) in parallel.
@@ -918,16 +957,22 @@ def _trim(history: list[ModelMessage]) -> list[ModelMessage]:
 
     kept = history[kept_start:]
 
-    # Blank bulky tool payloads outside the most recent exchanges.
+    # Abridge an exchange's tool payloads once, at its own commit (the tail
+    # of the history): its last result to DIGEST_ROWS_LAST rows with airing
+    # ids — what "the second one" or "what's after that" refer to — the
+    # others to DIGEST_ROWS. Older exchanges are never touched again, so the
+    # server's prefix cache keeps the whole history up to the finished
+    # exchange; a rewrite in the middle (or a dropped head) costs it all.
     kept_starts = [i for i, m in enumerate(kept) if _is_user_request(m)]
-    blank_before = kept_starts[-KEEP_TOOL_RESULTS_FOR] if len(
-        kept_starts) > KEEP_TOOL_RESULTS_FOR else 0
+    last_start = kept_starts[-1] if kept_starts else 0
+    last_result = max((i for i, m in enumerate(kept) if i >= last_start and isinstance(m, ModelRequest)
+                       and any(isinstance(p, ToolReturnPart) for p in m.parts)), default=None)
     out: list[ModelMessage] = []
     for i, msg in enumerate(kept):
-        if i < blank_before and isinstance(msg, ModelRequest) and any(
-                isinstance(p, ToolReturnPart) for p in msg.parts):
-            parts = [_replace(p, content="[tool result omitted]")
-                     if isinstance(p, ToolReturnPart) else p
+        if isinstance(msg, ModelRequest) and any(isinstance(p, ToolReturnPart) for p in msg.parts):
+            keep = DIGEST_ROWS_LAST if i == last_result else DIGEST_ROWS
+            parts = [_replace(p, content=_digest(p.content, keep))
+                     if isinstance(p, ToolReturnPart) and not str(p.content).startswith("(earlier result") else p
                      for p in msg.parts]
             out.append(_replace(msg, parts=parts))
         else:
@@ -991,7 +1036,29 @@ def _est_tokens(msg: ModelMessage) -> int:
     for p in getattr(msg, "parts", []):
         content = getattr(p, "content", "")
         try:
-            total += len(str(content))
+            n = len(str(content))
         except Exception:  # noqa: BLE001
-            total += 100
-    return total // 4
+            n = 400
+        # JSON rows (digits, quotes, braces) tokenise at ~3 chars a token, prose at ~4
+        total += n // 3 if isinstance(p, ToolReturnPart) else n // 4
+    return total
+
+
+def _digest(content, keep: int = DIGEST_ROWS) -> str:
+    """An earlier tool result, abridged for the history: a listing keeps its
+    first `keep` rows as title · channel · start · airing id, in order, so
+    "the second one" or "what's after that" still resolve and a pick can
+    still be played; anything else keeps its first 200 chars."""
+    text = content if isinstance(content, str) else json.dumps(content, ensure_ascii=False)
+    rows = None
+    try:
+        d = json.loads(text)
+        rows = d if isinstance(d, list) else d.get("rows") if isinstance(d, dict) else None
+    except (ValueError, AttributeError):
+        pass
+    if isinstance(rows, list) and rows and all(isinstance(r, dict) for r in rows):
+        head = "; ".join(" · ".join(str(r.get(k)) for k in ("title", "channel_name", "start_local", "airing_id") if r.get(k))
+                         for r in rows[:keep])
+        more = f"; … and {len(rows) - keep} more" if len(rows) > keep else ""
+        return f"(earlier result, abridged) {head}{more}"
+    return "(earlier result, abridged) " + text[:200] + ("…" if len(text) > 200 else "")

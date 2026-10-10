@@ -58,7 +58,7 @@ SCHEMA = "minny-rollout/1"
 # Set by pai_agent.build_agent: which static prompt and which guide-row
 # convention a turn ran under, so datasets can be split where they changed.
 PROMPT_HASH: str | None = None
-ROW_SHAPE = "pacific-iso-compact/2026-10-04"
+ROW_SHAPE = "pacific-iso-lean/2026-10-10"       # kind/program_type/duration_s dropped, description ≤120 chars, 2 genres; lineup-wide on-now is an overview
 ROLLOUT_DIR = Path(os.environ.get(
     "VOICE_ROLLOUT_DIR", str(Path.home() / "news" / "voice-rollouts")))
 

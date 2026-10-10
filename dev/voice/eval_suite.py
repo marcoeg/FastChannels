@@ -180,7 +180,7 @@ async def run_turn(brain: VoiceBrain, model, settings, say: str, deps: TurnDeps)
     t0, first, text = time.monotonic(), None, []
     try:
         async with brain.agent.run_stream_events(
-                say, model=model, model_settings=settings, deps=deps,
+                await brain.user_prompt(say, deps), model=model, model_settings=settings, deps=deps,
                 message_history=list(brain.history), capabilities=[trace]) as ev:
             async for e in ev:
                 d = None

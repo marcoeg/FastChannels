@@ -500,6 +500,33 @@ framing, and two reference errors.
 confirmation wording for catch-up and restart, the identity line, and
 restart flows that look the airing up; the rest is the RLVR residue.
 
+## Prompt layout change of 2026-10-10 — what it means for the data
+
+For serving latency on the local brain (runbook, "Serving latency"), the
+agent's prompt changed shape: the clock, the on-screen line and the memory
+notes now ride in a context block *under* the viewer's words (the words,
+a blank line, `[context for this turn — not spoken by the viewer]` …
+`[end of context]`), the system prompt is static, each exchange's tool
+results are abridged at its commit (the last to eight rows with airing
+ids, the others to three), and guide rows are lean (`row_shape
+pacific-iso-lean/2026-10-10`: no `kind`/`program_type`/`duration_s`,
+description ≤ 120 chars, two genres, 15 rows, a lineup-wide what's-on-now
+as overview rows). Consequences:
+
+- run1, run2-general and run2 were generated under the old layout and row
+  shape; sft1 and sft2 were trained on them. Served under the new layout,
+  sft2 is a cross-layout case: the suite with the frontier in the same run
+  (2026-10-10 10:44) gave 96 / 92 / 78 % against 96 / 95 / 83 % — the same
+  gap as under the old layout — with first text at 2.2 s, the frontier's.
+- `sft_train_prep.py` and `sft_eval.py` work unchanged (they render what
+  the rollouts recorded); `sft_eval.last_user` and `rlvr_rewards.Sources`
+  strip the block when they show or judge the request, and the block's
+  lines count as grounding sources.
+- The next generation run (**run3**) produces data in the new layout by
+  construction, since the generator uses the agent; **sft3** should be
+  trained on run3 (plus the old runs only if their layout is accepted as a
+  second format), and the RLVR prompt set rebuilt from run3.
+
 ## RLVR: `rlvr_rewards.py` and `sft_rl.py` (written 2026-10-09; not run)
 
 Reinforcement learning with verifiable rewards on top of the SFT model,
