@@ -434,6 +434,43 @@ laptop. The RL prompt set rebuilt over the three runs holds 8,140 prompts
 (6,405 train / 346 dev under 10k tokens); the teacher scores grounding
 0.97, fabrication 0.021, routing 0.969, coverage 0.71 on its dev part.
 
+## sft2 — trained on the three runs; the gates (2026-10-09 evening)
+
+One epoch of QLoRA from the base over run1 + run2-general + run2 (6,756
+examples at 12,288 tokens; trained on the laptop, gate 1 passed there),
+served as `qwen3.5-9b-sft2` (Q8_0) on `:8002`. Gates 1 and 2 from nucbox
+the same evening; gate 3 was interrupted after two scenarios by the
+guide's tunnel losing its `172.23.0.0/16` route (every guide call timed
+out; the household agent's guide was down by the same cause) and is
+rerun once the route is back.
+
+| Gate | metric | sft1 | **sft2** |
+| --- | --- | --- | --- |
+| 1 run1 dev (230 steps, `sft-eval-20261009-2313.json`) | kind accuracy | 93.5 % | 94.3 % |
+| | tool names / args | 78.0 / 55.9 % | **84.7 / 66.1 %** |
+| | exact match | 33.5 % | **39.1 %** |
+| | text: answered as text / forbidden / length | 98.2 % / 0 / ×0.99 | 95.5 % / 0 / ×1.0 |
+| | hygiene rows | all 0 | all 0 |
+| 1 run2 dev (96 steps, the targeted categories, `sft-eval-20261009-2320.json`) | kind accuracy | 95.8 % | **99.0 %** |
+| | tool names / args | 73.5 / 42.9 % | **91.8 / 49.0 %** |
+| | exact match | 22.9 % | 26.0 % |
+| | text: answered as text / forbidden / length | 93.6 % / 0 / ×1.0 | **97.9 %** / 0 / ×0.99 |
+| | hygiene rows | all 0 | all 0 |
+| 2 `model_bench` (27, `20261009-2311.json`) | routed | 100 % | 100 % |
+| | faithful / helpful / voice | 4.52 / 4.41 / 4.78 | **5.00 / 4.52 / 5.00** |
+| 3 `eval_suite` | routed / checks / meets | 97 / 93 / 78 % | pending the guide |
+
+Reading it: the targeted data did what it was for — on the follow-up and
+catch-up split the tool choice went from 73.5 to 91.8 % and the
+tool-vs-text decision to 99 %, and it lifted the general split too
+(names +7, args +10). Arguments on the targeted split moved less
+(42.9 → 49.0 %); the remaining differences there are mostly where a
+time-slot window starts relative to the teacher's (the teacher opens the
+whole evening for "at nine tonight", the student the hour asked) and a
+title's trailing "7AM" dropped — conventions, not wrong calls. Gate 2's
+timings were inflated by the guide timeouts of that hour; its grades
+stand.
+
 ## RLVR: `rlvr_rewards.py` and `sft_rl.py` (written 2026-10-09; not run)
 
 Reinforcement learning with verifiable rewards on top of the SFT model,
