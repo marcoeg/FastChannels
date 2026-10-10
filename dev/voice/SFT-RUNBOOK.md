@@ -378,6 +378,23 @@ it is a purchase, not an experiment. The 9B path first:
    then the GGUF with `--no-nextn`, serving as `qwen3.5-9b-sft2`, and the
    three gates — gate 1 on run1's dev against sft1 (kind 93.5 / names 78.0
    / args 55.9) and on run2's dev for the targeted categories.
+
+   **Done 2026-10-09.** 845 steps, ~58 s/step; pick-best picked
+   checkpoint-845 (dev loss 0.283 at the ≤16384 default cap — not
+   comparable to sft1's 0.134, which used ≤12288). The GGUF needed **no
+   hand-patching** this run: `merge()`'s embedded served template (7816 B)
+   and `--no-nextn` produced a clean `block_count=32` model that loaded
+   first try, and the conversion ran in a throwaway `~/minny-sft/.convert`
+   venv so the cu126 training venv stayed intact.
+
+   **Gate 1 (run1's dev, 230 ex, 0 errors):** sft2 beats sft1 on every
+   tool metric — kind 94.3 %, tool names **84.7 %** (sft1 78.0), args
+   **65.3 %** (55.9), arg keys 74.6 % (67.8), exact 38.7 % (33.0); text
+   length ×1.0, forbidden 0, all hygiene rows 0. The gains land on run1's
+   dev — which run2 added no data for — so it is generalisation, not
+   fitting the new examples. One regression: empty / non-text answers
+   1.8 % → **4.5 %** (`answered_as_text` 95.5 %), ~5 of 112 text steps —
+   the thing to watch in the `--judge` pass and gates 2–3.
 3. **RLVR** (rented 80 GB cards; the laptop cannot sample 8 trajectories
    of 8k tokens at a useful rate): step-wise GRPO with TRL's
    `GRPOTrainer` and vLLM, the policy initialised from the merged sft2,
