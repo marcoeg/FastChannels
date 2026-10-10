@@ -48,6 +48,12 @@ for _f in (HERE / ".env", Path.home() / ".env"):
                 os.environ.setdefault(k.strip(), v.strip().strip('"'))
 os.environ["VOICE_TV"] = "ytvn"
 os.environ.setdefault("VOICE_EPG_BACKEND", "minny")
+# The benches pick the model per run (make_model); the agent's own default
+# must be the neutral OpenAI one. With the production switch on `local`
+# the agent would carry the local settings (extra_body chat_template_kwargs)
+# into every run and OpenAI rejects them: "Unknown parameter" — the
+# frontier was skipped from a whole suite run that way on 2026-10-10.
+os.environ["VOICE_LLM"] = "openai"
 sys.path.insert(0, str(HERE))
 
 from pydantic import BaseModel, Field  # noqa: E402
@@ -203,9 +209,10 @@ async def run_turn(brain: VoiceBrain, model, settings, q: str) -> dict:
     first = None
     text: list[str] = []
     try:
+        deps = brain.make_deps(None)
         async with brain.agent.run_stream_events(
-                q, model=model, model_settings=settings,
-                deps=brain.make_deps(None), capabilities=[trace]) as ev:
+                await brain.user_prompt(q, deps), model=model, model_settings=settings,
+                deps=deps, capabilities=[trace]) as ev:
             async for e in ev:
                 d = None
                 if isinstance(e, PartStartEvent) and isinstance(e.part, TextPart):
