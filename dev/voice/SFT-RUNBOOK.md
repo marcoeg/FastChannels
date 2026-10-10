@@ -609,6 +609,87 @@ on-now framing, the two tuning references, the ignored recall, "Hey
 Wanda"). Promote through `.env` only if it beats sft2 on gates 1 and 3
 without a hygiene regression, and record the result in `SFT-DATA.md`.
 
+## Serving latency: prompt layout and history budget (plan, 2026-10-10)
+
+The first household session on the local brain (29 turns, sft2 on the
+laptop): behaviour as the gates said, first text **p50 6.1 s, p90 12.9 s**
+against the frontier's 2.7 / 4.5 s. All of it is prompt processing:
+llama-server reports `cache_read_tokens = 7,699` on every request — the
+static system prompt — and re-processes everything after it (clock line,
+on-screen line, memory notes, the history, this turn's tool results),
+6–11k tokens by the fourth turn, twice a turn. Three fixes; the first is a
+server flag, the other two are agent changes that the next data
+generation must share, since training prompts have to match serving.
+
+**Fix 1 — `--cache-reuse 256` on llama-server** (laptop restart). Lets
+llama.cpp reuse cached KV chunks past the point where a prompt diverges.
+Measure on the next turns: the rollouts' `requests[].usage.cache_read_tokens`
+against `input_tokens`; if it stays at 7,699 the feature does not apply to
+this hybrid model (KV shifting needs plain attention; 24 of the 32 layers
+are linear attention) and fix 2 carries the whole gain.
+
+**Fix 2 — a stable prefix: the volatile lines move into the user turn.**
+Today three `@agent.instructions` hooks (`time_context`, `memory_context`,
+`screen_context`, `pai_agent.py` ~455–465 and ~751) render the clock, the
+memory notes and the on-screen line *into the system prompt*, after the
+static text; any change to them — the minute, a tune, a recalled fact —
+invalidates the cache for the history behind them. The change: the three
+hooks go, and `run_turn` prepends one context block to the viewer's
+utterance in the user message —
+
+```
+[Minny context — not spoken by the viewer]
+Clock: Saturday, October 10, 2026, 9:28 AM PDT …
+On screen now (live): KTVU channel 2 | player playing, volume 50%
+Memory: the viewer's favourite channel is KQED; usual volume 40 %.
+
+Tune on that channel.
+```
+
+— so the system prompt is byte-identical for every request of a
+deployment (`prompt_hash` becomes stable), every earlier turn is frozen
+history (its block is stale but never rewritten), and a turn's second
+request differs from its first only by the appended tool call and
+result. Qwen's template forbids a second system message, which is why the
+block rides in the user turn. Pieces: a `context_block(deps)` builder and
+a `strip_context(text)` used wherever the raw utterance matters (memory
+extraction, the transcript log — the rollouts already take `user_text`
+separately); the instruction wording that says "these notes, refreshed
+every request" points to the block instead; `format_time_context` keeps
+minute resolution (the windows need it) since the clock no longer breaks
+anything. The frontier path gains too: OpenAI's prompt caching also wants
+an exact prefix, and the household brain's instructions currently change
+every request for the same reason.
+
+**Fix 3 — the history budget.** `_trim` already keeps at most 12 exchanges
+and ~8,000 *estimated* tokens (chars ÷ 4) and blanks tool results older
+than `KEEP_TOOL_RESULTS_FOR` exchanges to "[tool result omitted]"; prompts
+still reached 18–19k tokens because the estimate undercounts JSON rows
+(digits and punctuation tokenise at ~3 chars a token), the current turn's
+two full results sit on top, and 25-row results are large. Changes: count
+tokens at chars ÷ 3 for tool returns; budget 4,000 history tokens; replace
+blanking with **compaction at commit** — the finished turn's tool returns
+are rewritten to a short digest (the first three rows as title · channel ·
+start, plus "… and N more") except the last listing result, which stays
+full for one more turn so "the second one" still resolves; and
+`MAX_ROWS` 25 → 15 for broad schedule searches (the window ranking already
+puts the relevant rows first). Compaction at commit rewrites only the tail
+of the prefix, so the cache loses the newest turn once, not the
+conversation.
+
+**Verification, in this order:** the cache ratio from the rollouts after
+each change (`cache_read_tokens / input_tokens` on second requests should
+approach 1); first text p50 on a scripted multi-turn session (the suite's
+multi-turn scenarios and a ten-turn `minny_brain_check`-style run) — the
+target is ~2–3 s on the laptop; `eval_suite.py` on the frontier before and
+after fix 2 (the household brain must not regress) and on sft2 (a
+cross-layout check: the fine-tune was trained with the lines in the
+system prompt, so expect a small loss until retrained); then **run3** —
+one general + focused generation under the new layout and compaction
+(~1,500 conversations) — `sft3` trained on it, and the RLVR prompt set
+rebuilt from it. Order of work: fix 2 (half a day with the gates), fix 3
+(half a day), run3 and sft3 (a day, mostly the laptop's), RLVR after.
+
 ### What RL can and cannot fix here
 
 The rewards are code, so they move what code can verify: the tool and
