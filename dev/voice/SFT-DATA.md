@@ -618,3 +618,16 @@ than sft2. Nothing was shipped; **sft2 remains the local brain.**
 - **Use `kind`/tool_match in the in-loop eval as the stop signal**, not the
   aggregate reward (gameable by construction). The runbook R5 already flags
   `kl > 0.2` as a stop sign; this run hit ~1.0 and should have been halted.
+
+**Run 2 — staged (2026-10-11).** All of the above are implemented and
+committed (`3828535`): `rlvr_rewards.reward()` floors the total to −1.0 on a
+tool-vs-text mismatch (like a format failure); `WEIGHTS` moved to
+routing/args 1.5, grounding 0.75, length 0.25; `sft_rl.py` defaults are now
+`--beta 0.1` and `--max-steps 150`, with `load_best_model_at_end` on
+`eval_reward` + an `EarlyStoppingCallback`. Validated offline with
+`score-eval` on run 1's saved results: the collapse drops from ~3.15 (old
+reward, top of the chart) to **0.849**, below sft2 (2.079) and the teacher
+(2.242) — the exploit is closed and `eval_reward` is a faithful in-loop
+signal again. The kit (`~/minny-rl-kit.tgz`) was rebuilt with the fixed
+scripts and the existing `rl/` (prompts unchanged — the fix is in scoring,
+not prompt-building); `scp` it to the next pod and run R2→R7 as written.
