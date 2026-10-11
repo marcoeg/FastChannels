@@ -55,6 +55,7 @@ XML_PARAM = re.compile(r"<parameter=(?P<key>[^>\n]+)>\n(?P<value>.*?)\n</paramet
 PY_LITERAL = re.compile(r"<parameter=[^>\n]+>\n(True|False|None)\n</parameter>")
 TOOL_RESPONSE = re.compile(r"<tool_response>\n(.*?)\n</tool_response>", re.S)
 USER_TURN = re.compile(r"<\|im_start\|>user\n(?!<tool_response>)(.*?)<\|im_end\|>", re.S)
+CONTEXT_HEADER = "[context for this turn — not spoken by the viewer]"
 ASSISTANT_TURN = re.compile(r"<\|im_start\|>assistant\n(.*?)<\|im_end\|>", re.S)
 NARRATED = re.compile(r"\b(let me (check|look|see)|i'?m (checking|looking)|checking (the|what)|i'?ll (check|look))\b", re.I)
 CLAIMED = re.compile(r"\b(tuned|switched (to|over)|turned on|now playing|playing from the beginning|restart(ed|ing)|"
@@ -162,14 +163,21 @@ class Sources:
         self.prompt = prompt
         users = USER_TURN.findall(prompt)
         self.request = users[-1].strip() if users else ""
-        i = self.request.find("\n\n[context for this turn — not spoken by the viewer]")   # the block is a source, not the request
+        # The per-turn context block (layout of 2026-10-10) follows the words
+        # in the user message: clock, on-screen line, memory notes. It is a
+        # source, not the request.
+        block = ""
+        i = self.request.find("\n\n" + CONTEXT_HEADER)
         if i >= 0:
+            block = self.request[i:]
             self.request = self.request[:i].strip()
         self.earlier = " ".join(users[:-1]) + " " + " ".join(ASSISTANT_TURN.findall(prompt))
         sys_end = prompt.find(END)
         system = prompt[:sys_end] if sys_end > 0 else ""
-        screen = next((ln for ln in system.splitlines() if ln.startswith("On screen now")), "")
+        # the on-screen line: in the block under the new layout, in the system prompt under the old
+        screen = next((ln for ln in (block or system).splitlines() if ln.startswith("On screen now")), "")
         self.screen = screen
+        self.block = block
         # the last turn: after the last real user message
         last_user_pos = max((m.start() for m in USER_TURN.finditer(prompt)), default=0)
         turn = prompt[last_user_pos:]
@@ -193,8 +201,8 @@ class Sources:
             self.channels.add(norm(m.group(1)))
             self.numbers.add(m.group(2))
         raw_results = " ".join(TOOL_RESPONSE.findall(prompt))
-        self.free_text = norm(self.request + " " + self.earlier + " " + screen + " " + raw_results)
-        self.free_tokens = tokens(self.request + " " + self.earlier + " " + screen + " " + raw_results)
+        self.free_text = norm(self.request + " " + self.earlier + " " + screen + " " + block + " " + raw_results)
+        self.free_tokens = tokens(self.request + " " + self.earlier + " " + screen + " " + block + " " + raw_results)
         self.has_results = bool(results)
         # "empty" only when every result of the turn is one of the guide's nothing-found sentences
         self.results_empty = bool(results) and all(NO_MATCH.search(r) and not rows_of(r) for r in results)
