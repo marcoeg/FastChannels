@@ -65,8 +65,12 @@ RESULT_CLAIM = re.compile(r"\b(no listings|nothing (is )?(scheduled|listed|on)|i
                           r"not (on|scheduled|listed|available)|found nothing|couldn'?t find|can'?t find|no catch-?up)\b", re.I)
 NO_MATCH = re.compile(r"found nothing|Nothing on this TV's channels matches|no (recordings|results|matches)|is not in this TV|not carried", re.I)
 MAX_SPOKEN = 400
-WEIGHTS = {"format": 1.5, "routing": 1.0, "args": 1.0, "grounding": 1.0, "coverage": 0.5,
-           "fabrication": -1.5, "length": 0.5, "kind": 0.25}
+# Weighted toward call quality (routing, args) over text niceties (grounding,
+# length), so within the non-floored region a content-free text answer cannot
+# out-score a correct tool call. kind is also a hard floor in reward() — the
+# weight here only applies when the tool-vs-text branch already matches the teacher.
+WEIGHTS = {"format": 1.5, "routing": 1.5, "args": 1.5, "grounding": 0.75, "coverage": 0.5,
+           "fabrication": -1.5, "length": 0.25, "kind": 0.25}
 LISTING_TEMPLATES = {"on_now", "on_now_channel", "genre_now", "genre_schedule", "channel_schedule", "channel_lineup",
                      "whats_next", "whats_after_title", "movies", "recommend", "catchup_browse", "vod_browse",
                      "m_on_now_tune", "m_channel_evening_followups", "m_genre_tonight_pick", "m_now_then_next",
@@ -433,7 +437,12 @@ def reward(prompt: str, completion: str, extras: dict, vocab: Vocab | None = Non
     comp["length"] = length(spoken, t_spoken, calls)
     kind_expected = extras.get("kind_expected") or ("tool_call" if t_calls else "text")
     comp["kind"] = 1.0 if (("tool_call" if calls else "text") == kind_expected) else 0.0
-    if problem:
+    # kind is a hard gate, not a soft prior: taking the wrong tool-vs-text branch
+    # floors the total the way a format failure does. Without this, a brief grounded
+    # text answer scores high on format/grounding/length and passes routing (a
+    # tools_any_of set is already met by the turn's in-prompt calls), so RL collapses
+    # to "always answer as text, never call a tool" — run 1, 2026-10-11 (see SFT-DATA).
+    if problem or comp["kind"] == 0.0:
         total = -1.0
     else:
         total = sum(weights[k] * comp[k] for k in weights if comp.get(k) is not None)
