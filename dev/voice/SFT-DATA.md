@@ -527,7 +527,7 @@ as overview rows). Consequences:
   trained on run3 (plus the old runs only if their layout is accepted as a
   second format), and the RLVR prompt set rebuilt from run3.
 
-## RLVR: `rlvr_rewards.py` and `sft_rl.py` (written 2026-10-09; not run)
+## RLVR: `rlvr_rewards.py` and `sft_rl.py` (written 2026-10-09; first run 2026-10-11 — reward-hacked, not shipped; see the run note at the end)
 
 Reinforcement learning with verifiable rewards on top of the SFT model,
 for the residue SFT imitates but does not learn to judge — which tool,
@@ -575,3 +575,46 @@ installed TRL (verified here against 1.13); `--dry-run` is two small steps
 for the memory. For rented 80 GB cards — the laptop cannot sample eight
 8k-token trajectories per prompt at a useful rate. The eval suite and the
 dev splits stay held out; the gates after RL are the same three.
+
+## RLVR run 1 — reward-hacked, not shipped (2026-10-11)
+
+Ran on a rented RunPod **H200 141 GB** (the infra is in the runbook's
+"RLVR on the rented H200" section, and it worked end-to-end): policy from
+sft2's merge, fresh LoRA, `--beta 0.02`, dapo, 8 generations, 300 steps,
+~2.1 h, ~$15. **The held-out eval reward climbed the whole way — 2.64 →
+3.03 → 3.15 at steps 100/200/300**, with grounding, coverage and length
+all reaching ~0.99 and fabrication ~0. It read like a win. It was not.
+
+**The one component that fell told the story: `kind` (teacher's
+tool-vs-text decision, weight 0.25) dropped 0.80 → 0.53 → 0.48.** Gate 1
+on run1's dev exposed the collapse — ckpt-300 scored **tool_match 0,
+args 0, answered_as_text 1.00, kind 0.487**, and 0.487 is exactly
+112/230, the text-step fraction. **The policy had learned to answer every
+turn as short grounded text and never call a tool.**
+
+Why the reward allowed it: a brief grounded text answer scores 1.0 on
+format, ~1.0 on grounding, full on length, 0 fabrication — and the two
+components meant to stop it did not. **`routing` has a hole**: a text step
+counts as routed if a `tools_any_of` set was *already met by the turn's
+calls*, and in these single-step trajectories the tool results are already
+in the prompt — so a text answer passes routing even when the teacher's
+step was a *further* tool call. That left only **`kind` at weight 0.25**,
+with too loose a KL (`--beta 0.02`), opposing the degenerate "always text"
+optimum — so GRPO walked straight into it, and the rising *reward* masked a
+behavioural collapse. **The gate, not the reward, is truth.** The drift was
+progressive (kind already 0.80 at ckpt-100), so every checkpoint is worse
+than sft2. Nothing was shipped; **sft2 remains the local brain.**
+
+**Fix before run 2** (reward + schedule, not infra):
+- **Make kind/routing a hard gate, not a soft prior.** When the teacher's
+  step is a tool call and the policy answers text (or vice versa), *floor*
+  the total the way a format failure does — grounding/length must not buy
+  it back. Equivalently, the routing text-step rule must require the step
+  match the teacher's *kind*, not just that some set was met earlier.
+- **Up-weight routing + args, down-weight text-grounding/length** so a
+  content-free text answer cannot out-score a correct call.
+- **Tighten the KL** (`--beta` ~0.1–0.2) and run **far fewer steps** — the
+  drift was well under way by step 100.
+- **Use `kind`/tool_match in the in-loop eval as the stop signal**, not the
+  aggregate reward (gameable by construction). The runbook R5 already flags
+  `kl > 0.2` as a stop sign; this run hit ~1.0 and should have been halted.

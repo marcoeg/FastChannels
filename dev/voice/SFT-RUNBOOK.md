@@ -429,6 +429,16 @@ it is a purchase, not an experiment. The 9B path first:
 
 ## RLVR on the rented H200 — runbook
 
+> **Run 1 result (2026-10-11): the reward was hacked.** The policy
+> collapsed to answering every turn as short text and never calling a tool
+> (gate 1: `tool_match 0`, `answered_as_text 1.0`) while the *reward* rose
+> the whole way — `kind` 0.80→0.48 was the only warning. sft2 was not
+> beaten and **remains the local brain**. The **infrastructure below is
+> correct and worked end-to-end** — keep it. What needs changing before
+> run 2 is the **reward and schedule** (make kind/routing a hard gate,
+> up-weight routing+args, `--beta` ~0.1–0.2, far fewer steps, stop on
+> `kind`/`kl` not reward); the full post-mortem is in `SFT-DATA.md`.
+
 The policy starts from **sft2's merged bf16 model** (`~/minny-sft/sft2/merged`
 on the laptop); the box only trains. Merging, GGUF, serving and the gates
 happen at home afterwards, so the meter runs for the training alone.
@@ -520,6 +530,25 @@ above). Three follow-ons, each of which bit once:
   'cuda-toolkit-*'`) if you need room; the 18 GB model never goes on the
   overlay — `--local-dir` to the volume, or `/dev/shm` for fast loads.
 
+Confirmed on the 2026-10-11 H200 run — the exact snags and their fixes:
+- `vllm==0.28.0` still pulled **`torch 2.13.0+cu130`**, and the image only
+  had the 12.8 toolkit → `apt-get install -y 'cuda-toolkit-13-0*'`,
+  `CUDA_HOME=/usr/local/cuda-13.0`, then `causal_conv1d` builds. (The
+  nvcc-major rule above, made concrete.)
+- **`flash-linear-attention` is its own install line and easy to skip** —
+  if you do, the import check dies with `ModuleNotFoundError: No module
+  named 'fla'`. Install it, re-run the check.
+- **Do not `-U huggingface-hub`** — `transformers 5.17` requires it `<2.0`;
+  the pinned installs resolve a compatible one (1.33), and `hf download`
+  works off that. (`uv pip install -U "huggingface_hub[cli]"` broke the
+  laptop venv this way; on the box just don't upgrade it.)
+- The H200's **`/dev/shm` was 117 GB** — staging the model there
+  (`hf download … --local-dir /dev/shm/merged`, then `--base /dev/shm/merged`)
+  loaded far faster than the volume and dodged the earlier "stuck loading"
+  pain. That "stuck at 0 %" on the first attempt was **not** slow IO — it
+  was the vLLM-0.31 `futex` deadlock (check `State`/`wchan` in `/proc`,
+  not just GPU %, to tell IO-wait from a lock).
+
 ### R3. Model, prompts, scripts (~10 min)
 
 ```bash
@@ -528,6 +557,19 @@ hf download <you>/minny-sft2-merged --local-dir ~/minny-sft/sft2/merged
 scp nucbox:minny-rl-kit.tgz . && tar xzf minny-rl-kit.tgz    # sft_rl.py rlvr_rewards.py sft_train.py sft/ rl/
 ./sft_rl.py --check --prompts ./rl                    # teacher rewards as at home; GRPOConfig builds on this TRL
 ```
+
+Kit transfer, as it actually went: when the scripts or prompt layout
+change, rebuild the kit on whichever machine has the runs (`rlvr_rewards.py
+build --runs … --out ~/news/voice-sft/rl`, then `tar czf …`) — it was
+rebuilt on the **laptop** after the 2026-10-10 layout change. The rented
+pod **cannot reach the LAN**, so **push from the laptop**, capital-`-P`
+port: `scp -P <POD_PORT> -i ~/.ssh/id_runpod ~/minny-rl-kit.tgz
+root@<POD_IP>:` (use the "SSH over exposed TCP" endpoint — the
+`ssh.runpod.io` proxy has no SCP). Register your SSH **public** key on the
+RunPod account *before* creating the pod; if you forget, it drops to a
+password prompt — paste `id_runpod.pub` into the pod's
+`~/.ssh/authorized_keys` by hand (chmod 700 `~/.ssh`, 600 the file) via the
+web terminal.
 
 ### R4. Dry run (~5 min)
 
