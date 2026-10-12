@@ -467,20 +467,30 @@ troubleshooting on the box costs nine cents.
 ### R1. Rent
 
 One **H200 141 GB** — strongly preferred, and what the commands below
-assume. An H100 80 GB is **too tight for colocate**: `--vllm-gpu-mem 0.25`
-starves vLLM (it cannot fit the 18 GB weights + KV → "No available memory
-for the cache blocks"), and 0.3 then OOMs the policy backward by a hair —
-141 GB removes the squeeze. **Not a B200** — Blackwell (`sm_100`) forces a
-cu128 stack and reopens the CUDA-build fight; stay on Hopper (same stack
-as the laptop). An Ubuntu 22.04/24.04 image with a **550+ driver** (CUDA
-12.4 or later — `nvidia-smi` first). Two disk facts that cost hours
-(2026-10-10): the pod's **local overlay (`/`) is small** (~30 GB) and the
-mounted **network volume (`/workspace`) is huge but cannot `chmod`** — so
-wheel builds and the venv must live on the overlay (`/root`), big data on
-the volume, and the 18 GB model loads much faster staged into **`/dev/shm`**
-(RAM) than off the volume — check `df -h / /dev/shm /workspace` first.
-Register your SSH key on the account **before** creating the pod (it is
-injected at creation; otherwise paste it into `authorized_keys` by hand).
+assume. **The colocate run peaks ~105 GB of VRAM** (measured 2026-10-11/12,
+both the dry run and the real run), so it needs a card with ≥ ~120 GB
+usable — the H200's 141 GB fits with headroom. An **H100 80 GB cannot do
+colocate** (105 > 80): `--vllm-gpu-mem 0.25` starves vLLM ("No available
+memory for the cache blocks") and 0.3 OOMs the backward. **Not a B200** —
+Blackwell (`sm_100`) forces a cu128 stack and reopens the CUDA-build fight;
+stay on Hopper (same stack as the laptop). An Ubuntu 22.04/24.04 image with
+a **550+ driver** (CUDA 12.4 or later — `nvidia-smi` first).
+
+**Set the Container Disk to ≥ 100 GB** (the deploy screen's "Container
+Disk" slider, *separate* from the network volume) — the single most
+important pod setting, and the cause of a lost evening (2026-10-11). The
+default **30 GB overlay cannot hold the venv + CUDA toolkit + the JIT
+caches**, and no other filesystem is writable *and* executable *and* roomy:
+**`/dev/shm` is `noexec`** (compiled `.so`s from Triton/TileLang/vLLM fail
+to `dlopen` — "failed to map segment"), and **`/workspace` cannot `chmod`**
+(wheel builds die with "Operation not permitted"); a locked-down container
+won't even let you `mount -o remount,exec /dev/shm`. With a ≥ 100 GB
+overlay, *everything* — venv, toolkit, builds, Triton/vLLM caches, the
+18 GB model — lives on `/` and none of the filesystem juggling in R2/R3
+below is needed. Only override `UV_CACHE_DIR` off its `/workspace` preset
+(see R2). `df -h / /dev/shm /workspace` first to confirm the overlay is
+roomy. Register your SSH key on the account **before** creating the pod (it
+is injected at creation; otherwise paste it into `authorized_keys` by hand).
 Note the price and the clock when it starts.
 
 ### R2. Environment (~20 min; the kernels may compile)
