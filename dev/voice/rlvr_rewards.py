@@ -450,9 +450,13 @@ def reward(prompt: str, completion: str, extras: dict, vocab: Vocab | None = Non
 
 
 # ---- the prompt set --------------------------------------------------------------------------------
-def build(runs: list[Path], out: Path) -> None:
+def build(runs: list[Path], out: Path, templates: set[str] | None = None) -> None:
     """rl/prompts.jsonl from the runs' train/ examples joined with the
-    rollouts' checks, and rl/vocab.json from every channel the results name."""
+    rollouts' checks, and rl/vocab.json from every channel the results name.
+    templates: if given, only prompts whose metadata `template` is in the set are
+    written — a targeted set, e.g. the catch-up / on-now families for run 2.5, so
+    strong categories (schedule, tuning) are never trained on and can't regress.
+    The vocab is still built from every turn, filtered or not."""
     out.mkdir(parents=True, exist_ok=True)
     channels, numbers = set(), set()
     n = 0
@@ -477,6 +481,8 @@ def build(runs: list[Path], out: Path) -> None:
                                 channels.add(row["channel_name"])
                             if row.get("channel_number") is not None:
                                 numbers.add(str(row["channel_number"]))
+                    if templates is not None and m.get("template") not in templates:
+                        continue                        # targeted run: skip non-target templates (vocab already counted above)
                     fh.write(json.dumps({
                         "prompt": e["prompt"], "teacher_completion": e["completion"], "n_tokens": e["n_tokens"],
                         "checks": checks.get((m["session_id"], m["turn_index"]), {}),
@@ -542,13 +548,15 @@ def main() -> None:
     b = sub.add_parser("build", help="prompts.jsonl + vocab.json from prepared runs")
     b.add_argument("--runs", type=Path, nargs="+", required=True)
     b.add_argument("--out", type=Path, default=Path.home() / "news" / "voice-sft" / "rl")
+    b.add_argument("--templates", nargs="*", default=None,
+                   help="keep only prompts with these metadata templates (targeted run 2.5 — see the catch-up/on-now set in the runbook)")
     s = sub.add_parser("score-eval", help="components over an sft_eval results file: teacher vs models")
     s.add_argument("results", type=Path)
     s.add_argument("--vocab", type=Path)
     s.add_argument("--show", type=int, default=8)
     args = ap.parse_args()
     if args.cmd == "build":
-        build(args.runs, args.out)
+        build(args.runs, args.out, set(args.templates) if args.templates else None)
     else:
         score_eval(args.results, Vocab.load(args.vocab) if args.vocab else None, args.show)
 

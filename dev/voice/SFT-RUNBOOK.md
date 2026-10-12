@@ -661,6 +661,62 @@ on-now framing, the two tuning references, the ignored recall, "Hey
 Wanda"). Promote through `.env` only if it beats sft2 on gates 1 and 3
 without a hygiene regression, and record the result in `SFT-DATA.md`.
 
+### Run 2.5 — targeted on the weak categories (prepared 2026-10-11, to run next)
+
+Run 2 was a safe near-wash: it held the frontier parity and lifted catch-up
+(gate 1 catch-up 43→86) but **redistributed** rather than added — schedule
+fell (92→75) by the same hand that raised catch-up, because the reward
+trained uniformly over all 6,405 prompts and GRPO moved mass off the turns
+sft2 already did well. Run 2.5 fixes that by **training only where sft2 is
+weak** and leaving the strong categories untouched so they cannot regress.
+Same reward, same guardrails as run 2 (`kind` hard-floor, `--beta 0.1`,
+early-stop on `eval_reward`) — the only change is the **prompt set**.
+
+**The focused set is built at home and shipped in the kit** — the pod has no
+run data, so it cannot rebuild it. `rlvr_rewards.py build` now takes
+`--templates`: it still counts the full vocab from every turn but writes only
+prompts whose metadata `template` is in the list. The 14 kept templates are
+the catch-up and on-now families that miss; schedule, tuning and volume are
+**deliberately excluded** so they stay at sft2's level.
+
+```bash
+# laptop — build the focused set (1,803 train / 96 dev), then fold it into the kit
+cd ~/Development/FastChannels/dev/voice
+./rlvr_rewards.py build --runs ~/news/voice-sft/run1 ~/news/voice-sft/run2-general ~/news/voice-sft/run2 \
+    --out ~/news/voice-sft/rl-focus \
+    --templates catchup catchup_title catchup_browse catchup_news m_catchup_pick m_catchup_title_play m_missed restart \
+               on_now on_now_channel title_now genre_now m_title_now_put_on m_now_then_next
+./sft_rl.py --check --prompts ~/news/voice-sft/rl-focus | tail -20          # GRPOConfig builds; beta 0.1
+tar czf ~/minny-rl-kit.tgz -C ~/Development/FastChannels/dev/voice sft_rl.py rlvr_rewards.py sft_train.py sft \
+    -C ~/news/voice-sft rl rl-focus                                         # kit now carries BOTH rl/ and rl-focus/
+```
+
+Then rent and set up exactly as R1–R4 (the kit already has `rl-focus/`). The
+only changed commands are the dry run and train — point `--prompts` at
+`./rl-focus`, cut the steps (a quarter the prompts, so the pass is shorter),
+and write a new output dir:
+
+```bash
+./sft_rl.py --dry-run --prompts ./rl-focus --base ~/minny-sft/sft2/merged --out ~/minny-rl/rl25
+nohup ./sft_rl.py --prompts ./rl-focus --base ~/minny-sft/sft2/merged --out ~/minny-rl/rl25 \
+    --max-steps 120 > ~/minny-rl/rl25.log 2>&1 &
+tail -f ~/minny-rl/rl25.log
+```
+
+Watch the same signals as R5 (`reward/format` pinned at 1.0, `kl` under ~0.2,
+`kind` holding, length not collapsing). Bring it home (R6, `rl25`), merge /
+GGUF / serve (R7, `--no-nextn`, alias `qwen3.5-9b-rl25`, port 8002).
+
+**Gate and promote rule — the one thing run 2.5 must satisfy.** Run the same
+three gates against sft2's numbers, and **require no schedule regression**:
+gate 1 on run2's dev must keep its schedule/args at or above sft2 (the 92→75
+drop is exactly what we are undoing), *and* show the catch-up / on-now lift
+run 2 found. Promote through `.env` only if it **raises the weak categories
+without pulling any strong one down** and holds gate 3's frontier parity
+(98/96/77) with no hygiene regression. If schedule still falls, the focused
+set is still too broad — drop `on_now`/`genre_now` and keep only the pure
+catch-up templates, and rerun. Record the outcome in `SFT-DATA.md`.
+
 ## Serving latency: prompt layout and history budget (plan, 2026-10-10)
 
 The first household session on the local brain (29 turns, sft2 on the
