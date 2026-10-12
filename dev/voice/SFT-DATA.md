@@ -631,3 +631,58 @@ reward, top of the chart) to **0.849**, below sft2 (2.079) and the teacher
 signal again. The kit (`~/minny-rl-kit.tgz`) was rebuilt with the fixed
 scripts and the existing `rl/` (prompts unchanged — the fix is in scoring,
 not prompt-building); `scp` it to the next pod and run R2→R7 as written.
+
+## RLVR run 2 — ran clean, a near-wash at frontier parity (2026-10-11)
+
+Ran on a rented H200 (150 steps, `--beta 0.1`, ~65 min). **The fix held:**
+in-loop `kind` stayed ~0.95 and `kl` ~0.01 the whole way (run 1 collapsed to
+`kind 0.48`, `kl ~1`); best checkpoint auto-kept at step 100. Merged onto
+sft2 (`qwen3.5-9b-rl2`), gated against sft2:
+
+- **Gate 1** (run1 dev, deterministic): rl2 **≥ sft2** — tool names 84.7→**86.4**,
+  args 66.1→**66.9**, keys 74.6→**76.3**, kind 94.3→94.8, empties 4.5→3.6,
+  hygiene all 0. No regression, small gains.
+- **Gate 2** (`model_bench`, 27 Q, judged): rl2 **slightly below** — routed
+  100→96 %, faithful 5.00→4.67, helpful 4.52→4.33, voice 5.00→4.78. Within
+  27-question judge noise, but not an improvement.
+- **Gate 3** (`eval_suite`, 92 turns, `suite-20261011-2053.json`): rl2 **meets
+  79 %, matching the frontier in the same run (79 %)** — closing the gap sft2
+  had (77 % vs its run's frontier 86 %). Judge 4.55 / 4.24 / 4.82 (frontier
+  4.74 / 4.40 / 4.87). **It redistributed by category** (meets, rl2 · frontier):
+  catch-up **86 · 71** (sft2 was 43 — the grounding/coverage reward paid off
+  exactly where aimed), memory **100 · 67**, limits/identity 88 · 88, volume
+  93 · 79 — **up**; schedule **75 · 92** (sft2 was 92), on demand 70 · 90,
+  robustness 70 · 70 — **down**. Per-category N is 7–14, so single-scenario
+  swings are noise; read the direction, not the decimals.
+
+**Verdict: rl2 ≈ sft2 overall** — a legitimate, safe model (the whole point
+vs run 1), at frontier parity, but a *trade* (catch-up fixed, schedule
+regressed) rather than a clean win, and a touch lower on the gate-2 judge. So
+**sft2 stays the production local brain** unless catch-up reliability is valued
+over schedule. The durable win is strategic: **RLVR now provably moves the
+targeted category without collapsing.**
+
+## Next: targeted RLVR run 2.5 (sketch)
+
+Run 2 showed the reward *can* lift a weak category (catch-up) but at the cost
+of others (schedule) — because the reward is applied *uniformly* across all
+prompts, so the gradient chases whatever is cheapest everywhere. Make it
+**targeted and non-disruptive:**
+
+1. **Train only where sft2 is weak.** Build the RL prompt set from the
+   categories that miss — catch-up, on-now framing, the listing/coverage
+   turns — not all 6,405. In `rlvr_rewards.py build`, filter prompts by the
+   template/category (the metadata already carries `template`); a few hundred
+   focused prompts beat 6,405 uniform ones. The strong categories (schedule,
+   tuning) then can't be dragged down because they're not in the training set.
+2. **Reward the specific residue, not generic text.** For catch-up, add a
+   component that checks the confirmation wording the criteria demand ("plays
+   from the beginning") and that a restart looks the airing up — i.e. encode
+   the *gate-3 criteria* that sft2 misses, rather than only generic grounding.
+3. **Keep the guardrails that worked:** `kind` hard-floor, `--beta 0.1`,
+   `--max-steps` ~100–150, stop on `kind`/`kl`. These kept run 2 safe; keep them.
+4. **Gate the same three, and require no schedule regression** — promote only
+   if catch-up rises *and* schedule/tuning hold. That's the bar run 2 didn't
+   quite clear.
+
+Cost is the same ~$10 / ~2 h on a **≥100 GB-container H200** (runbook R1).
