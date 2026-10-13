@@ -661,7 +661,16 @@ on-now framing, the two tuning references, the ignored recall, "Hey
 Wanda"). Promote through `.env` only if it beats sft2 on gates 1 and 3
 without a hygiene regression, and record the result in `SFT-DATA.md`.
 
-### Run 2.5 — targeted on the weak categories (prepared 2026-10-11, to run next)
+### Run 2.5 — targeted on the weak categories (prepared 2026-10-11, ran 2026-10-13)
+
+> **Result (2026-10-13): ran clean, a wash — sft2 kept.** The focused set was
+> already near-solved by sft2, so training KL stayed ~0.01 and the policy
+> barely moved; gate 1 on run2's dev was noise (kind 0.990 unchanged, the
+> targeted catch-up family −1/−2, not up). Not promoted. Full numbers and the
+> run-2.6 lesson (filter to sft2's *misses*, raise `--lr`) in `SFT-DATA.md`.
+> The procedure below is correct and reusable — only the prompt set needs to
+> be harder next time.
+
 
 Run 2 was a safe near-wash: it held the frontier parity and lifted catch-up
 (gate 1 catch-up 43→86) but **redistributed** rather than added — schedule

@@ -686,3 +686,49 @@ prompts, so the gradient chases whatever is cheapest everywhere. Make it
    quite clear.
 
 Cost is the same ~$10 / ~2 h on a **≥100 GB-container H200** (runbook R1).
+
+## RLVR run 2.5 — ran clean, a wash; **sft2 kept** (2026-10-13)
+
+Ran the targeted plan above, step 1 only (the generic `--templates` filter;
+**not** step 2 — a new blind reward component risked another hack, so it was
+deferred). Focused set = the catch-up + on-now families, 1,803 train / 96 dev
+(1,445 / 81 after the 10k-token drop); schedule, tuning and volume excluded.
+Guardrails as in run 2 (`kind` floor, `--beta 0.1`, `--max-steps 120`,
+early-stop on `eval_reward`). Infra all held: 105.78 GB peak on the H200, clean
+finish, GGUF `--no-nextn` (block_count 32 / 427 tensors), served template
+identical. Merged onto sft2 → `~/minny-rl/rl25/qwen3.5-9b-rl25-Q8_0.gguf`.
+
+**The run barely moved off sft2.** In-loop `kl` sat at **0.006–0.014** and
+`frac_reward_zero_std` ~0.81 the whole way — the focused prompts were already
+near-solved in sampling, so GRPO had almost no gradient. `eval_reward` ~2.05,
+`kind` ~0.995 throughout (no hack — the floor held perfectly).
+
+Gate 1 on run2's dev (96 ex), rl25 vs sft2 on the **identical examples**
+(`~/Downloads/sft-eval-20261013-1254.json` vs
+`~/news/model-bench/sft-eval-20261013-1303.json`):
+
+| family | tool steps | names sft2→rl25 | args sft2→rl25 |
+| --- | --- | --- | --- |
+| catch-up (targeted) | 19 | −1 | **−2** |
+| on-now (targeted) | 2 | +0 | +0 |
+| schedule/other (not trained) | 28 | −1 | −2 |
+| **aggregate** | 49 | 45→43 (91.8→87.8 %) | 24→20 (49.0→40.8 %) |
+| kind | — | 0.990 → **0.990** | |
+
+Every per-template change is a single-example flip on a tiny denominator —
+noise, not signal. The one thing that is *not* noise: **the targeted
+categories did not rise** (catch-up −1/−2). No schedule blow-up either (the
+floor + tiny KL protected it), but **no gain to bank**. Fails the promote
+rule's "weak categories must rise", so **rl25 was not promoted — sft2 remains
+the brain** (restored on laptop `:8002`). rl25's gguf/adapter are kept under
+`~/minny-rl/rl25/` for reference, not served.
+
+(Note: gate 3 for rl25 was not completed — the first `model_bench` run
+accidentally hit sft2 during a server swap. Given `kl` ~0.01, gate 3 would
+near-certainly be a wash too; not worth the rerun.)
+
+**Lesson for a run 2.6, if attempted:** the focused set was *too easy* — a near-
+zero KL means there was nothing to learn. Make it harder, not softer: keep only
+the prompts sft2 actually gets *wrong* (filter the focused set by sft2's own
+misses, not just by category), and give it room to move (`--lr` up, not
+`--beta` up). Without gradient there is no RL, however safe the guardrails.
