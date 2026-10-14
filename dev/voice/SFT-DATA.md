@@ -695,6 +695,17 @@ for the memory. For rented 80 GB cards — the laptop cannot sample eight
 8k-token trajectories per prompt at a useful rate. The eval suite and the
 dev splits stay held out; the gates after RL are the same three.
 
+**The library stack** (`sft_rl.py` imports): the trainer is **TRL**
+(`trl==1.13.0`) — `GRPOTrainer` + `GRPOConfig` with the dapo loss variant, the
+actual RL loop. Around it: **vLLM** (`vllm==0.28.0`) as the generation backend,
+run **colocated** on the training card; **peft** (`peft==0.21.2`) for the
+`LoraConfig` (r 32); **transformers** (`5.17.0`) for `AutoTokenizer` and
+`EarlyStoppingCallback`; and `datasets` / `torch` / `accelerate` as plumbing.
+Notably **no Unsloth** — that is the key difference from `sft_train.py` (which
+uses Unsloth's `FastModel`): the Unsloth + TRL-GRPO + vLLM-colocate combination
+wasn't viable, so RLVR runs on plain TRL. The reward itself is pure code in
+`rlvr_rewards.py`, no library.
+
 ## RLVR run 1 — reward-hacked, not shipped (2026-10-11)
 
 Ran on a rented RunPod **H200 141 GB** (the infra is in the runbook's
