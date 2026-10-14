@@ -862,3 +862,17 @@ zero KL means there was nothing to learn. Make it harder, not softer: keep only
 the prompts sft2 actually gets *wrong* (filter the focused set by sft2's own
 misses, not just by category), and give it room to move (`--lr` up, not
 `--beta` up). Without gradient there is no RL, however safe the guardrails.
+
+## Next platform: verifiers + prime-rl (evaluated 2026-10-14)
+
+The three lessons above — run 1's routing hole (judged against calls the
+policy never made), run 2's uniform-reward trade, run 2.5's no-gradient set —
+and the one-prompt-per-step batch `sft_rl.py` actually trains with, are the
+case for moving the RL loop onto Prime Intellect's `verifiers` (tasksets,
+toolsets, whole-turn rollouts with the policy's own calls) and `prime-rl`
+(real batch sizes, in-loop per-family eval, renderers that keep the sampler's
+token ids). The evaluation, the phased plan (A: gate-1 parity through
+`vf-eval` on the laptop, free; B: whole-turn env and a numeric "is there a
+gradient?" gate, free; C: the metered prime-rl run) and the budget are in
+**`PRIME-RL-EVAL.md`**. Until a prime-rl checkpoint has passed the three
+gates, `sft_rl.py` and the H200 runbook stay the fallback.

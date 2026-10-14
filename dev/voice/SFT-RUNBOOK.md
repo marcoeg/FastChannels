@@ -523,6 +523,12 @@ Budget at $5.48/h: ~10–11 GPU-hours for setup, two runs of 300–400 steps
 and a buffer — $55–65 (in-loop evaluation on 48 dev prompts every 100
 steps, ~10 min each, is what keeps it there).
 
+> **Platform note (2026-10-14).** After runs 1, 2 and 2.5 the next RL run is
+> planned on `verifiers` + `prime-rl` rather than this TRL loop; see
+> `PRIME-RL-EVAL.md` for the evaluation and the phased plan. R0–R7 below stay
+> valid as the fallback, and R1 (the box), R3 (staging sft2's merge), R6 and
+> R7 (adapter home, merge, GGUF, gates) carry over unchanged to that plan.
+
 ### R0. Before renting (free, at home)
 
 ```bash
