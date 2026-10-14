@@ -438,23 +438,26 @@ the new layout. **No new layout work is needed: `sft_gen.py` generates *through
 the real agent* (`VoiceBrain`), so it emits whatever the agent builds today —
 the new layout, automatically.** This is a regeneration, not a rebuild.
 
-**Decisions (2026-10-13):** regenerate **+ a light rebalance** toward the real
-reachable misses the gate triage found; **match sft2's shape** (a general pass +
-a focused pass, ~4k kept turns); and **canonicalise on-now routing** to
-`minny_search_live_schedule`.
+**Decision (2026-10-13):** regenerate under the new layout, **match sft2's shape**
+(a general pass + a focused pass, ~4k kept turns). **`sft/templates.json` is
+unchanged from sft2** (version `2026-10-09`).
 
-**What changed in `sft/templates.json` (version `2026-10-13`):** the triage
-showed the on-now gate-1 "miss" was a *measurement artefact* — `title_now`,
-`genre_now`, `ends_at` accepted **both** `minny_whats_on_now` and
-`minny_search_live_schedule`, so the teacher was inconsistent and `sft_eval`'s
-strict compare dinged sft2 for picking an accepted tool. Canonicalised those
-three (and the `m_title_now_put_on` turn) to **`minny_search_live_schedule`
-only** (richer answers — end-times, what's-next) and bumped their weights
-(title_now/genre_now 4→6, ends_at 3→4). **Left broad `on_now` / `on_now_channel`
-as `minny_whats_on_now`** — those are true "now snapshot" intents. The other
-real reachable misses (coverage/cross-channel rundown, fabrication discipline,
-identity) are reinforced by the existing `on_now`, `about`, `identity`,
-`limits` templates under the regenerated layout.
+**Do NOT canonicalise `minny_search_live_schedule` vs `minny_whats_on_now`
+(lesson, 2026-10-13).** A first attempt tightened `title_now`/`genre_now`/
+`ends_at` to `search_live_schedule` only, on the theory that the gate-1 "miss"
+(sft2 using `whats_on_now` where the teacher used `search_live_schedule`) was a
+measurement artefact of both being accepted. **That was wrong and was reverted.**
+The two tools answer **two different questions against two different index paths
+in the Minny guide** — `whats_on_now` is the current-snapshot path, `search_live_
+schedule` is the schedule path — so the teacher's choice per turn is *correct*,
+not inconsistent, and the templates rightly accept whichever fits. The smoke
+pass looked fine (98 % kept), but the full focused pass exposed it: `title_now`
+rejected 40 %, `genre_now` 48 % (the teacher legitimately picks `whats_on_now`
+about half the time), which would have **biased** the kept data toward one path
+and trained away a correct behaviour. The gate-1 "miss" between these two tools
+is **not a defect** — never force one. (`--recheck` could not undo it: it
+re-applies each record's *stored* checks, not the current `templates.json`, so
+the contaminated run had to be regenerated.)
 
 **Prerequisites:** generation runs on **nucbox** (the real agent + guide VPN +
 dry-run TV live there; the laptop has no guide route); the live guide/lineup
