@@ -582,6 +582,70 @@ as overview rows). Consequences:
   trained on run3 (plus the old runs only if their layout is accepted as a
   second format), and the RLVR prompt set rebuilt from run3.
 
+## The RLVR run in fourteen steps (sft2 → gated candidate, as of 2026-10-13)
+
+What one RLVR run actually does, start to finish. The policy always branches
+from **sft2** (never from a prior RL run — rl1 hacked, rl2 washed, so neither
+is a better start), and has to beat sft2 on the gates to ship. Steps 1–3 are
+free at home; 4–9 are the rented H200 and the only metered part; 10–14 are
+back home. The full turnkey commands are in `SFT-RUNBOOK.md` ("RLVR on the
+rented H200" R0–R7); this is the shape.
+
+**At home, free**
+1. **Stage the policy.** Upload sft2's merged bf16 (`~/minny-sft/sft2/merged`,
+   ~18 GB) to a private HF repo once, so the box pulls it at datacentre speed.
+2. **Build the prompt set + reward kit.** `rlvr_rewards.py build` joins a run's
+   train/dev examples with the rollout checks into `prompts.jsonl` +
+   `vocab.json` (the grounding vocabulary). `--templates` keeps only chosen
+   categories (run 2.5: the catch-up/on-now families, 1,803 / 96). Tar the
+   scripts + `sft/` + the prompt set into the kit.
+3. **Dry-check on CPU.** `./sft_rl.py --check --prompts <set>` — the GRPOConfig
+   builds (`beta 0.1`, dapo, 8 generations) and the teacher rewards score. Free
+   confidence before the meter starts.
+
+**On the rented H200, metered**
+4. **Rent right.** One H200 141 GB, **Container Disk ≥ 100 GB**, 580+ driver.
+   Colocate peaks ~105 GB VRAM; the big overlay dodges the noexec/no-chmod trap.
+5. **Environment (~20 min).** `uv venv`; **pinned** `vllm==0.28.0` +
+   `transformers 5.17 / trl 1.13 / peft 0.21`; `flash-linear-attention`; and
+   `causal_conv1d` built against a CUDA toolkit whose **major equals torch's**
+   (cu130 → cuda-toolkit-13-0). Import check must print `model type: qwen3_5`.
+6. **Model + kit.** `hf download` sft2 to `/dev/shm/merged`; `rsync` the kit,
+   extract, re-run `--check` on the box.
+7. **Dry run (~5 min).** `--dry-run` → loads policy bf16, attaches LoRA, starts
+   vLLM colocated at 30 % of the card, two optimiser steps, prints
+   `dry run: N GB peak` (105.78 GB — fits the 141).
+8. **Train (~1 h).** `nohup ./sft_rl.py --prompts <set> --base /dev/shm/merged
+   --out <run> --max-steps 120`. GRPO/dapo: 8 generations/prompt, reward =
+   `rlvr_rewards.py` with the **`kind` hard-floor** (a tool-vs-text mismatch
+   scores −1.0 — the fix that closed run 1's always-text hack), KL to sft2 at
+   `beta 0.1`, early-stop on `eval_reward`. Watch: `format` pinned 1.0, `kind`
+   holding, `kl` small, length steady.
+9. **Bring home, kill the meter.** `rsync` the `adapter/` (~300 MB) + summary +
+   log to the laptop, then **terminate the pod** — nothing else lives on it.
+
+**Back home — merge, convert, gate, decide**
+10. **Merge.** `sft_train.py --merge-only <adapter> --base ~/minny-sft/sft2/merged`
+    → merged bf16 with the served chat template embedded.
+11. **GGUF.** `convert_hf_to_gguf.py … --outtype q8_0 --no-nextn` (the
+    `--no-nextn` is mandatory — Qwen3.5's MTP head otherwise breaks the file).
+    Verify block_count 32 / no nextn tensors / 7816-byte template.
+12. **Serve.** `llama-server` on `:8002` with the kept flags; confirm `/props`
+    template is byte-identical to `sft/chat_template.qwen3.5-served.jinja`.
+13. **Gate against sft2.** Gate 1 `sft_eval.py` on run1 + run2 dev (+
+    `score-eval`); gate 2 `model_bench.py` smoke; gate 3 `eval_suite.py` vs the
+    frontier. The candidate and sft2 can't share a card (two Q8 9B > 16 GB), so
+    gate the candidate and the frontier together and diff sft2 from its saved
+    numbers — or swap `:8002` to sft2 for a matched run on the identical dev.
+14. **Decide + record.** **Promote rule:** weak categories must rise *and*
+    schedule/tuning hold, frontier parity kept, no hygiene regression. Promote
+    via `.env` or keep sft2; write the outcome and the per-category diff to this
+    file.
+
+The invariant across all three runs: the plumbing (4–12) is solved and
+reusable — every run's outcome turned on the **reward and the prompt set**
+(steps 2 and 8), never the infrastructure.
+
 ## RLVR: `rlvr_rewards.py` and `sft_rl.py` (written 2026-10-09; first run 2026-10-11 — reward-hacked, not shipped; see the run note at the end)
 
 Reinforcement learning with verifiable rewards on top of the SFT model,
