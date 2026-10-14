@@ -6,6 +6,61 @@ traffic, through the real agent against a dry-run TV, rejection-sampled with
 the eval suite's checks. Prepared and first run 2026-10-07 (`run1`, see the
 end).
 
+## The pipeline in eight steps (rollouts → sft2, as of 2026-10-13)
+
+1. **Capture** — `rollouts.py` records every brain turn of the live agent in
+   the Responses-API shape (`~/news/voice-rollouts/YYYY-MM-DD.jsonl`: the
+   full prompt, tool calls and results, spoken text, latency, signals). 328
+   real turns since 2026-10-01 plus the transcript log (806 household
+   utterances) were the raw material.
+2. **Test set first** — `eval/suite.json` + `eval_suite.py`: 67 scenarios /
+   92 turns written from the logs and the week's bugs, deterministic checks
+   plus a judge, run through the real agent against a dry-run TV and the
+   live guide. Baseline 2026-10-07: frontier 97 / 96 / 85 %, base
+   Qwen3.5-9B 91 / 82 / 64 % (routed / checks / meets). Its utterances are
+   held out of everything that follows.
+3. **Generate teacher data** — `sft_gen.py` + `sft/templates.json`: sampled
+   traffic (the household's own utterances, single templates, multi-turn
+   scenarios; slots from the live lineup and guide; memory notes; a
+   per-conversation screen state) answered by `gpt-5.6-terra` through the
+   same agent, rejection-sampled with the suite's checks and generic
+   filters (format, claimed actions without a call, length); `--recheck`
+   re-filters offline, `--retry-errors` regenerates outages. run1: 2,275
+   turns kept; run2-general: 988; run2 (focused on schedule follow-ups and
+   catch-up, 14 new templates via `--focus`): 955.
+4. **Prepare** — `sft_train_prep.py`: one prompt/completion pair per
+   assistant step, rendered with the chat template llama-server actually
+   serves (`sft/chat_template.qwen3.5-served.jinja`, verified byte-identical
+   against its `/apply-template`), split by conversation, every step
+   checked (prefix stability, think block, tool-call XML, token boundary,
+   length cap). Two conventions learned the hard way: history calls keep
+   Python-style literals as llama.cpp renders them; completions carry JSON
+   booleans and omit nulls (BUGLIST T8). run1 → 4,579 examples; the three
+   runs → 6,756 train / 367 dev at 12,288 tokens.
+5. **Train** — `sft_train.py` on the laptop's RTX 5000 Ada 16 GB: Unsloth
+   QLoRA, r 32 on the language model's projections including the 24
+   linear-attention layers, one epoch, lr 2e-4, effective batch 8; no
+   in-loop eval (the 248k-vocab logits OOM), so a checkpoint every 200
+   steps and `--pick-best-only` scores them afterwards with
+   `logits_to_keep`, then merges the best into bf16. sft1: run1, 517 steps,
+   8.5 h, dev loss flat at 0.134. sft2: all three runs, ~14 h.
+6. **Serve** — llama.cpp `convert_hf_to_gguf.py --outtype q8_0 --no-nextn`
+   (Qwen3.5's MTP head would otherwise break the file), llama-server with
+   the base's flags, alias `qwen3.5-9b-sft2` on `:8002`.
+7. **Gates** — `sft_eval.py` (held-out dev steps against the teacher: kind,
+   tool names, args, forbidden patterns, length, optional judge),
+   `model_bench.py` (27-question smoke), `eval_suite.py` with the frontier
+   in the same run. run1 dev names / args: base 58.5 / 29.7 → sft1 78.0 /
+   55.9 → sft2 84.7 / 66.1; run2 dev: sft1 73.5 / 42.9 → sft2 91.8 / 49.0;
+   suite: base 91 / 82 / 64 → sft1 97 / 93 / 78 → sft2 98 / 96 / 77 against
+   the frontier's 98 / 97 / 86, schedule meets 58 → 92.
+8. **Promote** — `.env`: `LOCAL_LLM_MODEL=qwen3.5-9b-sft2`,
+   `LOCAL_LLM_BASE_URL` to `:8002`; `VOICE_LLM=local` puts it in front of
+   the household (where it is now, for testing). The latency work that
+   followed (static system prompt, context block, tail digests, lean rows)
+   changed the prompt layout, so run3 and sft3 regenerate under it before
+   RLVR.
+
 ## What it writes
 
 In `--out` (default `~/news/voice-sft/<stamp>/`):
