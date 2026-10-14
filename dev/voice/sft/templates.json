@@ -1,5 +1,5 @@
 {
-  "version": "2026-10-09",
+  "version": "2026-10-13",
   "about": "Request templates for sft_gen.py. Phrasings are taken from the household's conversation log; slots are filled at generation time from the live lineup, the guide and the TV's on-demand catalogue, so every name in the traffic is real. Each template carries the checks that decide whether the teacher's turn is kept (rejection sampling).",
   "mix": {"log": 0.35, "single": 0.45, "multi": 0.20, "memory_share": 0.30},
   "slots": {
@@ -38,9 +38,9 @@
     {"id": "whats_after_title", "weight": 4,
      "say": ["What's on after {title_tonight}?", "What follows {title_tonight} on {channel}?", "What comes on after {title_tonight} tonight?"],
      "checks": {"tools_any_of": [["minny_search_live_schedule"]]}},
-    {"id": "ends_at", "weight": 3,
+    {"id": "ends_at", "weight": 4,
      "say": ["When does {title_now} end?", "How long is {title_now} on for?", "What time does {title_now} finish?"],
-     "checks": {"tools_any_of": [["minny_whats_on_now"], ["minny_search_live_schedule"]]}},
+     "checks": {"tools_any_of": [["minny_search_live_schedule"]]}},
     {"id": "catchup_browse", "weight": 5,
      "say": ["What can I catch up on from {bcast_channel}?", "What did I miss on {bcast_channel} today?", "Anything to catch up on from {bcast_channel}?", "What's in catch-up for {bcast_channel}?"],
      "checks": {"tools_any_of": [["minny_search_catchup"], ["minny_find_channels", "minny_search_catchup"]]}},
@@ -65,15 +65,15 @@
     {"id": "title_schedule", "weight": 8,
      "say": ["Is there any {title_tonight} tonight?", "Is {title_tonight} on {time_phrase}?", "When is {title_tonight} on?", "What time can I watch {title_tonight}?", "When is the next {title_tonight} on {channel}?", "Do we have {title_tonight} today or tomorrow?"],
      "checks": {"tools_any_of": [["minny_search_live_schedule"]]}},
-    {"id": "title_now", "weight": 4,
+    {"id": "title_now", "weight": 6,
      "say": ["Is {title_now} on right now?", "Is there any {title_now} on?", "Is {title_now} playing now?"],
-     "checks": {"tools_any_of": [["minny_whats_on_now"], ["minny_search_live_schedule"], ["minny_whats_on_now", "minny_search_live_schedule"]]}},
+     "checks": {"tools_any_of": [["minny_search_live_schedule"]]}},
     {"id": "genre_schedule", "weight": 7,
      "say": ["Any {genre} on {time_phrase}?", "Is there any {genre} {time_phrase}?", "What {genre} can I watch {time_phrase}?", "Are there {genre} {time_phrase}?"],
      "checks": {"tools_any_of": [["minny_search_live_schedule"]]}},
-    {"id": "genre_now", "weight": 4,
+    {"id": "genre_now", "weight": 6,
      "say": ["Is there any {genre} on right now?", "Any {genre} on now?", "Is there any live {genre} on TV right now?"],
-     "checks": {"tools_any_of": [["minny_whats_on_now"], ["minny_search_live_schedule"]]}},
+     "checks": {"tools_any_of": [["minny_search_live_schedule"]]}},
     {"id": "whats_next", "weight": 4,
      "say": ["What's on next on {channel}?", "What's after this on {channel}?", "What comes next on {channel}?"],
      "checks": {"tools_any_of": [["minny_search_live_schedule"]]}},
@@ -223,7 +223,7 @@
      "turns": [{"say": ["What should I watch tonight?", "Anything good on tonight?"], "checks": {"tools_any_of": [["minny_search_live_schedule"], ["minny_search_live_schedule", "minny_whats_on_now"], ["minny_whats_on_now", "minny_search_live_schedule"]]}},
                {"say": ["Put on the first one.", "The first one."], "checks": {"tools_any_of": [["tv_watch_channel"], ["tv_watch_title"], ["tv_play_airing"], []]}}]},
     {"id": "m_title_now_put_on", "weight": 2,
-     "turns": [{"say": ["Is {title_now} on right now?"], "checks": {"tools_any_of": [["minny_whats_on_now"], ["minny_search_live_schedule"]]}},
+     "turns": [{"say": ["Is {title_now} on right now?"], "checks": {"tools_any_of": [["minny_search_live_schedule"]]}},
                {"say": ["Put it on."], "checks": {"tools_any_of": [["tv_watch_channel"], ["tv_watch_title"]]}}]}
   ]
 }

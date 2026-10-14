@@ -427,6 +427,80 @@ it is a purchase, not an experiment. The 9B path first:
    `--dry-run`). The step-by-step for the rented box is the last section
    of this file, "RLVR on the rented H200".
 
+## sft3 — regenerate under the new prompt layout (prepared 2026-10-13)
+
+**Why.** sft2 and all three RL runs were trained on the *old* prompt layout.
+The latency rework (commit `26812c0`: static system prompt, the turn's context
+under the viewer's words, tail digests, lean rows) changed the prompt the model
+reads, so the household will run the new layout — and the whole sft2 stack is
+trained for a prompt it no longer sees. sft3 regenerates the SFT corpus under
+the new layout. **No new layout work is needed: `sft_gen.py` generates *through
+the real agent* (`VoiceBrain`), so it emits whatever the agent builds today —
+the new layout, automatically.** This is a regeneration, not a rebuild.
+
+**Decisions (2026-10-13):** regenerate **+ a light rebalance** toward the real
+reachable misses the gate triage found; **match sft2's shape** (a general pass +
+a focused pass, ~4k kept turns); and **canonicalise on-now routing** to
+`minny_search_live_schedule`.
+
+**What changed in `sft/templates.json` (version `2026-10-13`):** the triage
+showed the on-now gate-1 "miss" was a *measurement artefact* — `title_now`,
+`genre_now`, `ends_at` accepted **both** `minny_whats_on_now` and
+`minny_search_live_schedule`, so the teacher was inconsistent and `sft_eval`'s
+strict compare dinged sft2 for picking an accepted tool. Canonicalised those
+three (and the `m_title_now_put_on` turn) to **`minny_search_live_schedule`
+only** (richer answers — end-times, what's-next) and bumped their weights
+(title_now/genre_now 4→6, ends_at 3→4). **Left broad `on_now` / `on_now_channel`
+as `minny_whats_on_now`** — those are true "now snapshot" intents. The other
+real reachable misses (coverage/cross-channel rundown, fabrication discipline,
+identity) are reinforced by the existing `on_now`, `about`, `identity`,
+`limits` templates under the regenerated layout.
+
+**Prerequisites:** generation runs on **nucbox** (the real agent + guide VPN +
+dry-run TV live there; the laptop has no guide route); the live guide/lineup
+route up; the teacher (`VOICE_MODEL=gpt-5.6-terra`) reachable; `eval/suite.json`
+untouched (its utterances stay held out). Training is the laptop (RTX 5000 Ada,
+~14 h for the full corpus), as sft2.
+
+**Run it.** Smoke first, then the two passes, then prep/train/gates:
+
+```bash
+# nucbox — SMOKE: eyeball new-layout data + the canonicalised routing before the long run
+cd ~/Development/FastChannels/dev/voice && git pull
+./sft_gen.py --check                                   # templates + held-out overlap, offline
+./sft_gen.py --n 40 --out ~/news/voice-sft/sft3-smoke  # ~40 convs through the agent
+#   check: the system prompt is the static new-layout prefix; on-now turns call
+#   search_live_schedule (watch the rejected/ rate on title_now/genre_now/ends_at —
+#   if the teacher insists on whats_on_now and yield craters, re-add it and nudge the
+#   tool descriptions instead of forcing it in the check).
+
+# nucbox — the two passes (match sft2's shape)
+./sft_gen.py --n 1000 --out ~/news/voice-sft/run3-general --workers 4
+./sft_gen.py --focus title_schedule,genre_schedule,channel_schedule,whats_next,whats_after_title,ends_at,\
+title_now,genre_now,catchup,catchup_title,catchup_browse,catchup_news,m_catchup_pick,m_catchup_title_play,m_missed \
+    --n 1000 --out ~/news/voice-sft/run3 --workers 4
+```
+
+```bash
+# laptop — prep EACH run dir (sft_train_prep takes one --run; writes <run>/train/{train,dev}.jsonl).
+# --server compares a sample against llama-server's /apply-template (the served template is model-independent,
+# so sft2 on :8002 is a valid check) — catches any new-layout render drift before the 14 h train.
+./sft_train_prep.py --run ~/news/voice-sft/run3-general --server http://127.0.0.1:8002
+./sft_train_prep.py --run ~/news/voice-sft/run3         --server http://127.0.0.1:8002
+# train on BOTH runs combined (sft_train --run is nargs+, mirrors sft2: 1 epoch, 12k cap, pick-best, merge)
+nohup ./sft_train.py --run ~/news/voice-sft/run3-general ~/news/voice-sft/run3 \
+    --epochs 1 --max-tokens 12288 --out ~/minny-sft/sft3 --pick-best --merge > ~/minny-sft/sft3.log 2>&1 &
+# (if --pick-best OOMs inline as it did for sft2, rerun scoring alone: ./sft_train.py --pick-best-only ~/minny-sft/sft3 --merge)
+python ~/minny-sft/llama.cpp/convert_hf_to_gguf.py ~/minny-sft/sft3/merged --outtype q8_0 --no-nextn \
+    --outfile ~/minny-sft/sft3/qwen3.5-9b-sft3-Q8_0.gguf
+# serve on :8002, then the three gates vs sft2's numbers; promote via .env only if it holds under the new layout
+```
+
+> The exact `sft_train_prep` / `sft_train` / `--pick-best-only` flags are steps
+> 4–5 above (unchanged). The gates are step 7, now the bar is **sft2 under the
+> new layout** — regenerate sft2's gate numbers under the new prompt first if a
+> clean baseline is wanted, since sft2's saved figures are old-layout.
+
 ## RLVR on the rented H200 — runbook
 
 > **Run 1 result (2026-10-11): the reward was hacked.** The policy
