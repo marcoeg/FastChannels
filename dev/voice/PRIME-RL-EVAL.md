@@ -27,6 +27,93 @@ to be calibrated by the dry run.*
 - Keep `sft_rl.py` + the H200 runbook as the fallback until a prime-rl run has
   produced a gated checkpoint.
 
+## 0. The chain in plain terms (read this first)
+
+RLVR means reinforcement learning with verifiable rewards: the score for an
+answer comes from code that checks facts, not from a human or a judge model.
+
+**What is being learned, and from what.** The thing being trained is sft2,
+our Qwen3.5-9B, through a small LoRA adapter. The base weights never change.
+The adapter is a few hundred megabytes of extra weights that nudge the model's
+behaviour, and it is what comes home at the end.
+
+The unit of learning is one viewer turn, played end to end. A task starts
+from recorded material we already have: the static system prompt, the
+viewer's words, and the context block that goes under them, with the clock,
+the on-screen line and the memory notes frozen at recording time. The model
+then has to do what it does in production. It decides whether to call a guide
+tool, which one, with which arguments. It gets a real result back. It speaks
+an answer. This is the first difference from the TRL runs: there, the model
+only produced one step of a turn, with the teacher's earlier calls already
+pasted into the prompt, which is how run 1 learned to skip tools and still
+score well.
+
+During training the tools are real but tame. The Minny guide answers from a
+store of recorded responses, so results do not shift with the real clock. The
+TV is a dry run that returns "ok" without touching the box. Memory and web
+lookup are stubs. The policy's own calls are executed, and the trace records
+exactly what it called and what it got.
+
+**One training step, concretely.** Three processes run on the rented box. An
+inference server, vLLM with the current adapter loaded, plays the model. An
+orchestrator runs our taskset: it picks tasks, replays the scripted viewer
+turns, serves the tools, scores the traces, and packs them into a batch. A
+trainer takes the batch and updates the adapter, then writes the new adapter
+to disk for vLLM to pick up. A step goes like this:
+
+1. The orchestrator takes 16 tasks, meaning 16 recorded turns.
+2. For each task the model plays the turn 8 times at temperature 1, so 8
+   different attempts per turn: 128 rollouts.
+3. Each attempt is scored by `rlvr_rewards.py`. Did it produce a well-formed
+   call or clean text. Did it call the tool the checks expect, with the
+   expected arguments. Does the spoken answer only name titles, channels and
+   times that appear in the results it fetched. For a listing request, did it
+   cover the top results. Is it about as long as the teacher's answer. A
+   tool-versus-text mismatch still floors the score.
+4. Within each group of 8, attempts that scored above the group's own average
+   are reinforced and those below are discouraged. This is GRPO's whole trick:
+   the model is only ever compared with itself on the same turn, so no
+   absolute scale is needed.
+5. A group where all 8 attempts score the same teaches nothing, because there
+   is no better and worse to separate. Run 2.5 had 81 % such groups. prime-rl
+   can drop them from the batch instead of padding it with them.
+6. The trainer applies the update to the adapter. The inference server loads
+   the new adapter and keeps playing. The two overlap, so the next batch is
+   being played while the current one trains.
+
+One hundred steps at this shape is 12,800 played turns. The three TRL runs saw
+1,200 each, one task per step, which is why their curves were so noisy.
+
+Two mechanisms make the token bookkeeping safe. A renderer converts messages
+to token ids and back exactly as the sampler saw them, without re-rendering
+earlier turns; it is what prevents the `false` to `False` corruption we caught
+by hand in SFT prep. And a mismatch metric on the dashboard shows whether
+trainer and sampler still agree on the tokens.
+
+**What we watch, and how it ends.** Every 10 steps the orchestrator plays the
+held-out dev turns, 96 of them, with the current adapter and reports per
+family: schedule, catch-up, on-now, tuning. That is gate 1 inside the loop.
+The stop rules from the earlier runs still apply, now visible live: the
+tool-versus-text rate stays near 1, the mismatch metric stays small and flat,
+answer lengths stay steady, no family that was strong falls. A rising total
+reward with a falling family is run 1 again, and the dashboard shows it
+within minutes rather than after the merge.
+
+When the run stops, the adapter files come home. Everything after that is
+what we already do: merge the adapter onto sft2 with
+`sft_train.py --merge-only`, convert to GGUF with `--no-nextn`, serve on the
+laptop, run gates 1 to 3 against sft2 and the frontier, and promote only if
+the weak families rise and the strong ones hold.
+
+Before any of this costs money, two free stages at home prove the chain.
+Phase A runs the same taskset through `vf-eval` against the laptop's sft2 and
+must agree with gate 1 on the same dev turns, which proves the task plumbing
+and the tool schemas. Phase B plays whole turns 8 times each and counts, per
+family, how many groups have a spread of scores and how far the average sits
+below the ceiling. If the targeted families show spread and headroom, there
+is something for RL to learn and renting is worth it. If not, we have
+reproduced run 2.5 for free, and the fix is harder tasks, not a GPU.
+
 ## 1. The two pieces, in our words
 
 **`verifiers` (0.4.0, the `verifiers.v1` API)** is the environment layer: a
