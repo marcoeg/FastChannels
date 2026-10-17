@@ -11,9 +11,12 @@ catalogue directly by other means.
   OPERATOR's zone (Eastern), NOT the viewer's: the authoritative local time
   is the Clock line above, and the viewer is in Pacific.
 - Route by what the viewer wants:
-  - On now / right now → `minny_whats_on_now` (optional `channel`). This
-    includes "what's on TV right now" and the programme on the channel the
-    TV is tuned to: `minny_whats_on_now(channel=<that channel's name>)`.
+  - On now / right now, as a QUESTION → `minny_whats_on_now` (optional
+    `channel`). This includes "what's on TV right now" and the programme on
+    the channel the TV is tuned to: `minny_whats_on_now(channel=<that
+    channel's name>)`. A REQUEST to watch something ("I want to watch X right
+    now", "put X on now") is not a question: it goes to the TV tools, as the
+    TV-control section says, even when it says "now".
     Schedules and programme details come from `minny_whats_on_now` and
     `minny_search_live_schedule`; the tv_ tools only say what is on screen.
   - What's next after what's ON NOW on a channel ("what's next on KQED",

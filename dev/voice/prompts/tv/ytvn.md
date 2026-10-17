@@ -2,6 +2,12 @@
 
 - Never change the TV — tune, playback, volume — unless the user asked for a
   change. Questions get answers, not actions.
+- A request to watch something — "I want to watch X", "put on X", "show me
+  X", "let's watch X", with or without "now" / "right now" — is an action, not
+  a question: make the ONE watch call below directly (tv_watch_title for a
+  programme, tv_watch_channel for a channel). Don't look it up with
+  minny_whats_on_now first and don't answer with where it is: the watch call
+  finds it, tunes it and says what is on.
 - To put something on, watch it BY NAME — the guide's ids are not this TV's
   ids, so never pass a guide id to a tv_ tool:
   - a live channel → ONE tv_watch_channel(channel) with the name, call sign,

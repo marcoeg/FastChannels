@@ -66,6 +66,19 @@ _OUTAGE = {"minny": "The TV guide is unavailable right now (it could not be "
            "tv": "The TV isn't reachable right now — say so; don't retry."}
 
 
+class GuideDown(Exception):
+    """The guide could not be checked; the message says so. A lookup that
+    failed must never read as "not found": on 2026-10-17 a guide server that
+    was respawning turned "Turn on Premier League Soccer" into "isn't in this
+    TV's lineup" while channel 48 was airing it."""
+
+
+# Spoken words and how the listings spell them (accents are folded first):
+# "Premier League Soccer" is "Fútbol: Premier League" on Telemundo. "football"
+# stays as it is: in a US lineup it is American football.
+_SAME_WORD = {"soccer": "futbol"}
+
+
 def _dead_connection(e: BaseException) -> bool:
     """The transport to a stdio server is gone: its process exited or its
     pipes closed. Anything else (a tool error, a slow backend, a request
@@ -546,7 +559,10 @@ def build_agent(primers: list | None = None, hooks: dict | None = None) -> Agent
             if not await pr.lineup():
                 return "The TV's lineup is unavailable — the TV is not connected."
             # "Put on College Football": a programme on air, not a channel.
-            live = await _airing_now(channel)
+            try:
+                live, down = await _airing_now(channel), None
+            except GuideDown as e:
+                live, down = [], e
             if len(live) == 1:
                 r = live[0]
                 return (f"{channel!r} is not a channel, but {r['title']!r} is on now on "
@@ -561,6 +577,9 @@ def build_agent(primers: list | None = None, hooks: dict | None = None) -> Agent
             if titles:
                 return (f"{channel!r} is not a channel on this TV, but it is an "
                         "on-demand title — " + await tv_watch_title(channel))
+            if down:
+                return (f"{channel!r} is not a channel name in this TV's lineup, and the "
+                        f"guide could not be checked for a programme by that name: {down}")
             return f"{channel!r} is not a channel on this TV."
 
         @agent.tool_plain
@@ -592,10 +611,16 @@ def build_agent(primers: list | None = None, hooks: dict | None = None) -> Agent
                 only = hit.name if hit else None
             # The three lookups are independent: run them together (they
             # took ~4 s in sequence, and viewers spoke again before an answer).
-            titles, live, recent = await asyncio.gather(
+            got = await asyncio.gather(
                 pr.search_titles(title, year) if not catchup else _none(),
                 _airing_now(title, only) if not year else _none(),
-                _aired_recently(title, only) if not year else _none())
+                _aired_recently(title, only) if not year else _none(),
+                return_exceptions=True)
+            down = next((g for g in got if isinstance(g, GuideDown)), None)
+            for g in got:
+                if isinstance(g, BaseException) and not isinstance(g, GuideDown):
+                    raise g
+            titles, live, recent = ([] if isinstance(g, GuideDown) else g for g in got)
             pick = pr.pick_title(title, titles)
             if pick:
                 return await _control("play_asset", {"asset_id": pick.asset_id})
@@ -666,6 +691,9 @@ def build_agent(primers: list | None = None, hooks: dict | None = None) -> Agent
             if year:
                 return (f"No on-demand title matching {title!r} ({year}) on this TV "
                         "(live and catch-up were not checked for a dated film).")
+            if down:
+                return (f"No on-demand title matching {title!r} on this TV; whether it is "
+                        f"on live or was in the last 24 hours could not be checked: {down}")
             return (f"No on-demand title matching {title!r} on this TV, and it "
                     f"isn't on live right now or in the last 24 hours{where}. "
                     "Say so; don't guess when it is on.")
@@ -676,12 +704,13 @@ def build_agent(primers: list | None = None, hooks: dict | None = None) -> Agent
         def _title_matches(title: str, row: dict) -> bool:
             """Every spoken word is in the row's title/series — compared
             without spaces, so 'PBS NewsHour' matches 'PBS News Hour'."""
-            words = [w for w in pr._norm(pr.split_caps(title)).split() if len(w) > 1]
+            words = [_SAME_WORD.get(w, w) for w in pr._norm(pr.split_caps(title)).split() if len(w) > 1]
             hay = pr.squash(f"{row.get('title', '')} {row.get('series_title') or ''}")
             spoken = pr.squash(title)
             if not words:
                 return False
-            names = pr._norm(f"{row.get('title', '')} {row.get('series_title') or ''}").split()
+            names = [_SAME_WORD.get(w, w)
+                     for w in pr._norm(f"{row.get('title', '')} {row.get('series_title') or ''}").split()]
             return all(w in names for w in words) or (len(spoken) >= 6 and spoken in hay)
 
         async def _aired_recently(title: str, only: str | None = None) -> list[dict]:
@@ -698,16 +727,21 @@ def build_agent(primers: list | None = None, hooks: dict | None = None) -> Agent
                       "start": (now - timedelta(hours=24)).isoformat(timespec="seconds"),
                       "end": now.isoformat(timespec="seconds")}
 
+            failed: list[BaseException] = []
+
             async def one(q: str) -> list:
                 try:
                     raw = await scopes[0].minny.direct_call_tool(
                         "search_live_schedule", {"query": q, **window})
                     got = await scopes[0].filter("minny_search_live_schedule", raw)
-                except Exception:  # noqa: BLE001
+                except Exception as e:  # noqa: BLE001
+                    failed.append(e)
                     return []
                 return got if isinstance(got, list) else []
 
             rows = [r for rs in await asyncio.gather(*(one(q) for q in queries)) for r in rs]
+            if len(failed) == len(queries):
+                raise GuideDown(_OUTAGE["minny"]) from failed[0]
             out, seen = [], set()
             from lineup_scope import start_key
             for r in sorted(rows, key=start_key, reverse=True):
@@ -732,10 +766,15 @@ def build_agent(primers: list | None = None, hooks: dict | None = None) -> Agent
                 return []
             try:
                 rows = await scopes[0].whats_on_now()
-            except Exception:  # noqa: BLE001
-                return []
-            if not isinstance(rows, list):
-                return []
+            except Exception as e:  # noqa: BLE001
+                raise GuideDown(_OUTAGE["minny"]) from e
+            if isinstance(rows, str):
+                # The scope answers in words when it has no rows: "lists nothing
+                # on air … the guide is reachable" is an answer; anything else
+                # ("could not be checked", "unavailable") is an outage.
+                if "the guide is reachable" in rows:
+                    return []
+                raise GuideDown(rows)
             out, seen = [], set()
             for r in rows:
                 if only and r.get("channel_name") != only:
