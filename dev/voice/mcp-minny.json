@@ -1,0 +1,17 @@
+{
+  "mcpServers": {
+    "minny": {
+      "command": "uv",
+      "args": ["--directory", "/home/marco/Development/MinnyAgent", "run", "minny-mcp"],
+      "env": { "MINNY_DEFAULT_OPERATOR": "mirotv" }
+    },
+    "minny_ott": {
+      "command": "uv",
+      "args": ["--directory", "/home/marco/Development/MinnyAgent", "run", "minny-mcp"],
+      "env": {
+        "MINNY_DEFAULT_OPERATOR": "mai",
+        "MINNY_PROVIDER_TAGS": "ec:netflix:web_link,ec:disney_plus:web_link,ec:amazon_prime:web_link"
+      }
+    }
+  }
+}

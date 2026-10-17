@@ -43,7 +43,7 @@ def load_static_instructions(backend: str = "minny",
         raise FileNotFoundError(
             f"no guide prompt for VOICE_EPG_BACKEND={backend!r}: {epg}")
     text = epg.read_text(encoding="utf-8").strip()
-    if player == "ytvn":
+    if player in ("ytvn", "minny"):
         text = _ytvn_vod(text)
     parts.append(text)
     return "\n\n".join(parts)

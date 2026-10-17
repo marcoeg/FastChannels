@@ -73,6 +73,17 @@ class GuideDown(Exception):
     TV's lineup" while channel 48 was airing it."""
 
 
+# minny-tv-mcp's tools the model never sees with the minny player: raw-id tunes and
+# play_url (as with ytvn), and its extras — pairing is a setup step, one viewer
+# needs no TV list, details are opened by the resolvers (partner-app titles),
+# search and home are UI the voice does not drive yet.
+MINNY_TV_HIDDEN = {"tv_tune_channel", "tv_tune_number", "tv_play_url", "tv_pair_tv",
+                   "tv_list_tvs", "tv_search", "tv_open_details", "tv_go_home"}
+
+# How a partner app is named to the viewer (the viewer's button: "Abrir en <name>").
+PARTNER_APPS = {"netflix": "Netflix", "disney_plus": "Disney+", "amazon_prime": "Prime Video"}
+
+
 # Spoken words and how the listings spell them (accents are folded first):
 # "Premier League Soccer" is "Fútbol: Premier League" on Telemundo. "football"
 # stays as it is: in a US lineup it is American football.
@@ -407,9 +418,16 @@ def build_agent(primers: list | None = None, hooks: dict | None = None) -> Agent
     #     over stdio from mcp-tv-ytvn.json (server name "tv" keeps the tv_
     #     prefix). It needs `python3 serve.py` running in ytvn-epg and the page
     #     open in a browser; otherwise its tools report the TV as not connected.
+    #   minny: the minny-client reference viewer on Miro TV, through
+    #     minny-tv-mcp, one long-lived MCP-over-HTTP service at TV_MCP_URL
+    #     (minny-client docs/voice-agent-switch.md). It keeps ytvn's contract —
+    #     same tools and viewer:// resources — so it gets the same resolvers and
+    #     lineup scoping below (the `ytvn` guard stands for either), plus a second
+    #     guide server for partner apps (mcp-minny.json).
     player = os.environ.get("VOICE_TV", "tvshell")
     ytvn = None
-    scopes: list = []                        # LineupScopes (ytvn + Minny guide)
+    ott = None                               # minny: the partner-app guide server's guard
+    scopes: list = []                        # LineupScopes (ytvn/minny + Minny guide)
     if player == "ytvn":
         # The model never sees the raw-id tune (guide ids are the catalogue's,
         # not the player's) nor play_url: it watches by name through the
@@ -422,6 +440,18 @@ def build_agent(primers: list | None = None, hooks: dict | None = None) -> Agent
         tv = ResilientToolset(
             GatedToolset(prefixed.filtered(lambda ctx, td: td.name not in
                                            {"tv_tune_channel", "tv_tune_number", "tv_play_url"})),
+            svc="tv", guard=ytvn)
+    elif player == "minny":
+        # 25 s: play_airing resolves through Miro TV's policy manager; the remote
+        # relay allows a command 20 s and minny-tv-mcp waits 22 s.
+        raw_tv = MCPToolset(os.environ["TV_MCP_URL"],
+                            cache_tools=True,
+                            init_timeout=10.0,
+                            read_timeout=25.0,
+                            tool_error_behavior="failed")
+        ytvn = MCPGuard(raw_tv, "tv")
+        tv = ResilientToolset(
+            GatedToolset(raw_tv.prefixed("tv").filtered(lambda ctx, td: td.name not in MINNY_TV_HIDDEN)),
             svc="tv", guard=ytvn)
     else:
         tv = ResilientToolset(
@@ -437,7 +467,10 @@ def build_agent(primers: list | None = None, hooks: dict | None = None) -> Agent
         # Minny MCP (stdio) from mcp.json — one toolset per server, already
         # prefixed "minny_". Wrap for the same dead-server resilience as the
         # others. The server needs the Minerva VPN up (see VPN-CONNECT.md).
-        minny_cfg = str(Path(__file__).parent / "mcp.json")
+        # The minny player has two guide servers (mcp-minny.json): "minny" on Miro
+        # TV's operator, "minny_ott" on the partner-app catalogue (Ecuador's
+        # providers only).
+        minny_cfg = str(Path(__file__).parent / ("mcp-minny.json" if player == "minny" else "mcp.json"))
         # 10 s: ranked guide searches measure up to ~6 s.
         tv_search = _stdio_toolsets(minny_cfg, read_timeout=10.0)
         guards = [MCPGuard(ts.wrapped, "minny") for ts in tv_search]
@@ -446,18 +479,26 @@ def build_agent(primers: list | None = None, hooks: dict | None = None) -> Agent
             # catalogue answers — what the model used to spend a round trip on.
             primers.append(lambda raw=g:
                            raw.direct_call_tool("cluster_status", {}))
-        if player == "ytvn":
-            # The guide covers the operator's whole catalogue; the ytvn TV
-            # carries one lineup. Keep guide answers to the TV's channels.
+        if player in ("ytvn", "minny"):
+            # The guide covers the operator's whole catalogue; the TV carries one
+            # lineup. Keep guide answers to the TV's channels.
             from lineup_scope import LineupScope, LineupScopedToolset
-            scopes = [LineupScope(g) for g in guards]
+            scoped = []
+            for ts, g in zip(tv_search, guards):
+                if getattr(ts, "prefix", "") == "minny_ott":
+                    # Partner apps: no channels to scope, only its on-demand search.
+                    ott = g
+                    scoped.append(ts.filtered(lambda ctx, td: td.name == "minny_ott_search_vod"))
+                    continue
+                sc = LineupScope(g)
+                scopes.append(sc)
+                # On-demand titles come from the TV's own catalogue (tv_on_demand,
+                # tv_watch_title): the guide's VOD index is the operator's, with
+                # ids and titles this TV may not have.
+                scoped.append(LineupScopedToolset(ts, scope=sc).filtered(
+                    lambda ctx, td: td.name != "minny_search_vod"))
             primers.extend(sc.channels for sc in scopes)
-            # On-demand titles come from the TV's own catalogue (tv_on_demand,
-            # tv_watch_title): the guide's VOD index is the operator's, with
-            # ids and titles this TV may not have.
-            tv_search = [LineupScopedToolset(ts, scope=sc).filtered(
-                             lambda ctx, td: td.name != "minny_search_vod")
-                         for ts, sc in zip(tv_search, scopes)]
+            tv_search = scoped
         tv_search = [ResilientToolset(ts, svc="minny", guard=g)
                      for ts, g in zip(tv_search, guards)]
     else:
@@ -688,6 +729,10 @@ def build_agent(primers: list | None = None, hooks: dict | None = None) -> Agent
                             + await _watch_title(rest, year, channel, retry=False,
                                                  catchup=catchup))
             where = f" on {only}" if only else ""
+            # Not on Miro TV at all: a partner app may carry it (minny player).
+            partner = await _partner_title(title, year)
+            if partner:
+                return partner
             if year:
                 return (f"No on-demand title matching {title!r} ({year}) on this TV "
                         "(live and catch-up were not checked for a dated film).")
@@ -700,6 +745,31 @@ def build_agent(primers: list | None = None, hooks: dict | None = None) -> Agent
 
         async def _none() -> list:
             return []
+
+        async def _partner_title(title: str, year: int | None) -> str | None:
+            """A title on a partner app (Netflix, Disney+, Prime Video) offered
+            here: its details screen opened on the TV, and where it streams.
+            None when there is no partner catalogue or no matching title."""
+            if ott is None:
+                return None
+            from lineup_scope import _rows
+            try:
+                rows = _rows(await ott.direct_call_tool(
+                    "search_vod", {"query": title, **({"year": year} if year else {})})) or []
+            except Exception:  # noqa: BLE001 — no partner answer: say what Miro TV has
+                return None
+            pick = next((r for r in rows if r.get("details_uri") and _title_matches(title, r)), None)
+            if pick is None:
+                return None
+            apps = [PARTNER_APPS.get(sv, sv) for sv in pick.get("services") or []] or ["a partner app"]
+            name = pick.get("series_title") or pick.get("title") or title
+            ok, state = await _control_ok("open_details", {"uri": pick["details_uri"]})
+            if not ok:
+                return (f"{name!r} is not on Miro TV; it streams on {apps[0]}, but its details "
+                        f"could not be opened on the TV: {state}")
+            return (f"{name!r} is not on Miro TV; it streams on {' and '.join(apps)}. Its details "
+                    f"are now open on the TV: the viewer presses \"Abrir en {apps[0]}\" to watch "
+                    "it in that app. Say so in one or two sentences.")
 
         def _title_matches(title: str, row: dict) -> bool:
             """Every spoken word is in the row's title/series — compared
