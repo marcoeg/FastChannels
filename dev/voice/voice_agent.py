@@ -281,8 +281,14 @@ async def entrypoint(ctx: agents.JobContext) -> None:
     # satellite's echo), pre-empting her answer. Transcription models are
     # known to echo hint text on noise (documented for Whisper; the default
     # here is gpt-4o-mini-transcribe), so the hint gives it nothing to echo.
+    # The channel names are per lineup (BUG-0002 B): the Bay Area call signs
+    # were echoed as phantom turns on Miro TV and sent Minny looking for
+    # channels its lineup does not have.
+    _stt_channels = {
+        "minny": "Teleamazonas, Ecuavisa, Gamavisión, TC and RTS",
+    }.get(os.environ.get("VOICE_TV", "tvshell"), "KTVU, KPIX, KQED, KNTV and COZI")
     _stt_prompt = ("English conversation with Minny, a TV-viewing assistant, "
-                   "about TV channels such as KTVU, KPIX, KQED, KNTV and COZI, "
+                   f"about TV channels such as {_stt_channels}, "
                    "and the names of programmes and films.")
     # Realtime STT both rooms: finalizes ~0.2 s after speech (vs ~1 s batch)
     # and emits interim transcripts that feed preemptive generation. It holds
