@@ -14,6 +14,19 @@ https://nucbox.local:8443, https://192.168.50.17:8443 {
 		reverse_proxy 127.0.0.1:7880
 	}
 
+	# Pairing a minny-client viewer from the voice page (VOICE_TV=minny):
+	# only the claim, only POST, to the remote relay on this machine. The
+	# relay sees a loopback caller, so in its development mode (no
+	# MINNY_CONTROLLERS) the claim is made as user "local", as from a
+	# terminal on this machine.
+	@pairclaim {
+		path /api/pair/claim
+		method POST
+	}
+	handle @pairclaim {
+		reverse_proxy 127.0.0.1:8795
+	}
+
 	# The voice client page
 	handle {
 		root * /srv

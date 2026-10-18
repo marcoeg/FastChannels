@@ -54,6 +54,9 @@ config = {
     # Opened with ?test the page joins room "test-plan": the agent's test
     # mode (marked traces, separate memory graph) — see TEST-SCRIPT.md.
     "testToken": mint("test-plan"),
+    # The page shows "Pair a TV" (a code box, claimed through caddy on the
+    # remote relay) only for the minny-client viewer.
+    "pairing": env.get("VOICE_TV", "").strip() == "minny",
 }
 out = HERE / "client" / "config.js"
 out.write_text(

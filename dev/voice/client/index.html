@@ -20,6 +20,13 @@
   button { padding:.7rem 2rem; border-radius:.6rem; border:1px solid #33415e;
            background:#1a2233; color:#d8dee9; font-size:1rem; cursor:pointer; }
   button:hover { background:#223049; }
+  #pair { margin-top:1rem; text-align:center; }
+  #pair summary { cursor:pointer; opacity:.7; }
+  #pair form { display:flex; gap:.5rem; justify-content:center; margin-top:.8rem; }
+  #pair input { width:8.5rem; padding:.6rem; border-radius:.6rem; border:1px solid #33415e;
+                background:#0f1420; color:#d8dee9; font-size:1.1rem; letter-spacing:.15em; text-align:center; }
+  #pair button { padding:.6rem 1.2rem; }
+  #pairStatus { min-height:1.5em; margin-top:.5rem; opacity:.8; }
 </style>
 </head>
 <body>
@@ -27,6 +34,14 @@
 <div id="orb"></div>
 <div id="status">disconnected</div>
 <button id="btn">Connect</button>
+<details id="pair" hidden>
+  <summary>Pair a TV</summary>
+  <form id="pairForm">
+    <input id="pairCode" inputmode="numeric" autocomplete="off" placeholder="123 456" aria-label="Code on the TV's Minny screen">
+    <button type="submit">Pair</button>
+  </form>
+  <div id="pairStatus">Open the viewer's Minny screen and type its code.</div>
+</details>
 
 <script src="https://cdn.jsdelivr.net/npm/livekit-client@2.6.2/dist/livekit-client.umd.min.js"></script>
 <script src="config.js"></script>
@@ -48,6 +63,41 @@ if (TEST) {
   b.style.cssText = 'position:fixed;top:0;left:0;right:0;padding:6px;text-align:center;' +
                     'background:#b45309;color:#fff;font:600 14px system-ui;z-index:10';
   document.body.appendChild(b);
+}
+
+// Pairing (VOICE_TV=minny): the code the viewer shows on its Minny screen
+// is claimed on the remote relay through caddy (/api/pair/claim). Once per
+// viewer: the relay keeps the pairing, the viewer keeps its token.
+if (window.VOICE_CONFIG.pairing) {
+  const pair = document.getElementById('pair');
+  const pairStatus = document.getElementById('pairStatus');
+  const code = document.getElementById('pairCode');
+  pair.hidden = false;
+  document.getElementById('pairForm').onsubmit = async (e) => {
+    e.preventDefault();
+    const digits = code.value.replace(/\D/g, '');
+    if (digits.length !== 6) { pairStatus.textContent = 'The code has 6 digits.'; return; }
+    pairStatus.textContent = 'pairing…';
+    try {
+      const res = await fetch('/api/pair/claim', {
+        method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ code: digits }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (res.ok) {
+        pairStatus.textContent = 'Paired: ' + (body.name || body.device_id) + '. It will follow your voice commands.';
+        code.value = '';
+      } else if (res.status === 404) {
+        pairStatus.textContent = 'No TV is showing that code (codes last 10 minutes).';
+      } else if (res.status === 401) {
+        pairStatus.textContent = 'The remote relay refused the claim (it expects a controller token).';
+      } else {
+        pairStatus.textContent = 'The remote relay is not reachable (' + res.status + ').';
+      }
+    } catch (err) {
+      pairStatus.textContent = 'failed: ' + err.message;
+    }
+  };
 }
 
 btn.onclick = async () => {
